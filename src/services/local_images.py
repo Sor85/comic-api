@@ -133,7 +133,7 @@ def receive_image(plugin, url, chapter_id, settings, signal):
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
         raise ComicApiError("图片地址无效", 502, "invalid_image", "jm")
-    ensure_public_url(url)
+    target = ensure_public_url(url)
     rate = settings["speed_limit_kbps"] * 1024
     last_error = None
     for attempt in range(settings["retries"] + 1):
@@ -146,7 +146,8 @@ def receive_image(plugin, url, chapter_id, settings, signal):
             # total deadline that would break large images at a low bandwidth limit.
             with plugin.client.stream(
                 "GET", url, headers={"Referer": f"{parsed.scheme}://{parsed.netloc}/"},
-                allow_redirects=False, max_recv_speed=rate, timeout=(10, 20)) as response:
+                allow_redirects=False, max_recv_speed=rate, timeout=(10, 20),
+                _image_target=target.retry(attempt) if target else None) as response:
                 if response.status_code != 200:
                     raise ComicApiError(f"图片下载失败 (HTTP {response.status_code})", 502, "image_download_failed", "jm")
                 for chunk in response.iter_content():

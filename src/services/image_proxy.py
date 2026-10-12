@@ -1,27 +1,16 @@
 """Image proxying: SSRF guard, per-request concurrency bound and an on-disk cache."""
 import asyncio
 import hashlib
-import ipaddress
-import socket
 import time
 import urllib.parse
 
 from src.errors import ComicApiError
+from src.services.image_network import image_target
 
 
 def ensure_public_url(url):
-    """The proxy endpoint takes user-supplied URLs; refuse private/reserved addresses."""
-    hostname = urllib.parse.urlparse(url).hostname or ""
-    try:
-        addresses = {entry[4][0] for entry in socket.getaddrinfo(hostname, None)}
-    except OSError as exc:
-        raise ComicApiError("图片地址无法解析", 502, "image_dns_failed") from exc
-    for address in addresses:
-        try:
-            if not ipaddress.ip_address(address).is_global:
-                raise ComicApiError("图片地址不被允许", 400, "invalid_request")
-        except ValueError:
-            raise ComicApiError("图片地址不被允许", 400, "invalid_request")
+    """Return the validated connection target; callers must pass it to the transport."""
+    return image_target(url)
 
 
 def download_image(client, url: str, retries: int = 3) -> bytes:
@@ -31,6 +20,7 @@ def download_image(client, url: str, retries: int = 3) -> bytes:
     因此加入重试+退避，避免单次失败导致整张图裂掉。
     """
     # JM 图片服务对 Referer 较敏感，使用站点根域而非图片自身 URL
+    target = ensure_public_url(url)
     parsed = urllib.parse.urlparse(url)
     headers = {
         "Referer": f"{parsed.scheme}://{parsed.netloc}/",
@@ -40,7 +30,8 @@ def download_image(client, url: str, retries: int = 3) -> bytes:
     last_err = None
     for attempt in range(max(1, retries)):
         try:
-            res = client.request("GET", url, headers=headers, timeout=30)
+            res = client.request("GET", url, headers=headers, timeout=30, allow_redirects=False,
+                                 _image_target=target.retry(attempt) if target else None)
             if res.status_code == 200 and res.content:
                 return res.content
             status = res.status_code
@@ -69,14 +60,14 @@ class ImageProxy:
             await asyncio.wait_for(self._slots.acquire(), timeout=10)
         except asyncio.TimeoutError as exc:
             raise ComicApiError("图片请求繁忙", 429, "busy", source) from exc
-        key = hashlib.sha256(f"{source}:{url}".encode()).hexdigest()[:32]
+        # Do not reuse entries fetched before destination pinning / redirect checks.
+        key = hashlib.sha256(f"public-v1:{source}:{chapter_id}:{url}".encode()).hexdigest()[:32]
         cache = self.store.root / "image_cache"
         path = cache / f"{key}.img"
 
         def process():
             if path.is_file():
                 return path.read_bytes()
-            ensure_public_url(url)
             data = plugin.transform_image(download_image(plugin.client, url), chapter_id, url)
             try:
                 cache.mkdir(exist_ok=True)

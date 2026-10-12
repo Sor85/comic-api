@@ -53,7 +53,18 @@ class BaseClient:
         self.session = requests.Session()
         self._request_slots = threading.BoundedSemaphore(4)
         
-    def _send(self, method: str, url: str, **kwargs):
+    @contextmanager
+    def _transport(self, image_target):
+        if image_target is None:
+            yield self.session
+        else:
+            # Per-transfer handles prevent DNS pins and proxy options leaking into
+            # concurrent API/image requests. Cookie domain restrictions are retained.
+            from src.services.image_network import image_session
+            with image_session(image_target, cookies=self.session.cookies) as session:
+                yield session
+
+    def _send(self, method: str, url: str, _session=None, **kwargs):
         kwargs.setdefault("impersonate", self.impersonate)
         headers = kwargs.get("headers", {})
         if "user-agent" not in {k.lower() for k in headers}:
@@ -61,32 +72,44 @@ class BaseClient:
         kwargs["headers"] = headers
         kwargs.setdefault("timeout", 20)
         try:
-            return self.session.request(method, url, **kwargs)
+            return (_session or self.session).request(method, url, **kwargs)
         except Exception as exc:
             timeout = "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower()
             raise ComicApiError("图源请求超时" if timeout else "无法连接图源", 504 if timeout else 502,
                                 "upstream_timeout" if timeout else "upstream_network") from exc
 
-    def request(self, method: str, url: str, **kwargs):
+    @staticmethod
+    def _image_options(url, target, kwargs):
+        if target is None:
+            return url
+        kwargs.pop("proxies", None)
+        kwargs.update(proxy=target.proxy or "", allow_redirects=False, verify=True)
+        return target.url
+
+    def request(self, method: str, url: str, _image_target=None, **kwargs):
         if not self._request_slots.acquire(timeout=10):
             raise ComicApiError("图源请求繁忙，请稍后重试", 429, "busy")
         try:
-            return self._send(method, url, **kwargs)
+            url = self._image_options(url, _image_target, kwargs)
+            with self._transport(_image_target) as session:
+                return self._send(method, url, _session=session, **kwargs)
         finally:
             self._request_slots.release()
 
     @contextmanager
-    def stream(self, method: str, url: str, **kwargs):
+    def stream(self, method: str, url: str, _image_target=None, **kwargs):
         # Hold the permit until the streaming transfer, including cancellation, has exited.
         if not self._request_slots.acquire(timeout=10):
             raise ComicApiError("图源请求繁忙，请稍后重试", 429, "busy")
-        response = None
         try:
-            response = self._send(method, url, stream=True, **kwargs)
-            yield response
+            url = self._image_options(url, _image_target, kwargs)
+            with self._transport(_image_target) as session:
+                response = None
+                try:
+                    response = self._send(method, url, _session=session, stream=True, **kwargs)
+                    yield response
+                finally:
+                    if response is not None:
+                        response.close()
         finally:
-            try:
-                if response is not None:
-                    response.close()
-            finally:
-                self._request_slots.release()
+            self._request_slots.release()
