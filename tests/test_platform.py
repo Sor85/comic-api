@@ -328,6 +328,17 @@ def test_index_asset_url_tracks_bundle_contents(client, tmp_path, monkeypatch):
     assert f"?v={app_module.bundled_asset_version()}" in second
 
 
+def test_chapter_previews_script_is_versioned_and_loaded_before_app(client):
+    import main as app_module
+    version = app_module.bundled_asset_version()
+    html = client.get("/").text
+    preview = f'/static/chapter-previews.js?v={version}'
+    assert html.index(preview) < html.index(f'/static/app.js?v={version}')
+    response = client.get(preview)
+    assert response.status_code == 200 and "class ChapterPreviews" in response.text
+    assert "immutable" in response.headers["cache-control"]
+
+
 def test_static_assets_cache_by_version(client):
     versioned = client.get("/static/app.js?v=abc123")
     assert versioned.status_code == 200
