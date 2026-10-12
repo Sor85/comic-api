@@ -9,6 +9,7 @@ from urllib.parse import quote, urlparse
 
 from src.clients.base import BaseClient
 from src.errors import ComicApiError
+from src.metadata import comic_labels
 from src.sources import SourcePlugin
 
 # 线路域名映射参考 Breeze-plugin-copyComic 的 API_DOMAIN_BASE_MAP。
@@ -78,11 +79,12 @@ class CopyPlugin(SourcePlugin):
          "description": "请求头 platform 值，部分线路需要特定值才能访问。",
          "options": PLATFORM_OPTIONS},
     ]
-    capabilities = ["search", "detail", "pages", "latest", "category", "leaderboard", "random"]
+    capabilities = ["search", "tag_search", "detail", "pages", "latest", "category", "leaderboard", "random"]
     categories = [{"value": v, "label": n} for v, n in
                   [("", "全部"), ("maoxian", "冒险"), ("qihuan", "奇幻"), ("aiqing", "爱情"),
                    ("kehuan", "科幻"), ("shenghuo", "生活"), ("rexue", "热血"), ("xuanyi", "悬疑")]]
     sorts = [{"value": "-datetime_updated", "label": "最新更新"}, {"value": "-popular", "label": "热度最高"}]
+    tag_sorts = sorts
     leaderboard_modes = [{"value": v, "label": n} for v, n in
                          [("day", "日榜"), ("week", "周榜"), ("month", "月榜"), ("total", "总榜")]]
 
@@ -97,6 +99,8 @@ class CopyPlugin(SourcePlugin):
         self._chapter_lock = threading.Lock()
         self._chapter_clock = {"next": 0.0}
         self._page_cache = {}
+        self._theme_cache = None
+        self._theme_lock = threading.Lock()
 
     def _resolve_domain(self, saved):
         domain = saved.get("api_domain")
@@ -212,7 +216,8 @@ class CopyPlugin(SourcePlugin):
     def _comic(self, item):
         return {"id": str(item["path_word"]), "source": self.id, "title": item.get("name", ""),
                 "cover": item.get("cover", ""), "description": item.get("brief", ""),
-                "author": " / ".join(author.get("name", "") for author in item.get("author", []))}
+                "author": " / ".join(author.get("name", "") for author in item.get("author", [])),
+                "tags": comic_labels(item.get("theme"), value_key="path_word")}
 
     def _items(self, data):
         items = []
@@ -225,6 +230,29 @@ class CopyPlugin(SourcePlugin):
     def search(self, keyword, page=1, sort=""):
         # 上游搜索接口不接受排序参数；排序由浏览接口提供。
         return self._items(self._get("search/comic", q=keyword, q_type="", limit=20, offset=(page-1)*20, platform=1))
+
+    def search_tag(self, keyword, page=1, sort="", tag_value=""):
+        theme = tag_value
+        if not theme:
+            for entry in self.categories:
+                if entry["value"] and keyword in (entry["label"], entry["value"]):
+                    theme = entry["value"]
+                    break
+        if not theme:
+            with self._theme_lock:
+                if self._theme_cache is None or time.monotonic() >= self._theme_cache[1]:
+                    data = self._get("h5/filter/comic/tags", type=1, platform=3)
+                    if not isinstance(data.get("theme"), list):
+                        raise ComicApiError("拷贝题材目录响应格式无效", 502, "invalid_response", self.id)
+                    labels = comic_labels(data["theme"], value_key="path_word")
+                    self._theme_cache = labels, time.monotonic() + 600
+                for entry in self._theme_cache[0]:
+                    if keyword in (entry["label"], entry["value"]):
+                        theme = entry["value"]
+                        break
+        if not theme:
+            raise ComicApiError("拷贝题材不存在，可通过漫画详情中的标签搜索", 422, "unknown_tag", self.id)
+        return self.browse("category", page=page, sort=sort, name=theme)
 
     def detail(self, comic_id):
         cid = quote(comic_id, safe="")

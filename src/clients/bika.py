@@ -13,6 +13,7 @@ from urllib.parse import urlparse, urlencode
 from src.clients.base import BaseClient
 from src.config import Config
 from src.errors import ComicApiError
+from src.metadata import comic_labels
 
 
 class BikaClient(BaseClient):
@@ -252,7 +253,7 @@ class BikaClient(BaseClient):
         with self._auth_lock:
             return self._login_locked(account, password)
 
-    def search(self, keyword: str, page: int = 1, sort: str = "dd") -> List[Dict[str, Any]]:
+    def search(self, keyword: str, page: int = 1, sort: str = "dd", category: str = "") -> List[Dict[str, Any]]:
         """搜索漫画"""
         self.ensure_authenticated()
         res = self.bika_request("comics/advanced-search", method="POST", params={
@@ -260,9 +261,24 @@ class BikaClient(BaseClient):
         }, json_body={
             "keyword": keyword,
             "sort": sort or "dd",
-            "categories": []
+            "categories": [category] if category else []
         })
         return self._parse_comics_list(res)
+
+    def search_tag(self, tag: str, page: int = 1, sort: str = "dd", category: str = ""):
+        self.ensure_authenticated()
+        params = {"page": str(page), "t": tag, "s": sort or "dd"}
+        if category:
+            params["c"] = category
+        return self._parse_comics_list(self.bika_request("comics", method="GET", params=params))
+
+    def search_categories(self):
+        self.ensure_authenticated()
+        response = self.bika_request("categories", method="GET")
+        rows = response.get("data", {}).get("categories")
+        if not isinstance(rows, list):
+            raise ComicApiError("哔咔分类响应格式无效", 502, "invalid_response", "bika")
+        return comic_labels([row.get("title") for row in rows if isinstance(row, dict) and not row.get("isWeb")])
 
     def get_comic_detail(self, comic_id: str) -> Dict[str, Any]:
         """获取详情并加载全部章节分页"""
@@ -306,6 +322,8 @@ class BikaClient(BaseClient):
             "description": description,
             "author": data.get("author", ""),
             "chapters": chapters,
+            "tags": comic_labels(data.get("tags")),
+            "categories": comic_labels(data.get("categories")),
             "source": "bika"
         }
 
@@ -357,7 +375,9 @@ class BikaClient(BaseClient):
                 "cover": cover_url,
                 "source": "bika",
                 "author": item.get("author", ""),
-                "category": " · ".join(item.get("categories", [])) if isinstance(item.get("categories"), list) else "",
+                "category": " · ".join(entry["label"] for entry in comic_labels(item.get("categories"))),
+                "categories": comic_labels(item.get("categories")),
+                "tags": comic_labels(item.get("tags")),
                 "description": item.get("description", "")
             })
         return results

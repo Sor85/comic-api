@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class BikaPlugin(SourcePlugin):
     id = "bika"
     name = "哔咔漫画"
-    capabilities = ["search", "detail", "pages", "latest", "category", "leaderboard", "random", "login"]
+    capabilities = ["search", "tag_search", "search_categories", "detail", "pages", "latest", "category", "leaderboard", "random", "login"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": name, "label": name} for name in
@@ -13,6 +13,7 @@ class BikaPlugin(SourcePlugin):
     sorts = [{"value": v, "label": n} for v, n in
              [("dd", "最新上架"), ("ld", "最多喜欢"), ("vd", "最多观看"), ("da", "最旧上架")]]
     search_sorts = sorts
+    tag_sorts = sorts
     latest_sorts = sorts
     leaderboard_modes = [{"value": v, "label": n} for v, n in [("day", "日榜"), ("week", "周榜"), ("month", "月榜")]]
 
@@ -31,8 +32,14 @@ class BikaPlugin(SourcePlugin):
             self.store.save_account(self.id, {})
             self.client.authorization = self.client._account = self.client._password = ""
 
-    def search(self, keyword, page=1, sort=""):
-        return self.client.search(keyword, page, sort or "dd")
+    def search(self, keyword, page=1, sort="", category=""):
+        return self.client.search(keyword, page, sort or "dd", category=category)
+
+    def search_tag(self, keyword, page=1, sort="", tag_value="", category=""):
+        return self.client.search_tag(tag_value or keyword, page, sort or "dd", category)
+
+    def search_categories(self):
+        return self.client.search_categories()
 
     def browse(self, action, page=1, sort="", mode="day", name=""):
         self.client.ensure_authenticated()

@@ -15,6 +15,7 @@ class SourcePlugin:
     # Sort values a plugin's search(keyword, page, sort) accepts; shown as
     # conditions on search results. Empty = upstream search cannot sort.
     search_sorts = []
+    tag_sorts = []
     # Sort values browse("latest") honours; empty = latest list has a fixed order.
     latest_sorts = []
     leaderboard_modes = []
@@ -29,7 +30,8 @@ class SourcePlugin:
     def manifest(self):
         return {"id": self.id, "name": self.name, "capabilities": self.capabilities,
                 "login_fields": self.login_fields, "categories": self.categories,
-                "sorts": self.sorts, "search_sorts": self.search_sorts, "latest_sorts": self.latest_sorts,
+                "sorts": self.sorts, "search_sorts": self.search_sorts, "tag_sorts": self.tag_sorts,
+                "latest_sorts": self.latest_sorts,
                 "leaderboard_modes": self.leaderboard_modes,
                 "account": self.account_status(), "settings_fields": self.settings_fields,
                 "settings": self.settings()}

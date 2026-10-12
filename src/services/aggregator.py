@@ -61,10 +61,29 @@ class AggregatorService:
         # Stable ties preserve upstream order; identical titles across sources stay selectable.
         return sorted(items, key=score, reverse=True)
 
-    async def aggregate_search(self, keyword: str, page: int = 1) -> Dict[str, Any]:
+    async def search_source(self, source, keyword, page=1, sort="", mode="keyword", tag_value="", category=""):
+        plugin = self.source(source)
+        capability = "tag_search" if mode == "tag" else "search"
+        if capability not in plugin.capabilities:
+            raise ComicApiError("图源不支持此搜索方式", 422, "unsupported", source)
+        sorts = plugin.tag_sorts if mode == "tag" else plugin.search_sorts
+        if sort and sort not in [item["value"] for item in sorts]:
+            raise ComicApiError("图源不支持此搜索排序", 422, "invalid_request", source)
+        if category and "search_categories" not in plugin.capabilities:
+            raise ComicApiError("图源不支持搜索分类筛选", 422, "invalid_request", source)
+        # Only send optional arguments when used, preserving older plugin signatures.
+        kwargs = {key: value for key, value in {"sort": sort, "category": category}.items() if value}
+        if mode == "tag" and tag_value:
+            kwargs["tag_value"] = tag_value
+        result = await self.call(source, "search_tag" if mode == "tag" else "search", keyword, page, **kwargs)
+        items = [dict(item, source=source) for item in result]
+        return items if mode == "tag" else self.rank_results(keyword, items)
+
+    async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword") -> Dict[str, Any]:
         """Search registered sources independently and retain partial failures."""
-        keys = [key for key, plugin in self.sources.items() if "search" in plugin.capabilities]
-        results = await asyncio.gather(*(self.call(key, "search", keyword, page) for key in keys), return_exceptions=True)
+        capability = "tag_search" if mode == "tag" else "search"
+        keys = [key for key, plugin in self.sources.items() if capability in plugin.capabilities]
+        results = await asyncio.gather(*(self.search_source(key, keyword, page, mode=mode) for key in keys), return_exceptions=True)
         all_results, errors, candidates = {}, {}, []
         for key, result in zip(keys, results):
             if isinstance(result, Exception):
@@ -73,7 +92,8 @@ class AggregatorService:
             else:
                 all_results[key] = [dict(item, source=key) for item in result]
                 candidates.extend(all_results[key])
-        candidates = self.rank_results(keyword, candidates)
+        if mode == "keyword":
+            candidates = self.rank_results(keyword, candidates)
         return {"keyword": keyword, "best_match": candidates[0] if candidates else None,
                 "items": candidates, "all_results": all_results, "errors": errors}
 

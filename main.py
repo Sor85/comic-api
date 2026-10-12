@@ -5,6 +5,7 @@ import logging
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlencode, urlparse
 
 from dotenv import load_dotenv
@@ -201,19 +202,27 @@ def create_app(store=None, sources=None):
     async def cancel_jm_sync():
         return jm_sync.cancel()
 
+    @app.get("/api/sources/{source}/search-categories")
+    async def search_categories(source: str):
+        if "search_categories" not in service.source(source).capabilities:
+            raise ComicApiError("图源不支持搜索分类筛选", 422, "unsupported", source)
+        return {"categories": await service.call(source, "search_categories")}
+
     @app.get("/api/search")
     async def search(keyword: str = Query(min_length=1, max_length=200), source: str = "",
-                     page: int = Query(1, ge=1, le=1000), sort: str = Query(default="", max_length=64)):
+                     page: int = Query(1, ge=1, le=1000), sort: str = Query(default="", max_length=64),
+                     mode: Literal["keyword", "tag"] = "keyword",
+                     tag_value: str = Query(default="", max_length=200),
+                     category: str = Query(default="", max_length=200)):
+        keyword, tag_value, category = keyword.strip(), tag_value.strip(), category.strip()
+        if not keyword or (tag_value and (mode != "tag" or not source)):
+            raise ComicApiError("搜索参数无效", 422, "invalid_request", source or None)
+        if not source and (category or sort):
+            raise ComicApiError("分类和排序仅适用于单一图源搜索", 422, "invalid_request")
         if source:
-            # Sort only applies when the plugin advertises search_sorts; keep the
-            # base search(keyword, page) signature working for older plugins.
-            if sort and sort not in [item["value"] for item in service.source(source).search_sorts]:
-                raise ComicApiError("图源不支持此搜索排序", 422, "invalid_request", source)
-            kwargs = {"sort": sort} if sort else {}
-            result = await service.call(source, "search", keyword, page, **kwargs)
-            items = service.rank_results(keyword, [dict(item, source=source) for item in result])
+            items = await service.search_source(source, keyword, page, sort, mode, tag_value, category)
             return {"items": items, "all_results": {source: items}, "errors": {}}
-        return await service.aggregate_search(keyword, page)
+        return await service.aggregate_search(keyword, page, mode)
 
     @app.get("/api/comic/{source}/{comic_id}")
     async def detail(source: str, comic_id: str):

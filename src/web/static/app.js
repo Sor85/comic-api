@@ -6,6 +6,7 @@ const state = {
   discover: {source: '', action: 'latest', page: 1, name: '', sort: '', mode: 'day'}, search: null, searchCounts: null, view: 'home',
   health: {}, healthDots: {}, chapterDesc: readLocal('comic:chapter-desc') === true,
   chapterPreviews: readLocal('comic:chapter-previews') === true,
+  searchMode: 'keyword', searchCategories: {}, searchCategoryRequests: {},
   browseRequest: 0, shelfRequest: 0, detailRequest: 0, readerRequest: 0, resultItems: [], resultShown: 0, activeTasks: 0,
 };
 const BROWSE_ACTIONS = {latest: '最新更新', category: '分类浏览', leaderboard: '排行榜', random: '随机推荐'};
@@ -120,6 +121,7 @@ function ask({title,message='',input=false,value='',placeholder='',choices=[],ok
 /* ---------- sources & discovery state ---------- */
 async function loadSources() {
   state.sources=(await api('/api/sources')).sources;
+  state.searchCategories={};
   renderSourceList();
   if(state.settingsSource)renderSourceSettings();
   if(!state.browseReady)initBrowse();
@@ -155,7 +157,7 @@ function setView(view){
 function viewURL(){
   if(state.view!=='results')return location.pathname;
   const params=new URLSearchParams();
-  if(state.search){params.set('q',state.search.keyword);if(state.search.source)params.set('source',state.search.source);}
+  if(state.search){for(const [key,value] of searchParams(state.search))params.set(key==='keyword'?'q':key,value);}
   else{params.set('browse',state.discover.action);params.set('source',state.discover.source);}
   return '?'+params;
 }
@@ -175,7 +177,7 @@ function openResults(){
 function showHome(){
   state.search=null;state.browseAbort?.abort();++state.browseRequest;state.pushedResults=false;
   $('keyword').value='';syncClear();
-  setView('home');renderContinue();renderRecent();
+  setView('home');syncSearchMode();renderContinue();renderRecent();
   if(!state.shelvesLoaded||state.shelfBlocked||state.shelfFailed)run(loadShelves);
 }
 function goHome(){
@@ -185,11 +187,12 @@ function goHome(){
 function initBrowse(){
   state.browseReady=true;
   const saved=readLocal('comic:discover');if(saved&&typeof saved==='object')Object.assign(state.discover,saved,{page:1});
-  renderQuick();renderRecent();renderContinue();
+  renderQuick();renderRecent();renderContinue();syncSearchMode();
   const params=new URLSearchParams(location.search);
   const q=(params.get('q')||'').trim().slice(0,200),src=params.get('source'),action=params.get('browse');
   if(q){
-    state.search={keyword:q,source:sourcePlugin(src)?src:'',page:1,sort:''};
+    state.search={keyword:q,source:sourcePlugin(src)?src:'',page:Math.min(1000,Math.max(1,parseInt(params.get('page'),10)||1)),sort:params.get('sort')||'',mode:params.get('mode')==='tag'?'tag':'keyword',tag_value:(params.get('tag_value')||'').slice(0,200),category:(params.get('category')||'').slice(0,200)};
+    normalizeSearch();
     $('keyword').value=q;syncClear();setView('results');syncHistory(false);run(loadSearch);return;
   }
   if(BROWSE_ORDER.includes(action)){
@@ -213,11 +216,17 @@ function browseAction(action,sourceId){
 }
 
 /* ---------- recent searches & reading history ---------- */
-function readRecent(){const list=readLocal('comic:recent');return Array.isArray(list)?list.filter(x=>typeof x==='string'):[];}
-function addRecent(keyword){saveLocal('comic:recent',[keyword,...readRecent().filter(x=>x!==keyword)].slice(0,10));}
+function readRecent(){
+  const list=readLocal('comic:recent');if(!Array.isArray(list))return [];
+  return list.map(item=>typeof item==='string'?{keyword:item,mode:'keyword'}:item).filter(item=>item&&typeof item.keyword==='string').slice(0,10).map(item=>({keyword:item.keyword.slice(0,200),mode:item.mode==='tag'?'tag':'keyword',source:typeof item.source==='string'?item.source:'',tag_value:typeof item.tag_value==='string'?item.tag_value:'',category:typeof item.category==='string'?item.category:''}));
+}
+function addRecent(search){
+  const entry={keyword:search.keyword,mode:search.mode,source:search.source,tag_value:search.tag_value||'',category:search.category||''};
+  saveLocal('comic:recent',[entry,...readRecent().filter(item=>JSON.stringify(item)!==JSON.stringify(entry))].slice(0,10));
+}
 function renderRecent(){
   const list=readRecent();$('recent').hidden=!list.length;
-  $('recent-list').replaceChildren(...list.map(k=>button(k,()=>startSearch(k),'recent-chip')));
+  $('recent-list').replaceChildren(...list.map(item=>button((item.mode==='tag'?'标签 · ':'')+item.keyword,()=>startSearch(item.keyword,item.source,item),'recent-chip')));
 }
 function readHistory(){const list=readLocal('comic:history');return Array.isArray(list)?list.filter(h=>h&&h.source&&h.id):[];}
 function recordHistory(r){
@@ -312,17 +321,58 @@ function chipGroup(label,values,selected,onpick){
   }
   row.append(node('span',label,'filter-label'),list);return row;
 }
+function syncSearchMode(){
+  const mode=state.search?.mode||state.searchMode||'keyword';state.searchMode=mode;
+  $('search-mode').replaceChildren(chipGroup('搜索方式',[{value:'keyword',label:'关键词'},{value:'tag',label:'标签'}],mode,value=>{
+    state.searchMode=value;
+    if(state.search){Object.assign(state.search,{mode:value,page:1,sort:'',tag_value:''});run(loadSearch);}
+    else syncSearchMode();
+  }));
+  $('keyword').placeholder=mode==='tag'?'输入标签名称；拷贝使用题材…':'搜索漫画、作者…';
+  $('keyword').setAttribute('aria-label',mode==='tag'?'搜索漫画标签':'搜索漫画');
+}
+function normalizeSearch(){
+  const s=state.search;if(!s)return;
+  s.mode=s.mode==='tag'?'tag':'keyword';
+  if(s.source&&!(sourcePlugin(s.source)?.capabilities||[]).includes(s.mode==='tag'?'tag_search':'search')){s.source='';s.tag_value='';s.category='';}
+  if(s.mode!=='tag'||!s.source)s.tag_value='';
+  if(!(sourcePlugin(s.source)?.capabilities||[]).includes('search_categories'))s.category='';
+  s.sort=pick(sourcePlugin(s.source)?.[s.mode==='tag'?'tag_sorts':'search_sorts']||[],s.sort);
+  syncSearchMode();
+}
+function loadSearchCategories(source,force=false){
+  const previous=state.searchCategories[source];
+  if(state.searchCategoryRequests[source]||(!force&&previous?.expires>Date.now()))return;
+  state.searchCategories[source]={items:previous?.items||[],loading:true};
+  state.searchCategoryRequests[source]=api(`/api/sources/${enc(source)}/search-categories`).then(data=>{
+    state.searchCategories[source]={items:comicLabels(data.categories),expires:Date.now()+300000};
+  }).catch(error=>{state.searchCategories[source]={items:previous?.items||[],error,expires:Date.now()+30000};}).finally(()=>{
+    delete state.searchCategoryRequests[source];
+    if(state.search?.source===source&&state.view==='results')renderFilters();
+  });
+}
+function searchCategoryFilter(s){
+  loadSearchCategories(s.source);
+  const cached=state.searchCategories[s.source]||{},values=[{value:'',label:'全部分类'},...(cached.items||[])];
+  if(s.category&&!values.some(item=>item.value===s.category))values.push({value:s.category,label:s.category});
+  const box=node('div',undefined,'search-category-filter');
+  box.append(chipGroup('分类',values,s.category||'',value=>{Object.assign(s,{category:value,page:1});run(loadSearch);}));
+  if(cached.loading)box.append(node('span','分类加载中','filter-note'));
+  if(cached.error){const notice=node('div',undefined,'filter-note');notice.append(node('span',`分类获取失败：${cached.error.message}`),button('重试',()=>{loadSearchCategories(s.source,true);renderFilters();},'link-btn'));if(cached.error.code==='login_required')notice.append(bindButton(s.source));box.append(notice);}
+  return box;
+}
 function renderFilters(){
   const box=$('filters');box.replaceChildren();
   const s=state.search,d=state.discover;
   if(s){
-    const searchable=state.sources.filter(p=>(p.capabilities||[]).includes('search'));
-    const c=state.searchCounts?.keyword===s.keyword?state.searchCounts:null;
+    const searchable=state.sources.filter(p=>(p.capabilities||[]).includes(s.mode==='tag'?'tag_search':'search'));
+    const c=!s.category&&!s.tag_value&&state.searchCounts?.key===searchKey(s)?state.searchCounts:null;
     if(searchable.length>1)box.append(chipGroup('图源',[
       {value:'',label:'全部',count:c?Object.values(c.counts).reduce((a,b)=>a+b,0):undefined},
       ...searchable.map(p=>({value:p.id,label:p.name,count:c?(c.errors[p.id]?'!':c.counts[p.id]??0):undefined,warn:c?.errors[p.id]?.message}))],
-      s.source,v=>{Object.assign(s,{source:v,page:1,sort:''});run(loadSearch);}));
-    const sorts=sourcePlugin(s.source)?.search_sorts||[];
+      s.source,v=>{Object.assign(s,{source:v,page:1,sort:'',category:'',tag_value:''});run(loadSearch);}));
+    if((sourcePlugin(s.source)?.capabilities||[]).includes('search_categories'))box.append(searchCategoryFilter(s));
+    const sorts=sourcePlugin(s.source)?.[s.mode==='tag'?'tag_sorts':'search_sorts']||[];
     if(sorts.length)box.append(chipGroup('排序',sorts,s.sort,v=>{Object.assign(s,{sort:v,page:1});run(loadSearch);}));
   }else{
     const p=discoverPlugin();if(!p)return;
@@ -391,20 +441,18 @@ async function loadDiscover(){
 }
 async function loadSearch(){
   const s=state.search;if(!s)return;
-  s.sort=pick(sourcePlugin(s.source)?.search_sorts||[],s.sort);
+  normalizeSearch();
   syncHistory(false);
   const scope=s.source?sourceName(s.source):'全部图源';
-  $('results-title').textContent=`“${s.keyword}”`;
+  $('results-title').textContent=`${s.mode==='tag'?'标签 · ':''}“${s.keyword}”`;
   $('results-meta').textContent=`${scope} · 搜索中…`;
   renderFilters();
   const request=beginResults();
   try{
-    const params=new URLSearchParams({keyword:s.keyword,page:s.page});
-    if(s.source)params.set('source',s.source);
-    if(s.sort)params.set('sort',s.sort);
+    const params=searchParams(s);
     const data=await api('/api/search?'+params,{signal:state.browseAbort.signal});
     if(request!==state.browseRequest)return;
-    if(!s.source)state.searchCounts={keyword:s.keyword,counts:Object.fromEntries(Object.entries(data.all_results||{}).map(([k,v])=>[k,v.length])),errors:data.errors||{}};
+    if(!s.source)state.searchCounts={key:searchKey(s),counts:Object.fromEntries(Object.entries(data.all_results||{}).map(([k,v])=>[k,v.length])),errors:data.errors||{}};
     renderFilters();
     showResults(data.items,s.page>1?'已经到最后一页了':'没有找到相关漫画','换个关键词，或切换到其他图源试试');
     $('results-meta').textContent=`${scope} · 第 ${s.page} 页 · ${data.items.length} 部`;
@@ -417,11 +465,12 @@ async function loadSearch(){
     }
   }catch(e){if(request===state.browseRequest&&e.name!=='AbortError'){$('results').replaceChildren();$('results-meta').textContent=scope;showError($('browse-status'),e,loadSearch);}}
 }
-function startSearch(keyword,source=''){
+function startSearch(keyword,source='',filters={}){
   keyword=keyword.trim().slice(0,200);if(!keyword)return;
   if(state.tab!=='browse')showTab('browse');
-  $('keyword').value=keyword;syncClear();addRecent(keyword);renderRecent();
-  state.search={keyword,source,page:1,sort:''};
+  state.search={keyword,source,page:1,sort:'',mode:filters.mode||state.searchMode||'keyword',tag_value:filters.tag_value||'',category:filters.category||''};
+  normalizeSearch();
+  $('keyword').value=keyword;syncClear();addRecent(state.search);renderRecent();
   return openResults();
 }
 function browse(event) {
@@ -430,7 +479,7 @@ function browse(event) {
   if(!keyword){$('keyword').focus();toast('请输入关键词');return;}
   if(matchMedia('(pointer:coarse)').matches)$('keyword').blur();
   // Keep the chosen source scope when refining a search from the results view.
-  startSearch(keyword,state.search?.source||'');
+  startSearch(keyword,state.search?.source||'',{mode:state.searchMode,category:state.search?.category||'',tag_value:keyword===state.search?.keyword?state.search.tag_value:''});
 }
 function turnPage(delta){
   const ctx=state.search||state.discover,page=ctx.page+delta;if(page<1)return;
@@ -444,7 +493,7 @@ function searchableTitle(title){
 function searchElsewhere(title){
   if($('reader-dialog').open)closeReader(true);
   ++state.detailRequest;if($('detail-dialog').open)$('detail-dialog').close();
-  return startSearch(searchableTitle(title));
+  return startSearch(searchableTitle(title),'',{mode:'keyword'});
 }
 
 /* ---------- tabs & cards ---------- */
@@ -626,8 +675,7 @@ function renderDetail() {
   if(detail.author){const a=node('span',undefined,'meta-item');a.innerHTML=svgIcon('user');a.append(node('span',detail.author));meta.append(a);}
   const n=node('span',undefined,'meta-item');n.innerHTML=svgIcon('list');n.append(node('span',`共 ${detail.chapters.length} 章`));meta.append(n);
   text.append(meta);
-  const tags=String(detail.category||'').split(/[·,，、/|]/).map(t=>t.trim()).filter(Boolean).slice(0,10);
-  if(tags.length){const box=node('div',undefined,'tags');box.append(...tags.map(t=>node('span',t,'tag')));text.append(box);}
+  text.append(renderComicLabels(detail));
   const desc=node('p',detail.description||'暂无简介','detail-desc');text.append(desc);
   const controls=node('div',undefined,'detail-actions');
   const last=readLocal(lastKey(detail));

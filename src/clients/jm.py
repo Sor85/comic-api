@@ -13,6 +13,7 @@ from Crypto.Util.Padding import unpad
 from src.clients.base import BaseClient
 from src.config import Config
 from src.errors import ComicApiError
+from src.metadata import comic_labels
 
 log = logging.getLogger("comic.jm")
 
@@ -430,7 +431,8 @@ class JmClient(BaseClient):
                             "source": "jm",
                             "author": detail["author"],
                             "category": "",
-                            "description": detail["description"]
+                            "description": detail["description"],
+                            "tags": detail.get("tags", [])
                         }]
                 except Exception:
                     pass  # 失败了则继续正常的网络检索
@@ -445,6 +447,16 @@ class JmClient(BaseClient):
             return []
         content_list = data.get("items", []) or data.get("content", [])
         return self._parse_jm_comics(content_list)
+
+    def search_tag(self, tag: str, page: int = 1) -> List[Dict[str, Any]]:
+        # JM's tag-only search uses main_tag=3, not the keyword/album-ID shortcut.
+        res = self.jm_request("/search", method="GET", params={
+            "search_query": tag, "main_tag": "3", "page": str(page)
+        })
+        data = res.get("data", res) if isinstance(res, dict) else res
+        if not isinstance(data, dict):
+            raise ComicApiError("禁漫标签搜索响应格式无效", 502, "invalid_response", "jm")
+        return self._parse_jm_comics(data.get("items", []) or data.get("content", []))
 
     def get_comic_detail(self, comic_id: str) -> Dict[str, Any]:
         """获取漫画详情"""
@@ -485,6 +497,7 @@ class JmClient(BaseClient):
             "author": "/".join(data.get("author", [])) if isinstance(data.get("author"), list) else data.get("author", ""),
             "authors": data.get("author", []) if isinstance(data.get("author"), list) else ([data["author"]] if data.get("author") else []),
             "chapters": chapters,
+            "tags": comic_labels(data.get("tags")),
             "source": "jm"
         }
 
@@ -556,6 +569,7 @@ class JmClient(BaseClient):
                 "title": title,
                 "cover": cover_url,
                 "source": "jm",
+                "tags": comic_labels(item.get("tags")),
                 "author": item.get("author", ""),
                 "category": item.get("category", {}).get("title", "") if isinstance(item.get("category"), dict) else "",
                 "description": item.get("description", "")

@@ -26,6 +26,8 @@ python main.py
 
 - **混合搜索**：各图源结果统一展示并标注来源，按标题完全匹配、包含关键词、字符相似度排序；忽略大小写、全半角与标点差异。同名的不同图源版本保留独立入口。排序范围是本次返回的结果（聚合搜索为各源首页），不是全站全部漫画，也不包含语义理解或简繁转换。
 
+- **标签与分类搜索**：详情页保留并展示全部标签，超过 12 项可展开；点击标签在该图源搜索，也可在搜索框下切换「关键词／标签」并输入名称。禁漫使用标签域 `main_tag=3`，哔咔使用 `comics?t=`，拷贝使用 `theme` 题材标识；标签搜索保留图源顺序，不按标题相似度重排。拷贝中文题材先匹配已知题材或完整题材目录，目录缓存 10 分钟，未知题材或目录失败明确报错，不退化成普通关键词搜索。各源标签含义、简繁和匹配规则不保证相同。
+- **哔咔搜索分类**：单独查看哔咔搜索结果时显示动态获取的分类，可与关键词或标签搜索叠加；「全部分类」清除筛选，换源时清除原分类及图源专用标签标识。分类目录在当前页面缓存 5 分钟，失败可重试且不阻止普通搜索。搜索 URL 与最近搜索保留搜索方式、图源和筛选条件；旧关键词历史仍可使用。图源分类与个人书库分类互相独立。
 - **图片代理**：封面与章节图片统一经 `/api/image/proxy` 中转，浏览器不直接连图源 CDN；校验公网地址并固定实际连接目标（SSRF 防护），最多处理 5 次 HTTP 重定向，每次跳转重新校验并固定目标，底层不自动跟随重定向。成功响应按源+章节+URL 缓存到磁盘（最多保留约 2000 张）。内置图源的 PDF 取图和 JM 收藏同步使用同一网络检查。
 - **图源账号**：SQLite 按图源隔离，账号与 Token 使用 AES-GCM 加密。首次启动自动导入原 `.bika_token` / `.bika_credentials.json`，之后以 SQL 为准；退出登录不会重新导入。旧文件不会自动删除，确认迁移成功后可自行清理其中的明文凭据。
 - **书库**：收藏、分类、移除、缓存详情与手动检查章节更新；页面支持按分类与标题/作者关键词筛选。同一本漫画的不同图源记录互不覆盖。尚未实现后台定时追更。
@@ -159,7 +161,9 @@ services:
 核心接口：
 
 - `search(keyword, page)`：漫画列表，每项含 `id/title/cover/author`。
-- `detail(comic_id)`：漫画详情及 `chapters: [{id, name, order}]`。
+- `detail(comic_id)`：漫画详情及 `chapters: [{id, name, order}]`；可附 `tags: [{label, value}]`、`categories: [{label, value}]`，分别表示显示名称与检索值。禁漫/哔咔的标签两者相同，拷贝由 `theme.name/path_word` 映射，缺少有效标识的题材不伪造检索值。
+- 可选 `search_tag(keyword, page, tag_value="", sort="")`：声明 `tag_search` 能力后提供图源原生标签检索；可用 `tag_sorts` 声明排序。聚合标签搜索只调用支持此能力的插件，旧插件的 `search(keyword, page)` 签名不变。
+- 可选 `search_categories()`：声明 `search_categories` 能力后返回分类选项 `[{label, value}]`，并在 `search` / `search_tag` 中接收可选 `category`。目录应按需获取，不应在构造 manifest 时发出网络请求。
 - `pages(comic_id, chapter_id)`：有序图片 URL 列表。
 - `client.request(...)`：图片请求客户端应复用 `BaseClient`，其 `request` / `stream` 支持内部 `_image_target` 参数，在隔离连接中固定已校验的目标 IP 与代理；自定义传输不能忽略这一策略。可选 `transform_image(data, chapter_id, url)` 解码图片。
 - 可选 `browse(action, **filters)`、`login(values)`、`logout()`、`account_status()`；通过 `categories/sorts/leaderboard_modes/login_fields` 描述界面。
@@ -169,9 +173,11 @@ services:
 
 拷贝适配器参考 [Breeze-plugin-copyComic](https://github.com/deretame/Breeze-plugin-copyComic) 的 API 协议，在 Python 中实现搜索、章节分组分页、图片顺序、推荐与排行榜。`COPY_API_BASE` 可修改 API 地址；上游域名、限流与接口变化可能导致服务不可用。
 
+标签检索协议参考：[JM 标签域](https://github.com/hect0x7/JMComic-Crawler-Python/blob/master/src/jmcomic/jm_client_interface.py#L565-L576)、[哔咔标签与分类参数](https://github.com/Miuzarte/PicaComic-go/blob/main/PicaComic.go#L132-L175)、[拷贝题材链接](https://github.com/deretame/Breeze-plugin-copyComic/blob/main/src/index.ts#L1431-L1461)及[完整题材目录](https://github.com/niuhuan/kobi/blob/main/rust/src/copy_client/client.rs#L297-L305)。这些是公开客户端的协议实现，镜像可用性和上游匹配规则仍以上游实际响应为准。
+
 ## API
 
-完整参数见 `/docs`。
+完整参数见 `/docs`。例如 `GET /api/search?keyword=科幻&mode=tag&source=copy&tag_value=kehuan` 按拷贝题材标识查询；`GET /api/search?keyword=职场&source=bika&category=全彩` 组合哔咔关键词与分类，加入 `mode=tag` 则使用标签与分类。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -184,7 +190,8 @@ services:
 | POST | `/api/jm/sync/run` | JSON `{}` 同步设置范围，或 `{"album_ids":["123"]}` 指定最多 200 本 |
 | POST | `/api/jm/sync/check-local` | 检查设置范围内收藏对应的已有漫画，完整校验后登记为已下载，不下载图片 |
 | POST | `/api/jm/sync/cancel` | 停止本次同步或本地检查，不关闭定时计划 |
-| GET | `/api/search?keyword=&source=&page=&sort=` | 搜索；省略 source 聚合各源；sort 仅对声明 search_sorts 的图源生效 |
+| GET | `/api/search?keyword=&source=&page=&sort=&mode=&tag_value=&category=` | `mode=keyword`（默认）或 `tag`；省略 source 聚合支持该模式的图源；sort 按 search_sorts/tag_sorts 校验，tag_value 仅单源标签搜索可用，category 仅支持搜索分类的单源可用（内置为哔咔） |
+| GET | `/api/sources/{source}/search-categories` | 按需获取搜索分类目录；内置仅哔咔支持，需要该图源登录 |
 | GET | `/api/comic/{source}/{comic_id}` | 详情 |
 | GET | `/api/chapter/{source}/{comic_id}/{chapter_id}` | 图片代理列表 |
 | GET | `/api/{source}/{action}` | latest / category / leaderboard / random，按能力开放 |
@@ -227,7 +234,7 @@ python -m pytest tests -q
 
 测试使用临时数据库和模拟图源，不需要实际账号。`tests.demo_server` 提供离线 WebUI 验证数据，不用于生产部署。
 
-前端错误卡片和章节封面另有不启动浏览器、不访问网络的单元测试，覆盖默认关闭、偏好保存、可见范围加载、排队清理、缓存与失败回退。使用 Node.js 18+ 内置测试运行器，无需安装 npm 依赖：
+前端错误卡片、章节封面及标签搜索另有不启动浏览器、不访问网络的单元测试，覆盖默认关闭、偏好保存、可见范围加载、排队清理、缓存、失败回退、标签安全渲染、分类筛选及搜索状态恢复。使用 Node.js 18+ 内置测试运行器，无需安装 npm 依赖：
 
 ```bash
 node --test tests/*-ui.test.cjs

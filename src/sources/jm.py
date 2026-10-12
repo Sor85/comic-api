@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class JmPlugin(SourcePlugin):
     id = "jm"
     name = "禁漫天堂"
-    capabilities = ["search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites"]
+    capabilities = ["search", "tag_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": v, "label": n} for v, n in
@@ -32,6 +32,9 @@ class JmPlugin(SourcePlugin):
             self.client.clear_session()
             self.store.save_account(self.id, {})
             self.client._account = self.client._password = ""
+
+    def search_tag(self, keyword, page=1, tag_value=""):
+        return self.client.search_tag(tag_value or keyword, page)
 
     def favorites(self, page=1, folder_id="0", order="mr"):
         return self.client.favorites(page, folder_id, order)

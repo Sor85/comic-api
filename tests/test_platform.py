@@ -332,11 +332,12 @@ def test_chapter_previews_script_is_versioned_and_loaded_before_app(client):
     import main as app_module
     version = app_module.bundled_asset_version()
     html = client.get("/").text
-    preview = f'/static/chapter-previews.js?v={version}'
-    assert html.index(preview) < html.index(f'/static/app.js?v={version}')
-    response = client.get(preview)
-    assert response.status_code == 200 and "class ChapterPreviews" in response.text
-    assert "immutable" in response.headers["cache-control"]
+    for asset, marker in [('chapter-previews.js', 'class ChapterPreviews'), ('comic-tags.js', 'function comicLabels')]:
+        path = f'/static/{asset}?v={version}'
+        assert html.index(path) < html.index(f'/static/app.js?v={version}')
+        response = client.get(path)
+        assert response.status_code == 200 and marker in response.text
+        assert "immutable" in response.headers["cache-control"]
 
 
 def test_static_assets_cache_by_version(client):
