@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class JmPlugin(SourcePlugin):
     id = "jm"
     name = "禁漫天堂"
-    capabilities = ["search", "detail", "pages", "latest", "category", "leaderboard", "random", "login"]
+    capabilities = ["search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": v, "label": n} for v, n in
@@ -21,7 +21,7 @@ class JmPlugin(SourcePlugin):
         self.client = JmClient(store=store)
 
     def account_status(self):
-        return {"authenticated": bool(self.client.jwt_token),
+        return {"authenticated": self.client.has_session(),
                 "configured": self.client._credentials_available()}
 
     def login(self, values):
@@ -29,8 +29,12 @@ class JmPlugin(SourcePlugin):
 
     def logout(self):
         with self.client._auth_lock:
+            self.client.clear_session()
             self.store.save_account(self.id, {})
-            self.client.jwt_token = self.client._account = self.client._password = ""
+            self.client._account = self.client._password = ""
+
+    def favorites(self, page=1, folder_id="0", order="mr"):
+        return self.client.favorites(page, folder_id, order)
 
     def browse(self, action, page=1, sort="", mode="week", name=""):
         if action == "random":

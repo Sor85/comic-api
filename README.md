@@ -11,7 +11,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-访问 http://localhost:34587 。哔咔账号可以在页面绑定，也可以在首次启动前填入 `.env`。禁漫与拷贝当前使用游客接口，不显示账号登录。
+访问 http://localhost:34587 。哔咔和禁漫账号可在「图源管理 → 设置 → 登录凭证」绑定；哔咔也可在首次启动前填入 `.env`。拷贝使用游客接口。禁漫收藏夹与自动同步需要账号，登录兼容 JWT 和 AVS Cookie 会话，凭据与会话均加密保存在 SQL。
 
 本地运行：
 
@@ -41,9 +41,59 @@ python main.py
 | `comic.sqlite` | 图源凭据密文、书库、下载记录 |
 | `credentials.key` | 凭据加密密钥，必须保密并与数据库一起备份 |
 | `downloads/` | 已生成的 PDF |
+| `jm-favorites/` | 默认 JM 收藏图片同步目录（可在允许的根目录内修改） |
 | `plugins/` | 自定义可信 Python 图源 |
 
 备份建议先停止服务再复制整个数据目录，避免遗漏 SQLite WAL。密钥丢失后无法解密旧账号。加密不防御可同时读取数据库和密钥的主机管理员。PDF 密码显示在任务卡上，沿用确定性六位密码，主要用于阅读流程而非强机密保护。
+
+## JM 收藏与图片同步
+
+导航「JM 收藏」（或 `/?tab=jm-favorites`）读取已绑定账号的云端收藏，支持自建收藏夹、分页、按收藏时间或漫画更新时间排序、本页标题/作者筛选及多选。`0` 是全部收藏，包含未放入自建目录的漫画。收藏页与本地「我的书库」是独立概念，不会修改远端收藏。
+
+### 同步行为
+
+- 「同步收藏」按设置中的范围扫描全部分页；「同步本书」「同步所选」直接同步指定漫画，不受收藏夹范围限制。
+- 定时同步默认关闭。保存并启用后立即执行，之后以每轮结束时间加间隔计算下一轮（5 分钟到 7 天）。只在服务运行时执行，浏览器可以关闭；服务重启后按保存的计划继续。
+- 单个同步 worker，漫画、章节和图片依次处理。已有任务运行时拒绝重入及设置/账号变更；需要先停止并等待结束。更换或解除禁漫账号绑定后关闭定时同步，避免用新账号意外继续旧计划。
+- 全部收藏逐页扫描，按漫画 ID 去重，再获取最新详情与章节，因而会补充新增章节。发现重复页、总数变化或不完整响应时明确报错，不把失败当作空收藏；远端持续变化时可稍后重试。
+- 文件清单持久化到 SQLite，按输出配置、漫画、章节和页码记录 URL 路径、文件位置、大小与 SHA-256。存在且校验一致的图片跳过，缺失或损坏的已记录图片重新下载；失败项在下一轮重试，不重复下载已完成项。
+- 停止与重启保留已完成图片；中止当前请求后结束。没有字节级断点续传，未完成的单张图片会重新下载。任务记录保留最近 30 次，页面显示最近 10 次，每轮保留前 100 条失败明细。
+- 可同步添加到本地书库，已有分类不变，新漫画使用「JM 收藏」分类。远端取消收藏、删夹或清空后不会删除本地书库和文件。
+
+### 下载设置
+
+| 设置 | 行为 |
+| --- | --- |
+| 收藏夹范围 | 未勾选为全部收藏，可选择多个自建收藏夹；删除的目录不会静默回退到全部 |
+| 下载限速 | 单位 KiB/s，`0` 不限速；使用 libcurl 接收限速并限制短请求平均速率，仅作用于本功能的图片下载，不限制在线阅读、API 元数据或现有 PDF 任务 |
+| 图片格式 | 原格式 / JPEG / PNG / WebP；先 JM 反切割，再真实编码，输出扩展名匹配编码格式 |
+| 图片质量 | 1–100，仅 JPEG / WebP 生效；JPEG 的透明区域铺白底；PNG 无损，不使用质量参数 |
+| 动图 | 原格式保留 GIF 动画并跳过反切割；主动转换成 JPEG/PNG/WebP 时仅保留首帧 |
+| 重试 | 每张图片额外重试 0–5 次，带退避；单张图片输入上限 64 MiB，下载不跟随重定向 |
+| 目录规则 | 漫画 ID/章节 ID；漫画标题 [ID]/章节序号 - 标题 [ID]；作者/漫画标题 [ID]/章节序号 - 标题 [ID] |
+| 文件名 | 五位页码，如 `00001.jpg`；目录名称清理 Windows 不支持的字符及保留名称，编号用于区分同名漫画/章节 |
+
+默认保存到 `DATA_DIR/jm-favorites`。目录与规则改变不会迁移或清理旧文件；标题/作者变化也可能产生新路径。格式或质量变更时可替换本工具已记录的同路径图片，不覆盖未登记的既有文件。空间不足、权限错误、已存在的未登记文件、上游无效图片会显示失败。
+
+### 服务器目录选择
+
+「同步设置 → 选择服务器目录」浏览的是**服务所在机器的目录**，不是 Windows 浏览器所在设备的磁盘。仅允许管理员通过 `JM_DOWNLOAD_ROOTS` 指定的根目录及其子目录，拒绝路径穿越和子目录符号链接。默认根目录为 `DATA_DIR/jm-favorites`；目录在同步时创建。多个根目录用服务器操作系统的路径分隔符分开（Linux/macOS 为 `:`，Windows 为 `;`）。该环境变量变更需要重启。
+
+Docker 中默认 `/app/data/jm-favorites` 已随数据卷持久化。自定义目录需要**同时配置容器内路径和卷挂载**，例如：
+
+```yaml
+services:
+  comic-api:
+    environment:
+      - JM_DOWNLOAD_ROOTS=/app/data/jm-favorites:/downloads
+    volumes:
+      - ./data:/app/data
+      - ./comics:/downloads
+```
+
+随后在页面选择 `/downloads` 或其子目录。只有设置环境变量而未挂载卷时，文件仍在容器文件系统，不是宿主机目标目录。备份应包含数据库、密钥以及所有自定义下载根目录；站点没有用户认证，不应开放给不可信用户。
+
+协议依据：[JMComic-Crawler-Python v2.7.8 收藏接口与登录实现](https://github.com/hect0x7/JMComic-Crawler-Python/blob/69afe2c38d09960fd43031826af19095f75a42a2/src/jmcomic/jm_client_impl.py#L963-L1019)。`GET /favorite` 使用 `page/folder_id/o`，解析 `list/folder_list/total`，官方页大小为 20；不调用会切换远端收藏状态的 `POST /favorite`。上游接口变化、账号权限或登录失效仍可能导致操作失败。
 
 ## 插件扩展
 
@@ -70,6 +120,12 @@ python main.py
 | --- | --- | --- |
 | GET | `/api/sources` | 插件能力与账号状态，不返回凭据 |
 | POST / DELETE | `/api/sources/{source}/login` / `/api/sources/{source}/account` | 登录 / 退出 |
+| GET | `/api/jm/favorites?page=1&folder_id=0&order=mr` | 禁漫云端收藏与目录，排序支持 mr/mp |
+| GET / PUT | `/api/jm/sync/settings` | 同步设置与可用根目录；PUT 保存完整设置 |
+| GET | `/api/jm/sync/directories?path=` | 允许范围内的服务器子目录 |
+| GET | `/api/jm/sync` | 当前同步、下次执行时间与最近记录（时间为 Unix 秒） |
+| POST | `/api/jm/sync/run` | JSON `{}` 同步设置范围，或 `{"album_ids":["123"]}` 指定最多 200 本 |
+| POST | `/api/jm/sync/cancel` | 停止本次同步，不关闭定时计划 |
 | GET | `/api/search?keyword=&source=&page=&sort=` | 搜索；省略 source 聚合各源；sort 仅对声明 search_sorts 的图源生效 |
 | GET | `/api/comic/{source}/{comic_id}` | 详情 |
 | GET | `/api/chapter/{source}/{comic_id}/{chapter_id}` | 图片代理列表 |
@@ -95,7 +151,9 @@ src/clients/             上游协议客户端（签名、解密、HTTP 伪装�
 src/services/aggregator.py   插件调度、聚合搜索、标题排序
 src/services/image_proxy.py  图片代理：SSRF 防护、并发上限、磁盘缓存
 src/services/pdf.py          章节图片并发下载与自适应压缩 PDF
-src/services/downloads.py    下载任务队列与生命周期
+src/services/downloads.py    PDF 下载任务队列与生命周期
+src/services/jm_sync.py      JM 收藏扫描、定时同步与文件检查点
+src/services/local_images.py 服务器目录边界、带宽限速与图片输出
 src/services/images.py       JM 图片反切割
 src/web/                 原生 JS 单页界面
 tests/                   pytest，无需真实账号

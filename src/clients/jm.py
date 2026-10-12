@@ -32,6 +32,19 @@ class JmClient(BaseClient):
         self._account = account.get("account", "")
         self._password = account.get("password", "")
         self.jwt_token = account.get("token", "")
+        self.avs = account.get("avs", "")
+        self.auth_cookies = account.get("cookies", {})
+        self.cookie_api = account.get("cookie_api", False)
+        self._login_cookies = {}
+
+    def has_session(self) -> bool:
+        return bool(self.jwt_token or self.avs)
+
+    def clear_session(self) -> None:
+        self.jwt_token = self.avs = ""
+        self.auth_cookies = {}
+        self.session.cookies.clear()
+        self._persist(token="", avs="", cookies={})
 
     def _credentials_available(self) -> bool:
         return bool(self._account and self._password)
@@ -45,30 +58,53 @@ class JmClient(BaseClient):
         self._persist(token=token)
 
     def login(self, account: str, password: str) -> dict:
-        """登录禁漫账号：POST /login，响应里带 jwttoken 和用户信息。"""
+        """Accept both the JWT API session and jmcomic's s → AVS cookie session."""
         account = account.strip()
         if not account or not password:
             raise ComicApiError("禁漫账号和密码不能为空", 422, "invalid_request", "jm")
         with self._auth_lock:
-            res = self.jm_request("/login", method="POST",
-                                  data={"username": account, "password": password},
-                                  _force_no_auth=True)
-            if not isinstance(res, dict) or not res.get("jwttoken"):
-                raise ComicApiError("登录响应缺少 Token", 502, "invalid_response", "jm")
-            self._account, self._password = account, password
-            self._persist(account=account, password=password, token=self.jwt_token, user=res)
-            return res
+            previous = self.cookie_api, self.jwt_token, self.avs, self.auth_cookies
+            try:
+                # Keep the project's existing API signature first; older jmcomic
+                # cookie endpoints use JM_SECRET instead of the app version.
+                for attempt, cookie_api in enumerate((self.cookie_api, not self.cookie_api)):
+                    self.cookie_api = cookie_api
+                    self._login_cookies = {}
+                    try:
+                        res = self.jm_request("/login", method="POST",
+                                              data={"username": account, "password": password},
+                                              _force_no_auth=True)
+                        if not isinstance(res, dict) or not (res.get("jwttoken") or res.get("s")):
+                            raise ComicApiError("登录响应缺少有效会话", 401, "login_failed", "jm")
+                    except ComicApiError as exc:
+                        if attempt == 0 and exc.code in ("login_failed", "invalid_response", "upstream_error"):
+                            continue
+                        raise
+                    self._account, self._password = account, password
+                    self.jwt_token, self.avs = res.get("jwttoken", ""), res.get("s", "")
+                    self.auth_cookies = dict(self._login_cookies)
+                    if self.avs:
+                        self.auth_cookies["AVS"] = self.avs
+                    self._persist(account=account, password=password, token=self.jwt_token,
+                                  avs=self.avs, cookies=self.auth_cookies, cookie_api=self.cookie_api, user=res)
+                    return res
+            except Exception:
+                self.cookie_api, self.jwt_token, self.avs, self.auth_cookies = previous
+                raise
 
     def ensure_session(self) -> None:
         """配置了账号但还没有会话时自动恢复；未配置账号则匿名使用。"""
-        if self.jwt_token:
+        if self.has_session():
             return
         with self._auth_lock:
-            if self.jwt_token:
+            if self.has_session():
                 return
-            persisted = (self.store.account("jm") or {}).get("token", "")
-            if persisted:
-                self.jwt_token = persisted
+            persisted = self.store.account("jm") or {}
+            if persisted.get("token") or persisted.get("avs"):
+                self.jwt_token = persisted.get("token", "")
+                self.avs = persisted.get("avs", "")
+                self.auth_cookies = persisted.get("cookies", {})
+                self.cookie_api = persisted.get("cookie_api", False)
                 return
             if self._credentials_available():
                 self.login(self._account, self._password)
@@ -76,8 +112,8 @@ class JmClient(BaseClient):
     def ensure_authenticated(self) -> None:
         """要求已登录的入口；未配置账号时报 login_required。"""
         self.ensure_session()
-        if not self.jwt_token:
-            raise ComicApiError("请先绑定禁漫账号", 401, "login_required", "jm")
+        if not self.has_session():
+            raise ComicApiError("禁漫收藏需要绑定账号", 401, "login_required", "jm")
 
     def md5_hex(self, text: str) -> str:
         return hashlib.md5(text.encode("utf-8")).hexdigest()
@@ -201,7 +237,8 @@ class JmClient(BaseClient):
                 self.api_bases.insert(0, base_url)
 
     def get_api_headers(self, ts: int, jwt_token: str = "") -> dict:
-        token = self.md5_hex(f"{ts}{Config.JM_VERSION}")
+        secret = Config.JM_SECRET if self.cookie_api else Config.JM_VERSION
+        token = self.md5_hex(f"{ts}{secret}")
         headers = {
             "token": token,
             "tokenparam": f"{ts},{Config.JM_VERSION}",
@@ -219,7 +256,10 @@ class JmClient(BaseClient):
         data: dict = None,
         _auth_retry: bool = False,
         _force_no_auth: bool = False,
+        _require_auth: bool = False,
     ) -> Any:
+        if _require_auth:
+            self.ensure_authenticated()
         # Host probing hits two remote config URLs with timeouts; throttle repeats after failures.
         if not self.host_resolved:
             with self._auth_lock:
@@ -228,7 +268,7 @@ class JmClient(BaseClient):
                         self._resolve_after = time.monotonic() + 60
 
         # 配置了账号但没有会话时先恢复登录态（排行榜等接口带 JWT 更稳定）。
-        if not _force_no_auth and not self.jwt_token and self._credentials_available():
+        if not _force_no_auth and not self.has_session() and self._credentials_available():
             self.ensure_session()
 
         # 逐个候选节点重试：单节点超时/5xx/返回非加密结构时轮换下一个。
@@ -240,10 +280,16 @@ class JmClient(BaseClient):
             ts = int(time.time())
             with self._auth_lock:
                 used_jwt = "" if _force_no_auth else self.jwt_token
-            headers = self.get_api_headers(ts, used_jwt)
+                used_avs = "" if _force_no_auth else self.avs
+                cookies = dict(self.auth_cookies) if not _force_no_auth else {}
+                if used_avs:
+                    cookies["AVS"] = used_avs
+                headers = self.get_api_headers(ts, used_jwt)
             url = f"{base_url}{path}"
 
             kwargs = {"headers": headers, "timeout": 10}
+            if cookies:
+                kwargs["cookies"] = cookies
             if params:
                 kwargs["params"] = params
             if data and method.upper() == "POST":
@@ -259,6 +305,20 @@ class JmClient(BaseClient):
                 self._rotate_base(base_url)
                 last_error = exc
                 continue
+
+            try:
+                envelope = json.loads(res.content)
+            except (ValueError, TypeError):
+                envelope = {}
+            api_code = str(envelope.get("code", "200")) if isinstance(envelope, dict) else "200"
+            if _require_auth and (res.status_code in (401, 403) or api_code in ("401", "403")):
+                with self._auth_lock:
+                    if (self.jwt_token, self.avs) == (used_jwt, used_avs):
+                        self.clear_session()
+                    if _auth_retry or not self._credentials_available():
+                        raise ComicApiError("禁漫会话已失效，需要重新登录", 401, "login_required", "jm")
+                    self.ensure_authenticated()
+                return self.jm_request(path, method, params, data, _auth_retry=True, _require_auth=True)
 
             if res.status_code in (401, 403) and used_jwt and not _auth_retry:
                 retry_without_auth = False
@@ -291,8 +351,14 @@ class JmClient(BaseClient):
                                     res.status_code if res.status_code in (401, 403, 404) else 502,
                                     "upstream_error", "jm")
 
+            if api_code != "200":
+                is_login = path.rstrip("/") == "/login"
+                raise ComicApiError("禁漫登录失败" if is_login else "禁漫接口返回错误，未取得有效数据",
+                                    401 if is_login else 502, "login_failed" if is_login else "upstream_error", "jm")
+            if path.rstrip("/") == "/login":
+                self._login_cookies = dict(getattr(res, "cookies", {}))
             decrypted = self.decrypt_response(res.content, ts)
-            if not isinstance(decrypted, (dict, list)):
+            if not isinstance(decrypted, (dict, list)) or (isinstance(decrypted, dict) and isinstance(decrypted.get("data"), str) and "code" in decrypted):
                 # 返回了非 JSON 结构（如 CDN 错误页）：视为坏节点，换下一个。
                 self._rotate_base(base_url)
                 last_error = ComicApiError("图源返回了无效数据", 502, "invalid_response", "jm")
@@ -310,6 +376,40 @@ class JmClient(BaseClient):
         if last_error is not None:
             raise last_error
         raise ComicApiError("禁漫节点不可用", 502, "upstream_error", "jm")
+
+    def favorites(self, page=1, folder_id="0", order="mr") -> dict:
+        """jmcomic API: /favorite returns list/folder_list/total, fixed at 20 items per page."""
+        if page < 1 or order not in ("mr", "mp") or not str(folder_id).isascii() or not str(folder_id).isdigit():
+            raise ComicApiError("收藏查询参数无效", 422, "invalid_request", "jm")
+        response = self.jm_request("/favorite", params={"page": str(page), "folder_id": str(folder_id), "o": order},
+                                   _require_auth=True)
+        data = response.get("data", response) if isinstance(response, dict) else response
+        if not isinstance(data, dict) or not isinstance(data.get("list"), list) or not isinstance(data.get("folder_list"), list):
+            raise ComicApiError("禁漫未返回有效收藏列表，需检查登录状态", 502, "invalid_response", "jm")
+        try:
+            total = int(data["total"])
+            if total < 0:
+                raise ValueError()
+            folders = {"0": {"id": "0", "name": "全部收藏"}}
+            for folder in data["folder_list"]:
+                fid = str(folder["FID"])
+                if not fid.isascii() or not fid.isdigit():
+                    raise ValueError()
+                if fid != "0":
+                    folders[fid] = {"id": fid, "name": str(folder["name"])}
+            if any(not isinstance(item, dict) for item in data["list"]):
+                raise ValueError()
+            items = self._parse_jm_comics(data["list"])
+            if len(items) != len(data["list"]):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ComicApiError("禁漫收藏数据不完整，未作为空收藏处理", 502, "invalid_response", "jm") from exc
+        if str(folder_id) not in folders:
+            raise ComicApiError("收藏夹已不存在，需重新选择同步范围", 404, "folder_not_found", "jm")
+        if not items and (page - 1) * 20 < total:
+            raise ComicApiError("禁漫收藏分页为空但总数非零", 502, "invalid_response", "jm")
+        return {"items": items, "folders": list(folders.values()), "total": total,
+                "page": page, "page_size": 20, "has_next": page * 20 < total}
 
     def search(self, keyword: str, page: int = 1) -> List[Dict[str, Any]]:
         """搜索漫画：GET /search；第 1 页输入纯数字或 jm 前缀 ID 时直接取详情"""

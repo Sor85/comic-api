@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services.downloads import DownloadManager, pdf_password_for
+from src.services.jm_sync import JmSync, SyncSettings
 from src.storage import Store
 
 load_dotenv()
@@ -70,19 +71,29 @@ class TaskInput(BaseModel):
     chapter: str = Field(default="", max_length=500)
 
 
+class SyncInput(BaseModel):
+    album_ids: list[str] | None = Field(default=None, min_length=1, max_length=200)
+
+
 def create_app(store=None, sources=None):
     store = store or Store()
     service = AggregatorService(store, sources)
     downloads = DownloadManager(store, service)
+    jm_sync = JmSync(store, service)
 
     @asynccontextmanager
     async def lifespan(app):
         await downloads.start()
-        yield
-        await downloads.stop()
+        await jm_sync.start()
+        try:
+            yield
+        finally:
+            await jm_sync.stop()
+            await downloads.stop()
 
     app = FastAPI(title="Comic · 图源与书库", version="2.0.0", lifespan=lifespan)
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
+    app.state.jm_sync = jm_sync
     app.mount("/static", VersionedStaticFiles(directory=WEB_STATIC), name="static")
 
     @app.exception_handler(ComicApiError)
@@ -118,7 +129,15 @@ def create_app(store=None, sources=None):
             raise ComicApiError("该图源不提供登录", 400, "unsupported", source)
         if any(not values.get(field["name"], "").strip() for field in plugin.login_fields):
             raise ComicApiError("请填写全部登录字段", 422, "invalid_request", source)
-        await service.call(source, "login", values)
+        if source == "jm":
+            jm_sync.guard_account_change()
+        try:
+            await service.call(source, "login", values)
+            if source == "jm":
+                jm_sync.account_changed()
+        finally:
+            if source == "jm":
+                jm_sync.account_changing = False
         return {"success": True, "account": plugin.account_status()}
 
     @app.put("/api/sources/{source}/settings")
@@ -134,8 +153,49 @@ def create_app(store=None, sources=None):
     async def logout(source: str):
         if "login" not in service.source(source).capabilities:
             raise ComicApiError("该图源不提供登录", 400, "unsupported", source)
-        await service.call(source, "logout")
+        if source == "jm":
+            jm_sync.guard_account_change()
+        try:
+            await service.call(source, "logout")
+            if source == "jm":
+                jm_sync.account_changed()
+        finally:
+            if source == "jm":
+                jm_sync.account_changing = False
         return {"success": True}
+
+    @app.get("/api/jm/favorites")
+    async def jm_favorites(page: int = Query(1, ge=1, le=1000),
+                           folder_id: str = Query("0", pattern=r"^[0-9]{1,20}$"),
+                           order: str = Query("mr", pattern=r"^(mr|mp)$")):
+        jm_sync.require_account()
+        return await service.call("jm", "favorites", page=page, folder_id=folder_id, order=order)
+
+    @app.get("/api/jm/sync/settings")
+    async def jm_sync_settings():
+        return jm_sync.options()
+
+    @app.put("/api/jm/sync/settings")
+    async def save_jm_sync_settings(values: SyncSettings):
+        return jm_sync.save_settings(values)
+
+    @app.get("/api/jm/sync/directories")
+    async def jm_sync_directories(path: str = Query("", max_length=2048)):
+        return await asyncio.to_thread(jm_sync.paths.browse, path)
+
+    @app.get("/api/jm/sync")
+    async def jm_sync_status():
+        return jm_sync.status()
+
+    @app.post("/api/jm/sync/run", status_code=202)
+    async def run_jm_sync(values: SyncInput):
+        if values.album_ids and any(not re.fullmatch(r"[0-9]{1,20}", value) for value in values.album_ids):
+            raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
+        return jm_sync.launch(values.album_ids)
+
+    @app.post("/api/jm/sync/cancel")
+    async def cancel_jm_sync():
+        return jm_sync.cancel()
 
     @app.get("/api/search")
     async def search(keyword: str = Query(min_length=1, max_length=200), source: str = "",

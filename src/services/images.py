@@ -27,6 +27,8 @@ def descramble_jm_image(data, chapter_id, url, count=None):
     if count <= 1:
         return data
     with Image.open(io.BytesIO(data)) as img:
+        if img.format == "GIF":
+            return data
         width, height = img.size
         step, remainder = divmod(height, count)
         if not step:

@@ -11,7 +11,7 @@ const BROWSE_ACTIONS = {latest: '最新更新', category: '分类浏览', leader
 const BROWSE_ORDER = ['latest', 'category', 'leaderboard', 'random'];
 const statuses = {queued:'排队中',running:'下载中',cancelling:'正在取消',cancelled:'已取消',failed:'失败',completed:'已完成',fetching:'获取章节',downloading:'下载图片',packaging:'打包 PDF',interrupted:'重启中断'};
 const TONES = {queued:'muted',running:'info',cancelling:'warn',cancelled:'muted',failed:'danger',interrupted:'danger',completed:'ok'};
-const CAP_LABELS = {search:'搜索',latest:'最新',category:'分类',leaderboard:'排行',random:'随机',login:'账号'};
+const CAP_LABELS = {search:'搜索',latest:'最新',category:'分类',leaderboard:'排行',random:'随机',login:'账号',favorites:'收藏夹'};
 
 const icons = {
   star:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
@@ -446,12 +446,13 @@ function searchElsewhere(title){
 /* ---------- tabs & cards ---------- */
 function showTab(tab) {
   const changed=state.tab!==tab;state.tab=tab;
-  for(const id of ['browse','library','downloads'])$(id).hidden=id!==tab;
+  for(const id of ['browse','library','downloads','jm-favorites'])$(id).hidden=id!==tab;
   document.querySelectorAll('[data-tab]').forEach(n=>{const on=n.dataset.tab===tab;n.classList.toggle('active',on);n.setAttribute('aria-current',on?'page':'false');});
   if(changed)window.scrollTo({top:0});
   if(tab==='browse'&&state.view==='home')renderContinue();
   if(tab==='library')run(loadLibrary);
   if(tab==='downloads')run(loadTasks);
+  if(tab==='jm-favorites')run(loadJmFavoritesView);
 }
 function card(item,{showSource=true,library=false,history=null}={}){
   const el=node('article',undefined,'card'+(history?' card-history':''));
@@ -697,6 +698,7 @@ function renderSourceSettings(){
     label.append(input);
     const submit=node('button','保存','primary');submit.type='submit';form.append(label,submit);form.onsubmit=event=>{event.preventDefault();run(async()=>{await api(`/api/sources/${enc(plugin.id)}/settings`,write('PUT',{...plugin.settings,[field.name]:input.value}));await loadSources();toast('设置已保存，后续请求立即生效');},submit);};section.append(form);body.append(section);}
   if(plugin.capabilities.includes('login')){const section=node('section',undefined,'setting-section');section.append(node('h3','登录凭证'),node('p',accountLabel(plugin),'muted'),labelBtn('key','管理登录凭证',()=>{configureAccount();$('credentials-dialog').showModal();}));body.append(section);}
+  if(plugin.id==='jm'&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','收藏与本地同步'),node('p','浏览远端收藏夹，按目录规则增量保存图片。','muted'),labelBtn('bookmark','打开 JM 收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('jm-favorites');}));body.append(section);}
   if(!(plugin.settings_fields||[]).length&&!plugin.capabilities.includes('login'))body.append(node('p','此图源使用自动服务器配置，无需登录，暂无可修改选项。','muted'));
 }
 function configureAccount(){
@@ -916,4 +918,4 @@ syncThemeColor();
 setInterval(()=>{if((state.tab==='downloads'||state.activeTasks)&&!document.hidden&&!loadTasks.busy){loadTasks.busy=true;loadTasks().catch(e=>{if(state.tab==='downloads')toast(e.message);}).finally(()=>loadTasks.busy=false);}},2500);
 // autofocus pops the on-screen keyboard on touch devices; drop it there.
 if(matchMedia('(pointer:coarse)').matches&&document.activeElement===$('keyword'))$('keyword').blur();
-run(async()=>{await loadSources();await loadLibrary();refreshTaskDot();});
+const appReady=run(async()=>{await loadSources();await loadLibrary();refreshTaskDot();});

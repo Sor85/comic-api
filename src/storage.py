@@ -51,7 +51,19 @@ class Store:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    name TEXT PRIMARY KEY, settings TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS jm_sync_runs (
+                    id TEXT PRIMARY KEY, state TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS jm_sync_files (
+                    scope TEXT NOT NULL, album_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                    page INTEGER NOT NULL, image_key TEXT NOT NULL, path TEXT NOT NULL,
+                    size INTEGER NOT NULL DEFAULT 0, digest TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(scope, album_id, chapter_id, page)
+                );
+                PRAGMA user_version=2;
             """)
 
     @contextmanager
@@ -83,6 +95,16 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT INTO source_settings VALUES (?,?) ON CONFLICT(source) DO UPDATE SET settings=excluded.settings",
                        (source, json.dumps(values)))
+
+    def settings(self, name):
+        with self.connect() as db:
+            row = db.execute("SELECT settings FROM app_settings WHERE name=?", (name,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def save_settings(self, name, values):
+        with self.connect() as db:
+            db.execute("INSERT INTO app_settings VALUES (?,?) ON CONFLICT(name) DO UPDATE SET settings=excluded.settings",
+                       (name, json.dumps(values, ensure_ascii=False)))
 
     def save_account(self, source, values):
         cipher = AES.new(self.key, AES.MODE_GCM)

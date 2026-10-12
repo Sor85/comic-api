@@ -8,6 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f26d3f'/%3E%3Cpath d='M9 7h10a4 4 0 0 1 4 4v14h-2.5a4.5 4.5 0 0 0-4.5-4.5H9z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/app.css?v=27">
   <script src="/static/app.js?v=27" defer></script>
+  <script src="/static/jm-sync.js?v=27" defer></script>
 </head>
 <body>
   <div id="scroll-progress" aria-hidden="true"></div>
@@ -20,6 +21,7 @@
       <button data-tab="browse" class="active" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg><span>发现漫画</span></button>
       <button data-tab="library" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg><span>我的书库</span></button>
       <button data-tab="downloads" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>下载任务</span><i class="tab-dot" data-downloads-dot hidden></i></button>
+      <button data-tab="jm-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m8 14 3 3 5-5"/></svg><span>JM 收藏</span></button>
     </nav>
     <div class="actions">
       <button id="theme" class="icon-btn ghost" type="button" title="切换主题" aria-label="切换主题">
@@ -100,12 +102,70 @@
       </div>
       <div id="tasks"></div>
     </section>
+    <section id="jm-favorites" class="jm-sync-view" hidden>
+      <div class="section-head">
+        <div class="section-title"><h1>JM 收藏</h1><span id="jm-favorites-count" class="count"></span></div>
+        <div class="jm-toolbar"><button id="jm-sync-settings-open" type="button">同步设置</button><button id="jm-favorites-refresh" type="button">刷新</button></div>
+      </div>
+      <p class="muted">远端收藏只读浏览。本地同步保存解码后的图片，不修改远端收藏，不删除已有文件。</p>
+      <section class="jm-sync-panel" aria-label="收藏同步状态">
+        <div class="section-head"><h2>本地同步</h2><div class="jm-toolbar"><button id="jm-sync-run" class="primary" type="button">同步收藏</button><button id="jm-sync-cancel" type="button" hidden>停止本次同步</button></div></div>
+        <p id="jm-sync-schedule" class="muted"></p>
+        <div id="jm-sync-status" role="status"></div>
+        <details id="jm-sync-history"><summary>同步记录</summary><div id="jm-sync-history-list"></div></details>
+      </section>
+      <form id="jm-favorites-filter" class="jm-toolbar">
+        <select id="jm-favorites-folder" aria-label="收藏夹"><option value="0">全部收藏</option></select>
+        <select id="jm-favorites-order" aria-label="收藏排序"><option value="mr">收藏时间</option><option value="mp">更新时间</option></select>
+        <input id="jm-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选">
+        <button type="submit">筛选</button>
+        <button id="jm-select-page" type="button">选择本页</button>
+        <button id="jm-sync-selected" type="button" hidden>同步所选</button>
+      </form>
+      <p id="jm-favorites-message" class="status" role="status"></p>
+      <div id="jm-favorites-books" class="grid"></div>
+      <div id="jm-favorites-pager" class="pager" hidden><button id="jm-favorites-prev" type="button">上一页</button><span id="jm-favorites-page"></span><button id="jm-favorites-next" type="button">下一页</button></div>
+    </section>
   </main>
   <nav id="tabbar" class="tabbar" aria-label="主导航">
     <button data-tab="browse" class="active" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg><span>发现</span></button>
     <button data-tab="library" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg><span>书库</span></button>
     <button data-tab="downloads" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>下载</span><i class="tab-dot" data-downloads-dot hidden></i></button>
+    <button data-tab="jm-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m8 14 3 3 5-5"/></svg><span>JM 收藏</span></button>
   </nav>
+  <dialog id="jm-sync-settings" class="jm-sync-dialog">
+    <div class="dialog-head"><h2>JM 收藏同步设置</h2><button type="button" data-close="jm-sync-settings">关闭</button></div>
+    <form id="jm-sync-form" class="settings-form">
+      <label class="jm-check"><input type="checkbox" name="enabled">定时同步</label>
+      <p class="muted">保存并启用后立即同步一次，之后按间隔运行。更换或解除账号绑定后，定时同步自动关闭。</p>
+      <div class="jm-settings-grid">
+        <label>同步间隔（分钟）<input name="interval_minutes" type="number" min="5" max="10080" required></label>
+        <label>下载限速（KiB/s，0 为不限速）<input name="speed_limit_kbps" type="number" min="0" max="1048576" required></label>
+        <label>图片格式<select name="image_format"><option value="original">保留图片格式</option><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
+        <label>JPEG / WebP 质量（1–100）<input name="quality" type="number" min="1" max="100" required></label>
+        <label>单张图片额外重试次数<input name="retries" type="number" min="0" max="5" required></label>
+        <label>目录层级<select name="directory_rule"><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 标题 [ID]</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 标题 [ID]</option></select></label>
+      </div>
+      <p class="muted">限速只作用于收藏同步图片，不限制在线阅读和现有 PDF 任务。图片先解码再转换；显式转换格式时，动图仅保存首帧。PNG 不使用质量参数。</p>
+      <fieldset class="jm-folder-options"><legend>同步范围</legend><p class="muted">未勾选收藏夹时同步全部收藏。单本及所选同步不受此范围限制。</p><div id="jm-sync-folders"></div></fieldset>
+      <label>服务器下载目录<input name="download_dir" maxlength="2048" required></label>
+      <button id="jm-directory-open" type="button">选择服务器目录</button>
+      <p class="muted">目录位于运行服务的机器，不是当前浏览器所在设备。可选根目录由 JM_DOWNLOAD_ROOTS 控制，Docker 目录必须挂载持久化卷；可在所选根目录下填写新子目录。</p>
+      <p id="jm-directory-preview" class="jm-path"></p>
+      <label class="jm-check"><input name="add_to_library" type="checkbox">同步添加到本地书库（保留已有分类）</label>
+      <p class="muted">已完成图片会校验并跳过，失败图片可在下次同步重试。变更目录或层级规则不会移动、清理旧文件；格式或质量变更可能替换本工具已记录的同路径图片。</p>
+      <button id="jm-sync-save" class="primary" type="submit">保存设置</button>
+      <p id="jm-sync-settings-message" class="status" role="status"></p>
+    </form>
+  </dialog>
+  <dialog id="jm-directory-dialog" class="jm-sync-dialog">
+    <div class="dialog-head"><h2>服务器目录</h2><button type="button" data-close="jm-directory-dialog">关闭</button></div>
+    <div id="jm-directory-roots" class="jm-toolbar"></div>
+    <p id="jm-directory-current" class="jm-path"></p>
+    <div class="jm-toolbar"><button id="jm-directory-parent" type="button">上一级</button><button id="jm-directory-select" type="button" class="primary">使用此目录</button></div>
+    <p id="jm-directory-message" class="status" role="status"></p>
+    <div id="jm-directory-list"></div>
+  </dialog>
   <button id="to-top" class="icon-btn" type="button" title="回到顶部" aria-label="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>
 
   <dialog id="detail-dialog" class="sheet">

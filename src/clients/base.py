@@ -1,5 +1,6 @@
 import random
 import threading
+from contextlib import contextmanager
 from src.errors import ComicApiError
 try:
     from curl_cffi import requests
@@ -52,26 +53,40 @@ class BaseClient:
         self.session = requests.Session()
         self._request_slots = threading.BoundedSemaphore(4)
         
-    def request(self, method: str, url: str, **kwargs):
-        # 强制添加 impersonate 伪装 TLS
-        if "impersonate" not in kwargs:
-            kwargs["impersonate"] = self.impersonate
-            
+    def _send(self, method: str, url: str, **kwargs):
+        kwargs.setdefault("impersonate", self.impersonate)
         headers = kwargs.get("headers", {})
-        if "user-agent" not in {k.lower() for k in headers.keys()}:
+        if "user-agent" not in {k.lower() for k in headers}:
             headers["user-agent"] = self.ua
         kwargs["headers"] = headers
-        
         kwargs.setdefault("timeout", 20)
+        try:
+            return self.session.request(method, url, **kwargs)
+        except Exception as exc:
+            timeout = "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower()
+            raise ComicApiError("图源请求超时" if timeout else "无法连接图源", 504 if timeout else 502,
+                                "upstream_timeout" if timeout else "upstream_network") from exc
+
+    def request(self, method: str, url: str, **kwargs):
         if not self._request_slots.acquire(timeout=10):
             raise ComicApiError("图源请求繁忙，请稍后重试", 429, "busy")
         try:
-            try:
-                response = self.session.request(method, url, **kwargs)
-            except Exception as exc:
-                timeout = "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower()
-                raise ComicApiError("图源请求超时" if timeout else "无法连接图源", 504 if timeout else 502,
-                                    "upstream_timeout" if timeout else "upstream_network") from exc
-            return response
+            return self._send(method, url, **kwargs)
         finally:
             self._request_slots.release()
+
+    @contextmanager
+    def stream(self, method: str, url: str, **kwargs):
+        # Hold the permit until the streaming transfer, including cancellation, has exited.
+        if not self._request_slots.acquire(timeout=10):
+            raise ComicApiError("图源请求繁忙，请稍后重试", 429, "busy")
+        response = None
+        try:
+            response = self._send(method, url, stream=True, **kwargs)
+            yield response
+        finally:
+            try:
+                if response is not None:
+                    response.close()
+            finally:
+                self._request_slots.release()
