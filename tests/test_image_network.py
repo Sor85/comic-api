@@ -32,6 +32,8 @@ def network(monkeypatch):
     content = io.BytesIO()
     Image.new("RGB", (8, 8), "white").save(content, "PNG")
     state = SimpleNamespace(calls=[], sessions=[], picture=content.getvalue(), addresses=["93.184.216.34"], status=200, dns_status=0)
+    state.responses = {}
+    state.addresses_by_host = {}
 
     class Session:
         def __init__(self, **kwargs):
@@ -50,9 +52,11 @@ def network(monkeypatch):
         def request(self, method, url, **kwargs):
             state.calls.append((url, kwargs, self.options))
             if url.startswith("https://dns.google/"):
-                body = {"Status": state.dns_status, "Answer": [{"type": 1, "data": value, "TTL": 60} for value in state.addresses]}
+                addresses = state.addresses_by_host.get(kwargs["params"]["name"], state.addresses)
+                body = {"Status": state.dns_status, "Answer": [{"type": 1, "data": value, "TTL": 60} for value in addresses]}
                 return SimpleNamespace(status_code=200, json=lambda: body, content=b"{}")
-            return SimpleNamespace(status_code=state.status, content=state.picture,
+            status, headers = state.responses.get(url, (state.status, {}))
+            return SimpleNamespace(status_code=status, headers=headers, content=state.picture,
                                    iter_content=lambda: iter([state.picture]), close=lambda: None)
 
         def close(self):
@@ -183,17 +187,191 @@ def test_public_resolution_is_pinned_and_no_proxy_is_preserved(network, monkeypa
     assert kwargs["proxy"] == ""
 
 
-def test_redirects_are_not_followed(network):
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_image_redirects_validate_and_pin_each_destination(network, tmp_path, status):
+    original = "https://storage-b.picacomic.com/static/cover.jpg"
+    destination = "https://img.picacomic.com/static/cover.jpg"
+    network.responses[original] = status, {"Location": destination}
+    network.addresses_by_host["img.picacomic.com"] = ["1.1.1.1"]
+    client = BaseClient()
+    transformed = []
+    def transform(data, chapter_id, url):
+        transformed.append((chapter_id, url))
+        return data
+    plugin = SimpleNamespace(client=client, transform_image=transform)
+    proxy = ImageProxy(Store(tmp_path))
+    assert asyncio.run(proxy.image(plugin, "bika", original, "1")) == network.picture
+    image_calls = [call for call in network.calls if not call[0].startswith("https://dns.google/")]
+    assert [call[0] for call in image_calls] == [original, destination]
+    for (url, kwargs, options), host, address in zip(image_calls,
+            ("storage-b.picacomic.com", "img.picacomic.com"), (network.addresses[0], "1.1.1.1")):
+        assert options[CurlOpt.CONNECT_TO] == [f"{host}:443:{address}:443"]
+        assert options[CurlOpt.FOLLOWLOCATION] == 0
+        assert kwargs["allow_redirects"] is False and kwargs["verify"] is True
+        assert kwargs["headers"]["Referer"] == f"https://{host}/"
+        assert {key.lower() for key in kwargs["headers"]} == {"referer", "user-agent"}
+    assert all(session.closed for session in network.sessions[1:])
+    assert transformed == [("1", original)]
+    count = len(network.calls)
+    assert asyncio.run(proxy.image(plugin, "bika", original, "1")) == network.picture
+    assert len(network.calls) == count and transformed == [("1", original)]
+
+
+@pytest.mark.parametrize("location, destination", [
+    ("/new/cover.jpg", "https://cdn.example/new/cover.jpg"),
+    ("../cover.jpg", "https://cdn.example/cover.jpg"),
+    ("?version=2", "https://cdn.example/static/cover.jpg?version=2"),
+    ("//other.example/cover.jpg", "https://other.example/cover.jpg"),
+])
+def test_image_redirects_resolve_relative_locations(network, location, destination):
+    from src.services.image_proxy import download_image
+    original = "https://cdn.example/static/cover.jpg"
+    network.responses[original] = 302, {"Location": location}
+    assert download_image(BaseClient(), original, retries=1) == network.picture
+    assert network.calls[-1][0] == destination
+
+
+@pytest.mark.parametrize("location", [
+    "http://127.0.0.1/private", "//169.254.169.254/metadata", "https://198.18.1.2/private",
+    "http://[::1]/private", "http://router.local/private", "file:///etc/passwd",
+    "https://user:password@cdn.example/image", "https://cdn.example/#fragment",
+])
+def test_image_redirects_cannot_reach_private_or_invalid_urls(network, location):
     from src.errors import ComicApiError
     from src.services.image_proxy import download_image
-    network.status = 302
+    original = "https://cdn.example/cover.jpg"
+    network.responses[original] = 301, {"Location": location}
     with pytest.raises(ComicApiError) as error:
+        download_image(BaseClient(), original, retries=1)
+    assert error.value.code == "invalid_request"
+    assert [url for url, _, _ in network.calls if not url.startswith("https://dns.google/")] == [original]
+
+
+@pytest.mark.parametrize("private_dns", [False, True])
+def test_image_redirects_reject_private_dns_at_later_hop(network, monkeypatch, private_dns):
+    from src.errors import ComicApiError
+    from src.services.image_proxy import download_image
+    original = "https://cdn.example/cover.jpg"
+    middle = "https://second.example/cover.jpg"
+    destination = "https://third.example/cover.jpg"
+    network.responses.update({original: (302, {"Location": middle}), middle: (307, {"Location": destination})})
+    if private_dns:
+        network.addresses_by_host["third.example"] = ["127.0.0.1"]
+    else:
+        def resolve(host, *args, **kwargs):
+            address = "127.0.0.1" if host == "third.example" else "198.18.0.9"
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 443))]
+        monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    with pytest.raises(ComicApiError) as error:
+        download_image(BaseClient(), original, retries=1)
+    assert error.value.code == "invalid_request"
+    assert [url for url, _, _ in network.calls if not url.startswith("https://dns.google/")] == [original, middle]
+
+
+@pytest.mark.parametrize("steps", [5, 6])
+def test_image_redirect_limit(network, steps):
+    from src.errors import ComicApiError
+    from src.services.image_proxy import download_image
+    urls = [f"https://cdn.example/{index}.jpg" for index in range(steps + 1)]
+    for current, following in zip(urls, urls[1:]):
+        network.responses[current] = 301, {"Location": following}
+    if steps == 5:
+        assert download_image(BaseClient(), urls[0], retries=1) == network.picture
+    else:
+        with pytest.raises(ComicApiError, match="重定向次数过多") as error:
+            download_image(BaseClient(), urls[0], retries=1)
+        assert error.value.code == "image_download_failed"
+    assert [url for url, _, _ in network.calls if not url.startswith("https://dns.google/")] == urls[:6]
+
+
+def test_image_redirect_loop_is_rejected(network):
+    from src.errors import ComicApiError
+    from src.services.image_proxy import download_image
+    original, destination = "https://cdn.example/a.jpg", "https://cdn.example/b.jpg"
+    network.responses.update({original: (302, {"Location": destination}), destination: (302, {"Location": original})})
+    with pytest.raises(ComicApiError, match="重定向存在循环") as error:
+        download_image(BaseClient(), original, retries=1)
+    assert error.value.code == "image_download_failed"
+    assert [url for url, _, _ in network.calls if not url.startswith("https://dns.google/")] == [original, destination]
+
+
+def test_image_redirect_revalidates_same_host_against_dns_rebinding(network, monkeypatch):
+    from src.errors import ComicApiError
+    from src.services.image_proxy import download_image
+    original = "https://cdn.example/a.jpg"
+    network.responses[original] = 301, {"Location": "/b.jpg"}
+    resolutions = []
+    def resolve(*args, **kwargs):
+        address = network.addresses[0] if not resolutions else "127.0.0.1"
+        resolutions.append(address)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 443))]
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    with pytest.raises(ComicApiError) as error:
+        download_image(BaseClient(), original, retries=1)
+    assert error.value.code == "invalid_request" and len(resolutions) == 2
+    assert [url for url, _, _ in network.calls] == [original]
+
+
+def test_image_redirect_respects_destination_no_proxy(network, monkeypatch):
+    from src.errors import ComicApiError
+    from src.services.image_proxy import download_image
+    original = "https://cdn.example/a.jpg"
+    network.responses[original] = 302, {"Location": "https://other.example/b.jpg"}
+    monkeypatch.setenv("no_proxy", "other.example")
+    with pytest.raises(ComicApiError) as error:
+        download_image(BaseClient(), original, retries=1)
+    assert error.value.code == "image_proxy_required"
+    assert [url for url, _, _ in network.calls if not url.startswith("https://dns.google/")] == [original]
+
+
+@pytest.mark.parametrize("headers", [{}, {"Location": ""}])
+def test_redirect_without_location_is_rejected(network, headers):
+    from src.errors import ComicApiError
+    from src.services.image_proxy import download_image
+    network.responses["https://cdn.example/a.jpg"] = 302, headers
+    with pytest.raises(ComicApiError, match="重定向缺少目标地址") as error:
         download_image(BaseClient(), "https://cdn.example/a.jpg", retries=1)
     assert error.value.code == "image_download_failed"
     image_calls = [call for call in network.calls if not call[0].startswith("https://dns.google/")]
     assert len(image_calls) == 1
     assert image_calls[0][1]["allow_redirects"] is False
     assert image_calls[0][2][CurlOpt.FOLLOWLOCATION] == 0
+
+
+@pytest.mark.parametrize("location", ["http://[", "https://[invalid]/image"])
+def test_malformed_redirect_location_has_explicit_error(network, location):
+    from src.errors import ComicApiError
+    from src.services.image_proxy import download_image
+    original = "https://cdn.example/a.jpg"
+    network.responses[original] = 302, {"Location": location}
+    with pytest.raises(ComicApiError, match="重定向地址无效") as error:
+        download_image(BaseClient(), original, retries=1)
+    assert error.value.code == "image_download_failed"
+    assert [url for url, _, _ in network.calls if not url.startswith("https://dns.google/")] == [original]
+
+
+def test_redirect_target_retries_rotate_its_own_pinned_addresses(network, monkeypatch):
+    from src.errors import ComicApiError
+    from src.services import image_proxy
+    original, destination = "https://cdn.example/a.jpg", "https://other.example/a.jpg"
+    network.responses[original] = 301, {"Location": destination}
+    network.addresses_by_host["other.example"] = [network.addresses[0], "1.1.1.1"]
+    client = BaseClient()
+    send = client.request
+    attempts, sleeps = [], []
+    def request(method, url, **kwargs):
+        if url == destination:
+            attempts.append(kwargs["_image_target"].attempt)
+            if len(attempts) == 1:
+                raise ComicApiError("无法连接图源", 502, "upstream_network")
+        return send(method, url, **kwargs)
+    monkeypatch.setattr(client, "request", request)
+    monkeypatch.setattr(image_proxy.time, "sleep", sleeps.append)
+    assert image_proxy.download_image(client, original) == network.picture
+    assert attempts == [0, 1] and sleeps == [0.5]
+    image_calls = [call for call in network.calls if not call[0].startswith("https://dns.google/")]
+    assert [call[0] for call in image_calls] == [original, destination]
+    assert image_calls[-1][2][CurlOpt.CONNECT_TO] == ["other.example:443:1.1.1.1:443"]
 
 
 def test_local_sync_stream_uses_same_pinned_policy(network):
