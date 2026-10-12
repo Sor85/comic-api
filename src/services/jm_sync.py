@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -13,6 +14,8 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.errors import ComicApiError, DownloadCancelled
+from src.services.jm_local import LocalLibrary, local_file_valid
+from src.services.jm_naming import JM_DIRECTORY_RULE
 from src.services.local_images import (
     DIRECTORY_RULES, FORMATS, DownloadPaths, file_digest, numeric_id, receive_image, write_atomic,
 )
@@ -29,7 +32,7 @@ class SyncSettings(BaseModel):
     speed_limit_kbps: int = Field(default=0, ge=0, le=1048576)
     image_format: Literal["original", "jpeg", "png", "webp"] = "original"
     quality: int = Field(default=90, ge=1, le=100)
-    directory_rule: Literal["id", "title", "author"] = "title"
+    directory_rule: Literal["id", "title", "title_plain", "author", "Bd_Aauthoroname_Pindextitle"] = "title"
     retries: int = Field(default=2, ge=0, le=5)
     add_to_library: bool = True
 
@@ -163,13 +166,15 @@ class JmSync:
         self.store.save_settings("jm_sync_clock", {"next_run_at": self.next_run_at})
 
     @staticmethod
-    def _new_state(automatic):
-        return {"id": uuid.uuid4().hex, "automatic": automatic, "status": "running", "stage": "scanning",
+    def _new_state(automatic, check_local=False):
+        return {"id": uuid.uuid4().hex, "automatic": automatic, "mode": "check_local" if check_local else "sync",
+                "status": "running", "stage": "scanning",
                 "started_at": time.time(), "finished_at": None, "albums_total": 0, "albums_done": 0,
                 "downloaded": 0, "skipped": 0, "failed": 0, "received_bytes": 0,
+                "local_albums": 0, "local_images": 0, "local_missing": 0, "local_results": [],
                 "title": "", "chapter": "", "page": 0, "pages": 0, "errors": [], "error": ""}
 
-    def launch(self, album_ids=None, automatic=False):
+    def launch(self, album_ids=None, automatic=False, check_local=False):
         if self.active:
             raise ComicApiError("已有收藏同步任务正在运行", 409, "sync_active", "jm")
         self.require_account()
@@ -179,7 +184,7 @@ class JmSync:
         config = self.settings()
         self.paths.resolve(config["download_dir"])
         self.signal = threading.Event()
-        self.current = self._new_state(automatic)
+        self.current = self._new_state(automatic, check_local)
         self.current["settings"] = config
         self._persist(self.current)
         self.task = asyncio.create_task(self._run(config, album_ids, self.identity()))
@@ -239,22 +244,45 @@ class JmSync:
                     raise ComicApiError("收藏分页提前返回空页", 502, "invalid_response", "jm")
             else:
                 raise ComicApiError("收藏超过 1000 页扫描上限，需缩小收藏夹范围", 422, "sync_too_large", "jm")
-        return list(result)
+        return result
 
     async def _run(self, config, album_ids, identity):
         state = self.current
+        checking = state["mode"] == "check_local"
         try:
-            await asyncio.to_thread(self.paths.prepare, config["download_dir"])
-            ids = list(dict.fromkeys(album_ids)) if album_ids else await self._collect(config, identity)
-            state.update(albums_total=len(ids), stage="downloading")
+            if not checking:
+                await asyncio.to_thread(self.paths.prepare, config["download_dir"])
+            favorites = await self._collect(config, identity) if checking or not album_ids else {}
+            ids = list(favorites) if checking or not album_ids else list(dict.fromkeys(album_ids))
+            state["albums_total"] = len(ids)
+            local = None
+            if checking:
+                if config["directory_rule"] == JM_DIRECTORY_RULE:
+                    # Canonical names can collapse different translated titles. Resolve every
+                    # author's actual metadata before allowing any album to be registered.
+                    state["stage"] = "matching"
+                    favorites = {}
+                    for album_id in ids:
+                        self._check(identity)
+                        state["title"] = album_id
+                        self._persist(state)
+                        favorites[album_id] = await self.service.get_comic_detail("jm", album_id)
+                local = await asyncio.to_thread(LocalLibrary, self.store, self.paths, config, favorites.values(), self.signal)
+            state["stage"] = "checking" if checking else "downloading"
             for album_id in ids:
                 self._check(identity)
                 try:
-                    await self._album(numeric_id(album_id), config, identity)
+                    if checking:
+                        await self._check_local_album(numeric_id(album_id), config, identity, local)
+                    else:
+                        await self._album(numeric_id(album_id), config, identity)
                 except DownloadCancelled:
                     raise
                 except Exception as exc:
-                    self._error(exc, state["title"] or album_id)
+                    label = state["title"] or album_id
+                    if checking and state["chapter"]:
+                        label += f" / {state['chapter']}"
+                    self._error(exc, label)
                 state["albums_done"] += 1
                 self._persist(state)
             self._check(identity)
@@ -267,8 +295,73 @@ class JmSync:
         finally:
             state.update(finished_at=time.time(), stage="finished")
             self._persist(state)
-            self._schedule_next()
+            if not checking:
+                self._schedule_next()
             self.wake.set()
+
+    def _save_book(self, album_id, book):
+        with self.store.connect() as db:
+            row = db.execute("SELECT category FROM library WHERE source='jm' AND comic_id=?", (album_id,)).fetchone()
+        self.store.save_book("jm", album_id, book, row[0] if row else "JM 收藏")
+
+    async def _chapter_data(self, config, album_id, chapter):
+        chapter_id = numeric_id(chapter["id"])
+        if config["directory_rule"] != JM_DIRECTORY_RULE:
+            return await self.service.get_chapter_images("jm", album_id, chapter_id), chapter
+        if not hasattr(self.service.source("jm"), "chapter_detail"):
+            raise ComicApiError("当前禁漫插件不提供 Pindextitle 所需的原始章节信息", 400, "unsupported", "jm")
+        data = await self.service.call("jm", "chapter_detail", album_id, chapter_id)
+        if (not isinstance(data, dict) or not {"id", "name", "sort", "series_id", "images"} <= data.keys()
+                or int(numeric_id(data["id"])) != int(chapter_id) or not isinstance(data["images"], list)):
+            raise ComicApiError("禁漫章节信息不完整或编号不一致", 502, "invalid_response", "jm")
+        return data["images"], dict(chapter, name=data["name"], sort=data["sort"], series_id=data["series_id"])
+
+    async def _check_local_album(self, album_id, config, identity, local):
+        state = self.current
+        state.update(title=album_id, chapter="", page=0, pages=0)
+        book = local.books[album_id] if config["directory_rule"] == JM_DIRECTORY_RULE else await self.service.get_comic_detail("jm", album_id)
+        state["title"] = book["title"]
+        directory = await asyncio.to_thread(local.album, book)
+        if not directory:
+            state["local_missing"] += 1
+            return
+        chapters = book.get("chapters", [])
+        if not chapters:
+            raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", "jm")
+        records, used = [], set()
+        for index, chapter in enumerate(chapters, 1):
+            self._check(identity)
+            state.update(chapter=chapter.get("name", ""), page=0, pages=0)
+            chapter_id = numeric_id(chapter["id"])
+            urls, chapter = await self._chapter_data(config, album_id, chapter)
+            if not urls:
+                raise ComicApiError("章节未返回图片", 502, "invalid_response", "jm")
+            state["chapter"] = chapter.get("name", "")
+            target = await asyncio.to_thread(local.chapter, directory, chapter, index)
+            if target in used:
+                raise ComicApiError("多个章节匹配到同一目录，未认定为已下载", 409, "local_ambiguous", "jm")
+            used.add(target)
+            state["pages"] = len(urls)
+            self._persist(state)
+            records.extend(await asyncio.to_thread(local.validate_chapter, album_id, chapter_id, target, urls))
+            state["page"] = len(urls)
+        self._check(identity)
+        await asyncio.to_thread(local.remember, album_id, records)
+        state["local_albums"] += 1
+        state["local_images"] += len(records)
+        if len(state["local_results"]) < 100:
+            state["local_results"].append({"id": album_id, "title": book["title"], "path": str(directory), "images": len(records)})
+        if config["add_to_library"]:
+            self._save_book(album_id, book)
+
+    def _guard_plain_directory(self, album_id, directory):
+        prefix = str(directory) + os.sep
+        with self.store.connect() as db:
+            for table in ("jm_sync_files", "jm_sync_local_files"):
+                conflict = db.execute(f"SELECT 1 FROM {table} WHERE album_id<>? AND substr(path,1,?)=? COLLATE NOCASE LIMIT 1",
+                                      (album_id, len(prefix), prefix)).fetchone()
+                if conflict:
+                    raise ComicApiError("无 ID 漫画目录已关联其他漫画，未混合写入；需改用带 ID 规则", 409, "file_conflict", "jm")
 
     async def _album(self, album_id, config, identity):
         state = self.current
@@ -276,21 +369,21 @@ class JmSync:
         book = await self.service.get_comic_detail("jm", album_id)
         state["title"] = book["title"]
         if config["add_to_library"]:
-            with self.store.connect() as db:
-                row = db.execute("SELECT category FROM library WHERE source='jm' AND comic_id=?", (album_id,)).fetchone()
-            self.store.save_book("jm", album_id, book, row[0] if row else "JM 收藏")
+            self._save_book(album_id, book)
         chapters = book.get("chapters", [])
         if not chapters:
             raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", "jm")
+        if config["directory_rule"] in ("title_plain", JM_DIRECTORY_RULE):
+            self._guard_plain_directory(album_id, self.paths.album(config, book))
         for index, chapter in enumerate(chapters, 1):
             self._check(identity)
             state.update(chapter=chapter.get("name", ""), page=0, pages=0)
             try:
                 chapter_id = numeric_id(chapter["id"])
-                urls = await self.service.get_chapter_images("jm", album_id, chapter_id)
+                urls, chapter = await self._chapter_data(config, album_id, chapter)
                 if not urls:
                     raise ComicApiError("章节未返回图片", 502, "invalid_response", "jm")
-                state["pages"] = len(urls)
+                state.update(chapter=chapter.get("name", ""), pages=len(urls))
                 directory = self.paths.chapter(config, book, chapter, index)
                 for page, url in enumerate(urls, 1):
                     self._check(identity)
@@ -317,8 +410,14 @@ class JmSync:
                              (scope, album_id, chapter_id, page)).fetchone()
         if row and row["image_key"] == key:
             saved = self.paths.resolve(row["path"])
-            if saved.parent == directory and saved.is_file() and saved.stat().st_size == row["size"] and file_digest(saved) == row["digest"]:
+            if saved.parent == directory and saved.is_file() and saved.stat().st_size == row["size"] and file_digest(saved, self.signal) == row["digest"]:
                 return True, 0
+        root = self.paths.resolve(config["download_dir"])
+        with self.store.connect() as db:
+            local = db.execute("SELECT * FROM jm_sync_local_files WHERE root=? AND album_id=? AND chapter_id=? AND page=?",
+                               (str(root), album_id, chapter_id, page)).fetchone()
+        if local_file_valid(self.paths, root, local, url, self.signal):
+            return True, 0
         data, extension, received = receive_image(self.service.source("jm"), url, chapter_id, config, self.signal)
         if self.signal.is_set():
             raise DownloadCancelled()

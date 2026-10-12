@@ -71,16 +71,33 @@ async function startJmSync(albumIds){
   await api('/api/jm/sync/run',write('POST',albumIds?{album_ids:albumIds}:{}));
   toast('收藏同步已启动');await loadJmStatus();
 }
+async function checkJmLocal(){
+  await loadJmSettings();
+  const naming=jm.settings.directory_rule==='Bd_Aauthoroname_Pindextitle'?'按“【作者】原标题 / 第N話 章节标题”规则匹配':'按漫画 ID 或完整标题匹配';
+  if(!await ask({title:'检查本地漫画',message:`范围：${jm.settings.folder_ids.length?'设置中指定的收藏夹':'全部收藏'}。\n目录：${jm.settings.download_dir}\n${naming}，核对章节、页码并解码验证图片，建立本地 SHA-256 校验记录。检查需要读取远端目录信息，但不下载、修改或删除图片；不进行模糊标题匹配。`,ok:'开始检查'}))return;
+  await api('/api/jm/sync/check-local',{method:'POST'});
+  toast('本地漫画检查已启动');await loadJmStatus();
+}
 function jmRunCard(item){
+  const checking=item.mode==='check_local';
   const box=node('article',undefined,'jm-run'),head=node('div',undefined,'jm-run-heading');
   const tone=item.status==='completed'?'ok':['failed','partial'].includes(item.status)?'danger':item.status==='running'?'info':'muted';
-  head.append(node('strong',item.automatic?'定时同步':'手动同步'),node('span',JM_SYNC_LABELS[item.status]||item.status,`status-pill ${tone}`));
+  head.append(node('strong',checking?'本地漫画检查':item.automatic?'定时同步':'手动同步'),node('span',checking&&item.status==='running'?'检查中':JM_SYNC_LABELS[item.status]||item.status,`status-pill ${tone}`));
   box.append(head,node('p',`${jmDate(item.started_at)}${item.finished_at?' → '+jmDate(item.finished_at):''}`,'muted'));
-  box.append(node('p',`漫画已处理 ${item.albums_done} / ${item.albums_total} · 新下载 ${item.downloaded} 张 · 校验跳过 ${item.skipped} 张 · 失败 ${item.failed} 项`));
-  const elapsed=Math.max(1,(item.finished_at||Date.now()/1000)-item.started_at);
-  box.append(node('p',`累计接收 ${jmBytes(item.received_bytes)} · 本次平均 ${(item.received_bytes/1024/elapsed).toFixed(1)} KiB/s`,'muted'));
+  if(checking){
+    box.append(node('p',`漫画已检查 ${item.albums_done} / ${item.albums_total} · 已下载 ${item.local_albums} 本（${item.local_images} 张） · 未匹配 ${item.local_missing} 本 · 异常 ${item.failed} 本`));
+    if(item.local_results?.length){
+      const details=node('details');details.append(node('summary',`已下载漫画（保留前 ${item.local_results.length} 本）`));
+      for(const book of item.local_results)details.append(node('p',`${book.title} [${book.id}] · ${book.images} 张 · ${book.path}`,'jm-path'));
+      box.append(details);
+    }
+  }else{
+    box.append(node('p',`漫画已处理 ${item.albums_done} / ${item.albums_total} · 新下载 ${item.downloaded} 张 · 校验跳过 ${item.skipped} 张 · 失败 ${item.failed} 项`));
+    const elapsed=Math.max(1,(item.finished_at||Date.now()/1000)-item.started_at);
+    box.append(node('p',`累计接收 ${jmBytes(item.received_bytes)} · 本次平均 ${(item.received_bytes/1024/elapsed).toFixed(1)} KiB/s`,'muted'));
+  }
   if(item.status==='running'||item.status==='cancelling'){
-    box.append(node('p',item.stage==='scanning'?'正在扫描收藏分页…':`${item.title||''} / ${item.chapter||''}${item.pages?` · 本章第 ${item.page} / ${item.pages} 张`:''}`));
+    box.append(node('p',item.stage==='scanning'?'正在扫描收藏分页…':item.stage==='matching'?`正在读取漫画详情并核对重名目录：${item.title||''}`:`${item.title||''} / ${item.chapter||''}${item.pages?` · 本章第 ${item.page} / ${item.pages} 张`:''}`));
   }
   if(item.settings?.download_dir)box.append(node('p',`保存目录：${item.settings.download_dir}`,'jm-path'));
   if(item.error)box.append(node('p',item.error,'error'));
@@ -102,7 +119,7 @@ async function loadJmStatus(){
   const history=data.history.filter(item=>item.id!==latest?.id),historySignature=JSON.stringify(history);
   if(historySignature!==jm.historySignature){jm.historySignature=historySignature;$('jm-sync-history-list').replaceChildren(...history.map(jmRunCard));}
   $('jm-sync-history').hidden=!history.length;
-  $('jm-sync-run').disabled=data.active;$('jm-sync-cancel').hidden=!data.active;$('jm-sync-cancel').disabled=data.current?.status==='cancelling';
+  $('jm-sync-run').disabled=data.active;$('jm-sync-check-local').disabled=data.active;$('jm-sync-cancel').hidden=!data.active;$('jm-sync-cancel').disabled=data.current?.status==='cancelling';
   $('jm-sync-save').disabled=data.active;
   syncJmSelection();renderJmSchedule();
 }
@@ -125,7 +142,14 @@ async function openJmSettings(){
 }
 function updateJmPreview(){
   const rule=jmField('directory_rule').value,format=jmField('image_format').value,root=jmField('download_dir').value.replaceAll('\\','/').replace(/\/$/,'');
-  const path=rule==='id'?'123456/123457':`${rule==='author'?'作者/':''}漫画标题 [123456]/001 - 章节标题 [123457]`;
+  const paths={
+    Bd_Aauthoroname_Pindextitle:'【作者】原标题/第1話 章节标题',
+    id:'123456/123457',
+    title:'漫画标题 [123456]/001 - 章节标题 [123457]',
+    title_plain:'漫画标题/第1話 章节标题',
+    author:'作者/漫画标题 [123456]/001 - 章节标题 [123457]',
+  };
+  const path=paths[rule]||paths.title;
   const extension=format==='original'?'原格式':format==='jpeg'?'jpg':format;
   $('jm-directory-preview').textContent=`目录示例：${root}/${path}/00001.${extension}`;
   jmField('quality').disabled=!['jpeg','webp'].includes(format);
@@ -155,6 +179,7 @@ $('jm-favorites-next').onclick=()=>{if(jm.hasNext){jm.page++;run(loadJmFavorites
 $('jm-select-page').onclick=()=>{const ids=filteredJmBooks().map(item=>String(item.id));const all=ids.every(id=>jm.selected.has(id));for(const id of ids){if(all)jm.selected.delete(id);else jm.selected.add(id);}renderJmBooks();};
 $('jm-sync-selected').onclick=()=>run(()=>startJmSync([...jm.selected]),$('jm-sync-selected'));
 $('jm-sync-run').onclick=()=>run(()=>startJmSync(),$('jm-sync-run'));
+$('jm-sync-check-local').onclick=()=>run(checkJmLocal,$('jm-sync-check-local'));
 $('jm-sync-cancel').onclick=()=>run(async()=>{await api('/api/jm/sync/cancel',{method:'POST'});await loadJmStatus();},$('jm-sync-cancel'));
 $('jm-sync-settings-open').onclick=()=>run(openJmSettings,$('jm-sync-settings-open'));
 $('jm-sync-form').onsubmit=event=>{

@@ -12,23 +12,37 @@ from PIL import Image
 
 from src.errors import ComicApiError, DownloadCancelled
 from src.services.image_proxy import ensure_public_url
+from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_name, validate_name
 
 
 DIRECTORY_RULES = {
-    "id": "漫画 ID / 章节 ID / 图片",
-    "title": "漫画标题 [ID] / 章节序号 - 标题 [ID] / 图片",
-    "author": "作者 / 漫画标题 [ID] / 章节序号 - 标题 [ID] / 图片",
+    JM_DIRECTORY_RULE: "【作者】原标题 / 第N話 章节标题",
+    "id": "漫画 ID / 章节 ID",
+    "title": "漫画标题 [ID] / 章节序号 - 章节标题 [ID]",
+    "title_plain": "漫画标题 / 第N話 章节标题",
+    "author": "作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]",
 }
 FORMATS = {"original": "保留图片格式", "jpeg": "JPEG", "png": "PNG", "webp": "WebP"}
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
 
 
-def safe_name(value, fallback="未命名"):
+def safe_name(value, fallback="未命名", max_bytes=100):
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", str(value or ""))
-    name = name.encode("utf-8")[:100].decode("utf-8", errors="ignore").strip(" .") or fallback
+    if max_bytes is not None:
+        name = name.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+    name = name.strip(" .") or fallback
     if name.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
         name = "_" + name
     return name
+
+
+def plain_chapter_name(chapter, index):
+    title = str(chapter.get("name") or "未命名").strip()
+    # Do not repeat the episode prefix when it is already part of the upstream title.
+    prefix = re.match(r"^第\s*([0-9]+)\s*[話话]\s*(.*)$", title, re.DOTALL)
+    if prefix and int(prefix[1]) == index:
+        title = prefix[2].strip()
+    return safe_name(f"第{index}話 {title}", max_bytes=None)
 
 
 def numeric_id(value):
@@ -90,16 +104,39 @@ class DownloadPaths:
             raise ComicApiError("下载目录不可写，需检查路径、挂载和权限", 422, "directory_unavailable") from exc
         return path
 
-    def chapter(self, settings, book, chapter, index):
-        album_id, chapter_id = numeric_id(book["id"]), numeric_id(chapter["id"])
+    def album(self, settings, book):
+        album_id = numeric_id(book["id"])
         root = self.resolve(settings["download_dir"])
-        if settings["directory_rule"] == "id":
-            return self.resolve(root / album_id / chapter_id)
-        album = f"{safe_name(book['title'])} [{album_id}]"
-        episode = f"{index:03d} - {safe_name(chapter.get('name'))} [{chapter_id}]"
-        if settings["directory_rule"] == "author":
-            root /= safe_name(book.get("author"), "未知作者")
-        return self.resolve(root / album / episode)
+        rule = settings["directory_rule"]
+        if rule == "id":
+            album = album_id
+        elif rule == JM_DIRECTORY_RULE:
+            album = validate_name(album_name(book))
+        elif rule == "title_plain":
+            album = safe_name(book["title"], max_bytes=None)
+            if len(album.encode("utf-8")) > 255:
+                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", "jm")
+        else:
+            album = f"{safe_name(book['title'])} [{album_id}]"
+            if rule == "author":
+                root /= safe_name(book.get("author"), "未知作者")
+        return self.resolve(root / album)
+
+    def chapter(self, settings, book, chapter, index):
+        chapter_id = numeric_id(chapter["id"])
+        album = self.album(settings, book)
+        rule = settings["directory_rule"]
+        if rule == "id":
+            episode = chapter_id
+        elif rule == JM_DIRECTORY_RULE:
+            episode = validate_name(chapter_name(chapter))
+        elif rule == "title_plain":
+            episode = plain_chapter_name(chapter, index)
+            if len(episode.encode("utf-8")) > 255:
+                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", "jm")
+        else:
+            episode = f"{index:03d} - {safe_name(chapter.get('name'))} [{chapter_id}]"
+        return self.resolve(album / episode)
 
 
 def encode_image(data, image_format, quality):
@@ -176,10 +213,12 @@ def receive_image(plugin, url, chapter_id, settings, signal):
     raise last_error
 
 
-def file_digest(path):
+def file_digest(path, signal=None):
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            if signal is not None and signal.is_set():
+                raise DownloadCancelled()
             digest.update(chunk)
     return digest.hexdigest()
 

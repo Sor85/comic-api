@@ -57,6 +57,13 @@ class FavoritePlugin(DemoPlugin):
     def pages(self, comic_id, chapter_id):
         return [f"https://images.invalid/{chapter_id}/{index}.png" for index in range(1, self.page_count+1)]
 
+    def chapter_detail(self, comic_id, chapter_id):
+        for index, chapter in enumerate(self.detail(comic_id)["chapters"], 1):
+            if chapter["id"] == chapter_id:
+                return dict(chapter, sort=chapter.get("sort", index), series_id=comic_id,
+                            images=self.pages(comic_id, chapter_id))
+        raise ComicApiError("测试章节不存在", 404, "not_found", "jm")
+
     def request(self, method, url, **kwargs):
         self.requests.append((url, kwargs))
         time.sleep(self.delay)
@@ -502,6 +509,22 @@ def test_sync_api_and_static_ui(jm_client):
     assert client.delete("/api/sources/jm/account").status_code == 200
     assert client.get("/api/jm/favorites").status_code == 401
     assert client.post("/api/jm/sync/run", json={}).status_code == 401
+
+
+def test_directory_switch_warning_is_visible_before_changing_settings(jm_client):
+    html = jm_client.get("/").text
+    start = html.index('<div id="jm-sync-switch-note"')
+    notice = html[start:html.index("</div>", start)]
+    assert 'role="note"' in notice and 'aria-labelledby="jm-sync-switch-title"' in notice
+    assert "hidden" not in notice
+    assert "每次保存设置都会立即同步一次" in notice and "不会等待下一个周期" in notice
+    assert "包括仅修改目录规则或下载目录" in notice and "之后按设定间隔运行" in notice
+    assert "检查本地漫画”登记" in notice and "未登记的原文件不会被覆盖" in notice
+    assert "消耗流量和时间" in notice
+    assert "关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步" in notice
+    assert "运行中的任务完成或停止后才能修改设置" in notice
+    assert start < html.index('<select name="directory_rule">')
+    assert "更换或解除账号绑定后，定时同步自动关闭" in html
 
 
 def test_active_sync_blocks_login_and_logout(jm_client):

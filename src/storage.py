@@ -63,7 +63,15 @@ class Store:
                     size INTEGER NOT NULL DEFAULT 0, digest TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY(scope, album_id, chapter_id, page)
                 );
-                PRAGMA user_version=2;
+                CREATE TABLE IF NOT EXISTS jm_sync_local_files (
+                    root TEXT NOT NULL, album_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                    page INTEGER NOT NULL, image_key TEXT NOT NULL, path TEXT NOT NULL,
+                    size INTEGER NOT NULL, digest TEXT NOT NULL,
+                    PRIMARY KEY(root, album_id, chapter_id, page), UNIQUE(root, path)
+                );
+                CREATE INDEX IF NOT EXISTS jm_sync_files_path ON jm_sync_files(path);
+                CREATE INDEX IF NOT EXISTS jm_sync_local_files_path ON jm_sync_local_files(path);
+                PRAGMA user_version=3;
             """)
 
     @contextmanager

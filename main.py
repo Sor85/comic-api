@@ -193,6 +193,10 @@ def create_app(store=None, sources=None):
             raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
         return jm_sync.launch(values.album_ids)
 
+    @app.post("/api/jm/sync/check-local", status_code=202)
+    async def check_jm_local():
+        return jm_sync.launch(check_local=True)
+
     @app.post("/api/jm/sync/cancel")
     async def cancel_jm_sync():
         return jm_sync.cancel()

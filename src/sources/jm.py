@@ -36,6 +36,9 @@ class JmPlugin(SourcePlugin):
     def favorites(self, page=1, folder_id="0", order="mr"):
         return self.client.favorites(page, folder_id, order)
 
+    def chapter_detail(self, comic_id, chapter_id):
+        return self.client.get_chapter_detail(comic_id, chapter_id)
+
     def browse(self, action, page=1, sort="", mode="week", name=""):
         if action == "random":
             return self.client.get_recommend()

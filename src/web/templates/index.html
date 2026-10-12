@@ -109,8 +109,9 @@
       </div>
       <p class="muted">远端收藏只读浏览。本地同步保存解码后的图片，不修改远端收藏，不删除已有文件。</p>
       <section class="jm-sync-panel" aria-label="收藏同步状态">
-        <div class="section-head"><h2>本地同步</h2><div class="jm-toolbar"><button id="jm-sync-run" class="primary" type="button">同步收藏</button><button id="jm-sync-cancel" type="button" hidden>停止本次同步</button></div></div>
+        <div class="section-head"><h2>本地同步</h2><div class="jm-toolbar"><button id="jm-sync-check-local" type="button">检查本地漫画</button><button id="jm-sync-run" class="primary" type="button">同步收藏</button><button id="jm-sync-cancel" type="button" hidden>停止本次任务</button></div></div>
         <p id="jm-sync-schedule" class="muted"></p>
+        <p class="muted">本地检查按同步范围核对已有漫画的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。</p>
         <div id="jm-sync-status" role="status"></div>
         <details id="jm-sync-history"><summary>同步记录</summary><div id="jm-sync-history-list"></div></details>
       </section>
@@ -137,14 +138,21 @@
     <div class="dialog-head"><h2>JM 收藏同步设置</h2><button type="button" data-close="jm-sync-settings">关闭</button></div>
     <form id="jm-sync-form" class="settings-form">
       <label class="jm-check"><input type="checkbox" name="enabled">定时同步</label>
-      <p class="muted">保存并启用后立即同步一次，之后按间隔运行。更换或解除账号绑定后，定时同步自动关闭。</p>
+      <p class="muted">更换或解除账号绑定后，定时同步自动关闭。</p>
+      <div id="jm-sync-switch-note" class="status warn jm-sync-switch-note" role="note" aria-labelledby="jm-sync-switch-title">
+        <strong id="jm-sync-switch-title">目录规则切换说明</strong>
+        <p>定时同步开启时，每次保存设置都会立即同步一次，包括仅修改目录规则或下载目录；不会等待下一个周期，之后按设定间隔运行。</p>
+        <p>旧漫画尚未通过“检查本地漫画”登记时，可能先重复下载图片，再因目标文件已存在而报告冲突。未登记的原文件不会被覆盖，但会消耗流量和时间。</p>
+        <p><strong>安全切换顺序：</strong>关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步。</p>
+        <p>运行中的任务完成或停止后才能修改设置。</p>
+      </div>
       <div class="jm-settings-grid">
         <label>同步间隔（分钟）<input name="interval_minutes" type="number" min="5" max="10080" required></label>
         <label>下载限速（KiB/s，0 为不限速）<input name="speed_limit_kbps" type="number" min="0" max="1048576" required></label>
         <label>图片格式<select name="image_format"><option value="original">保留图片格式</option><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
         <label>JPEG / WebP 质量（1–100）<input name="quality" type="number" min="1" max="100" required></label>
         <label>单张图片额外重试次数<input name="retries" type="number" min="0" max="5" required></label>
-        <label>目录层级<select name="directory_rule"><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 标题 [ID]</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 标题 [ID]</option></select></label>
+        <label>目录层级<select name="directory_rule"><option value="Bd_Aauthoroname_Pindextitle">【作者】原标题 / 第N話 章节标题</option><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option></select></label>
       </div>
       <p class="muted">限速只作用于收藏同步图片，不限制在线阅读和现有 PDF 任务。图片先解码再转换；显式转换格式时，动图仅保存首帧。PNG 不使用质量参数。</p>
       <fieldset class="jm-folder-options"><legend>同步范围</legend><p class="muted">未勾选收藏夹时同步全部收藏。单本及所选同步不受此范围限制。</p><div id="jm-sync-folders"></div></fieldset>
@@ -152,6 +160,9 @@
       <button id="jm-directory-open" type="button">选择服务器目录</button>
       <p class="muted">目录位于运行服务的机器，不是当前浏览器所在设备。可选根目录由 JM_DOWNLOAD_ROOTS 控制，Docker 目录必须挂载持久化卷；可在所选根目录下填写新子目录。</p>
       <p id="jm-directory-preview" class="jm-path"></p>
+      <p class="muted">“【作者】原标题 / 第N話 章节标题”对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle 规则：漫画目录为“【第一作者】原标题”，章节目录为“第N話 完整章节标题”。不附加 ID，不合并多位作者，不去重标题原有的“第N話”。本地检查按相同规则核对目录。</p>
+      <p class="muted">已有“漫画名 / 章节名 / 图片”目录可通过“检查本地漫画”识别，无需补上 ID；下载目录应设为所有漫画文件夹的上一级。目录层级只控制新下载的文件，不会重命名已检查的漫画。</p>
+      <p class="muted">“漫画标题 / 第N話 章节标题”是无 ID 规则，输出为“漫画标题/第1話 章节标题/图片”，不附加 ID，也不使用“001 -”。合法标题不截断；单个目录名超过 255 字节或目录已关联其他漫画时报告冲突。</p>
       <label class="jm-check"><input name="add_to_library" type="checkbox">同步添加到本地书库（保留已有分类）</label>
       <p class="muted">已完成图片会校验并跳过，失败图片可在下次同步重试。变更目录或层级规则不会移动、清理旧文件；格式或质量变更可能替换本工具已记录的同路径图片。</p>
       <button id="jm-sync-save" class="primary" type="submit">保存设置</button>

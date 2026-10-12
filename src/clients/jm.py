@@ -483,16 +483,21 @@ class JmClient(BaseClient):
             "cover": cover_url,
             "description": description,
             "author": "/".join(data.get("author", [])) if isinstance(data.get("author"), list) else data.get("author", ""),
+            "authors": data.get("author", []) if isinstance(data.get("author"), list) else ([data["author"]] if data.get("author") else []),
             "chapters": chapters,
             "source": "jm"
         }
 
     def get_chapter_images(self, comic_id: str, chapter_id: str) -> List[str]:
         """获取章节的所有图片链接"""
+        return self.get_chapter_detail(comic_id, chapter_id)["images"]
+
+    def get_chapter_detail(self, comic_id: str, chapter_id: str) -> Dict[str, Any]:
+        """一次请求同时保留 Pindextitle 所需的原始章节名称和序号。"""
         res = self.jm_request("/chapter", method="GET", params={"id": chapter_id, "skip": ""})
         data = res.get("data", res) if isinstance(res, dict) else res
         if not isinstance(data, dict):
-            return []
+            return {"images": []}
 
         images = data.get("images", [])
         image_urls = []
@@ -512,7 +517,23 @@ class JmClient(BaseClient):
                 image_urls.append(img_name)
             else:
                 image_urls.append(f"{self.image_base}/media/photos/{chapter_id}/{img_name}")
-        return image_urls
+        series = data.get("series")
+        sort = 1 if isinstance(series, list) else None
+        photo_id = str(data.get("id", ""))
+        for episode in series if isinstance(series, list) else []:
+            if not isinstance(episode, dict):
+                sort = None
+                break
+            try:
+                matches = int(episode.get("id")) == int(photo_id)
+            except (TypeError, ValueError):
+                sort = None
+                break
+            if matches:
+                sort = episode.get("sort")
+                break
+        return {"id": photo_id, "name": data.get("name"), "sort": sort,
+                "series_id": data.get("series_id"), "images": image_urls}
 
     def _parse_jm_comics(self, content_list: list) -> List[Dict[str, Any]]:
         """辅助解析禁漫返回的漫画列表"""
