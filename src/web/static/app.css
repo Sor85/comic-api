@@ -390,6 +390,9 @@ dialog[open]{animation:pop .18s ease-out}
 .jm-sync-panel .jm-run{padding:12px 0;border-top:1px solid var(--line)}
 .jm-sync-panel .jm-run:first-child{border-top:0}
 .jm-run-heading{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.jm-detail-failure{font-size:13px;line-height:1.6;margin-top:12px;padding:12px 14px;border:1px solid var(--danger);border-radius:10px;overflow-wrap:anywhere}
+.jm-detail-failure>strong{color:var(--danger)}
+.jm-detail-failure p{margin:8px 0 0}
 .jm-sync-dialog .settings-form{gap:12px}
 .jm-sync-dialog .settings-form>p{margin:0;font-size:13px}
 .jm-sync-switch-note{display:block;margin:0;font-size:13px;line-height:1.6}

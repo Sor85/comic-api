@@ -261,12 +261,27 @@ class JmSync:
                     # Canonical names can collapse different translated titles. Resolve every
                     # author's actual metadata before allowing any album to be registered.
                     state["stage"] = "matching"
-                    favorites = {}
+                    details = {}
                     for album_id in ids:
                         self._check(identity)
-                        state["title"] = album_id
+                        title = favorites[album_id].get("title")
+                        title = title.strip() if isinstance(title, str) else ""
+                        state["title"] = title or album_id
                         self._persist(state)
-                        favorites[album_id] = await self.service.get_comic_detail("jm", album_id)
+                        try:
+                            details[album_id] = await self.service.get_comic_detail("jm", album_id)
+                        except DownloadCancelled:
+                            raise
+                        except Exception as exc:
+                            self._check(identity)
+                            message = str(exc) if isinstance(exc, ComicApiError) else "图源详情读取失败"
+                            state["failed"] += 1
+                            state["errors"].append({"stage": "matching", "album_id": album_id, "title": title,
+                                                    "message": message, "code": exc.code if isinstance(exc, ComicApiError) else "upstream_error"})
+                            raise ComicApiError(f"漫画详情预读取失败（ID：{album_id}）：{message}",
+                                                exc.status_code if isinstance(exc, ComicApiError) else 502,
+                                                "local_check_detail_failed", "jm") from exc
+                    favorites = details
                 local = await asyncio.to_thread(LocalLibrary, self.store, self.paths, config, favorites.values(), self.signal)
             state["stage"] = "checking" if checking else "downloading"
             for album_id in ids:

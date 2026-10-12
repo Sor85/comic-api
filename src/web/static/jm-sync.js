@@ -80,6 +80,8 @@ async function checkJmLocal(){
 }
 function jmRunCard(item){
   const checking=item.mode==='check_local';
+  const detailFailure=checking&&item.status==='failed'?item.errors?.find(error=>error.stage==='matching'):null;
+  const otherErrors=(item.errors||[]).filter(error=>error!==detailFailure);
   const box=node('article',undefined,'jm-run'),head=node('div',undefined,'jm-run-heading');
   const tone=item.status==='completed'?'ok':['failed','partial'].includes(item.status)?'danger':item.status==='running'?'info':'muted';
   head.append(node('strong',checking?'本地漫画检查':item.automatic?'定时同步':'手动同步'),node('span',checking&&item.status==='running'?'检查中':JM_SYNC_LABELS[item.status]||item.status,`status-pill ${tone}`));
@@ -100,10 +102,20 @@ function jmRunCard(item){
     box.append(node('p',item.stage==='scanning'?'正在扫描收藏分页…':item.stage==='matching'?`正在读取漫画详情并核对重名目录：${item.title||''}`:`${item.title||''} / ${item.chapter||''}${item.pages?` · 本章第 ${item.page} / ${item.pages} 张`:''}`));
   }
   if(item.settings?.download_dir)box.append(node('p',`保存目录：${item.settings.download_dir}`,'jm-path'));
-  if(item.error)box.append(node('p',item.error,'error'));
-  if(item.errors?.length){
-    const details=node('details');details.append(node('summary',`失败明细（保留前 ${item.errors.length} 项）`));
-    for(const error of item.errors)details.append(node('p',`${error.title}：${error.message}`,'error'));
+  if(detailFailure){
+    const notice=node('div',undefined,'jm-detail-failure');notice.setAttribute('role','note');
+    notice.setAttribute('aria-label','漫画详情预读取失败说明');
+    notice.append(node('strong','详情预读取失败，本轮检查已中止'));
+    notice.append(node('p',`失败漫画：${detailFailure.title||'标题不可用'} · ID：${detailFailure.album_id}`));
+    notice.append(node('p',`原因：${detailFailure.message}`,'error'));
+    notice.append(node('p','本轮尚未开始本地图片校验，也未新增下载登记。此错误不代表本地图片损坏，已有文件和此前下载登记保持不变，无需删除本地文件。'));
+    notice.append(node('p','对应收藏恢复访问后可重新检查，或在“同步设置 → 同步范围”中选择不包含该漫画的收藏夹后重试。'));
+    notice.append(node('p','调整同步范围前，定时同步需关闭并保存，避免保存范围时立即触发下载。','muted'));
+    box.append(notice);
+  }else if(item.error)box.append(node('p',item.error,'error'));
+  if(otherErrors.length){
+    const details=node('details');details.append(node('summary',`失败明细（保留前 ${otherErrors.length} 项）`));
+    for(const error of otherErrors)details.append(node('p',`${error.title}：${error.message}`,'error'));
     box.append(details);
   }
   return box;
