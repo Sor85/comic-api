@@ -7,6 +7,8 @@
   <title>Comic · 聚合漫画</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f26d3f'/%3E%3Cpath d='M9 7h10a4 4 0 0 1 4 4v14h-2.5a4.5 4.5 0 0 0-4.5-4.5H9z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/app.css?v=27">
+  <script src="/static/modal-stack.js?v=27" defer></script>
+  <script src="/static/scroll-area.js?v=27" defer></script>
   <script src="/static/comic-tags.js?v=27" defer></script>
   <script src="/static/comic-authors.js?v=27" defer></script>
   <script src="/static/chapter-previews.js?v=27" defer></script>
@@ -109,82 +111,109 @@
       </div>
       <div id="tasks"></div>
     </section>
-    <section id="jm-favorites" class="jm-sync-view" hidden>
-      <div class="section-head">
-        <div class="section-title"><h1>JM 收藏</h1><span id="jm-favorites-count" class="count"></span></div>
-        <div class="jm-toolbar"><button id="jm-sync-settings-open" type="button">同步设置</button><button id="jm-favorites-refresh" type="button">刷新</button></div>
+    <section id="jm-favorites" class="jm-sync-view fav-view" hidden>
+      <div class="page-head">
+        <div class="page-title"><h1>JM 收藏</h1><span id="jm-favorites-count" class="count"></span></div>
+        <div class="page-actions">
+          <button id="jm-sync-settings-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>同步设置</span></button>
+          <button id="jm-favorites-refresh" class="icon-btn" type="button" title="刷新收藏" aria-label="刷新收藏"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+        </div>
       </div>
-      <p class="muted">漫画详情中的「加入 JM 收藏」写入已绑定账号，不指定收藏夹。收藏浏览、本地同步和本地书库操作不修改远端收藏；本地同步保存解码后的图片，不删除已有文件。</p>
-      <section class="jm-sync-panel" aria-label="收藏同步状态">
-        <div class="section-head"><h2>本地同步</h2><div class="jm-toolbar"><button id="jm-sync-check-local" type="button">检查本地漫画</button><button id="jm-sync-run" class="primary" type="button">同步收藏</button><button id="jm-sync-cancel" type="button" hidden>停止本次任务</button></div></div>
-        <p id="jm-sync-schedule" class="muted"></p>
-        <p class="muted">本地检查按同步范围核对已有漫画的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。</p>
-        <div id="jm-sync-status" role="status"></div>
-        <details id="jm-sync-history"><summary>同步记录</summary><div id="jm-sync-history-list"></div></details>
+      <p class="page-lead">漫画详情中的「加入 JM 收藏」写入已绑定账号，不指定收藏夹。收藏浏览、本地同步和本地书库操作不修改远端收藏；本地同步保存解码后的图片，不删除已有文件。</p>
+      <section class="jm-sync-panel" aria-labelledby="jm-sync-panel-title">
+        <div class="panel-head">
+          <span class="panel-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><line x1="7" y1="7.5" x2="7.01" y2="7.5"/><line x1="7" y1="16.5" x2="7.01" y2="16.5"/></svg></span>
+          <div class="panel-title"><h2 id="jm-sync-panel-title">本地同步</h2><p id="jm-sync-schedule"></p></div>
+          <div class="panel-actions">
+            <button id="jm-sync-check-local" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="m8 12 3 3 5-6"/></svg><span>检查本地漫画</span></button>
+            <button id="jm-sync-run" class="primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>同步收藏</span></button>
+            <button id="jm-sync-cancel" class="danger-soft" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>停止本次任务</span></button>
+          </div>
+        </div>
+        <div id="jm-sync-status" class="jm-sync-status" role="status"></div>
+        <details id="jm-sync-history" class="jm-history"><summary>同步记录</summary><div id="jm-sync-history-list"></div></details>
+        <p class="panel-note"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span>本地检查按同步范围核对已有漫画的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。</span></p>
       </section>
-      <form id="jm-favorites-filter" class="jm-toolbar">
+      <form id="jm-favorites-filter" class="fav-toolbar">
         <select id="jm-favorites-folder" aria-label="收藏夹"><option value="0">全部收藏</option></select>
         <select id="jm-favorites-order" aria-label="收藏排序"><option value="mr">收藏时间</option><option value="mp">更新时间</option></select>
-        <input id="jm-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选">
-        <button type="submit">筛选</button>
-        <button id="jm-select-page" type="button">选择本页</button>
-        <button id="jm-sync-selected" type="button" hidden>同步所选</button>
+        <div class="input-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="jm-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选"></div>
+        <div class="toolbar-end">
+          <button id="jm-select-page" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/></svg><span>选择本页</span></button>
+          <button id="jm-sync-selected" class="primary" type="button" hidden>同步所选</button>
+        </div>
       </form>
       <p id="jm-favorites-message" class="status" role="status"></p>
       <div id="jm-favorites-books" class="grid"></div>
-      <div id="jm-favorites-pager" class="pager" hidden><button id="jm-favorites-prev" type="button">上一页</button><span id="jm-favorites-page"></span><button id="jm-favorites-next" type="button">下一页</button></div>
+      <div id="jm-favorites-pager" class="pager" hidden><button id="jm-favorites-prev" class="icon-btn" type="button" title="上一页" aria-label="上一页"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button><span id="jm-favorites-page"></span><button id="jm-favorites-next" class="icon-btn" type="button" title="下一页" aria-label="下一页"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button></div>
     </section>
-    <section id="bika-favorites" class="bika-favorites-view" hidden>
-      <div class="section-head">
-        <div class="section-title"><h1>哔咔收藏</h1><span id="bika-favorites-count" class="count"></span></div>
-        <button id="bika-favorites-refresh" type="button">刷新</button>
+    <section id="bika-favorites" class="bika-favorites-view fav-view" hidden>
+      <div class="page-head">
+        <div class="page-title"><h1>哔咔收藏</h1><span id="bika-favorites-count" class="count"></span></div>
+        <div class="page-actions"><button id="bika-favorites-refresh" class="icon-btn" type="button" title="刷新收藏" aria-label="刷新收藏"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button></div>
       </div>
-      <p class="muted">已绑定账号的全部云端收藏，与「我的书库」独立。漫画详情中的「加入哔咔收藏」写入账号收藏，不提供取消收藏；此页面不提供收藏分组或图片同步。</p>
-      <form id="bika-favorites-filter" class="bika-favorites-toolbar">
+      <p class="page-lead">已绑定账号的全部云端收藏，与「我的书库」独立。漫画详情中的「加入哔咔收藏」写入账号收藏，不提供取消收藏；此页面不提供收藏分组或图片同步。</p>
+      <form id="bika-favorites-filter" class="fav-toolbar bika-favorites-toolbar">
         <select id="bika-favorites-sort" aria-label="收藏排序"><option value="dd">最新上架</option><option value="da">最旧上架</option><option value="ld">最多喜欢</option><option value="vd">最多观看</option></select>
-        <input id="bika-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选">
-        <button type="submit">筛选</button>
+        <div class="input-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="bika-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选"></div>
       </form>
       <p id="bika-favorites-message" class="status" role="status"></p>
       <div id="bika-favorites-books" class="grid"></div>
-      <div id="bika-favorites-pager" class="pager" hidden><button id="bika-favorites-prev" type="button">上一页</button><span id="bika-favorites-page"></span><button id="bika-favorites-next" type="button">下一页</button></div>
+      <div id="bika-favorites-pager" class="pager" hidden><button id="bika-favorites-prev" class="icon-btn" type="button" title="上一页" aria-label="上一页"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button><span id="bika-favorites-page"></span><button id="bika-favorites-next" class="icon-btn" type="button" title="下一页" aria-label="下一页"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button></div>
     </section>
   </main>
-  <dialog id="settings-dialog" class="site-settings-dialog" aria-labelledby="settings-title">
-    <div class="dialog-head"><h2 id="settings-title">设置</h2><button class="icon-btn" data-close="settings-dialog" type="button" title="关闭设置" aria-label="关闭设置" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="site-settings-body">
-      <p class="muted site-settings-intro">站点访问与图源配置保存在服务器，对所有浏览器生效。</p>
-      <div class="site-settings-grid">
-        <section class="site-settings-card" aria-labelledby="site-auth-title">
-          <div class="site-settings-card-head">
-            <div><h2 id="site-auth-title">站点鉴权</h2><p class="muted">独立于图源账号的访问凭据</p></div>
-            <button id="site-auth-toggle" class="source-toggle small" type="button" role="switch" aria-checked="false" aria-label="站点鉴权" disabled>状态未读取</button>
+  <dialog id="settings-dialog" class="modal site-settings-dialog" aria-labelledby="settings-title">
+    <div class="modal-head">
+      <div class="modal-title"><h2 id="settings-title">设置</h2><p>站点访问与图源配置保存在服务器，对所有浏览器生效。</p></div>
+      <button class="icon-btn ghost" data-close="settings-dialog" type="button" title="关闭设置" aria-label="关闭设置" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="settings-tabs" role="tablist" aria-label="设置分类">
+      <button id="settings-tab-auth" data-settings-pane="auth" role="tab" aria-selected="true" aria-controls="settings-pane-auth" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span>站点鉴权</span></button>
+      <button id="settings-tab-sources" data-settings-pane="sources" role="tab" aria-selected="false" aria-controls="settings-pane-sources" tabindex="-1" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg><span>图源管理</span></button>
+    </div>
+    <div class="site-settings-body modal-body" data-scroll-area>
+      <section id="settings-pane-auth" class="settings-pane" role="tabpanel" aria-labelledby="site-auth-title">
+        <div class="pane-intro"><h3 id="site-auth-title">站点鉴权</h3><p>独立于图源账号的访问凭据</p></div>
+        <div class="group">
+          <div class="group-row">
+            <div class="row-text"><strong>启用鉴权</strong><span>默认关闭。开启后，页面、API、图片和下载均需要用户名与密码，健康检查保持公开。</span></div>
+            <button id="site-auth-toggle" class="source-toggle" type="button" role="switch" aria-checked="false" aria-label="站点鉴权" disabled>状态未读取</button>
           </div>
-          <p class="muted">默认关闭。开启后，页面、API、图片和下载均需要用户名与密码，健康检查保持公开。</p>
-          <form id="site-auth-form" class="settings-form">
-            <fieldset id="site-auth-fields" class="site-auth-fields" disabled>
-              <label for="site-auth-username">用户名<input id="site-auth-username" name="username" autocomplete="username" maxlength="128" spellcheck="false"></label>
-              <label for="site-auth-password">新密码<input id="site-auth-password" name="password" type="password" autocomplete="new-password" maxlength="1024" aria-describedby="site-auth-password-note"></label>
-              <p id="site-auth-password-note" class="muted">密码不会回显。留空时保留现有密码。</p>
-              <label for="site-auth-confirm">确认新密码<input id="site-auth-confirm" name="password_confirmation" type="password" autocomplete="new-password" maxlength="1024"></label>
-            </fieldset>
-            <div class="form-actions"><button id="site-auth-save" class="primary" type="submit" disabled>保存凭据</button><button id="site-auth-reload" type="button">重新读取</button></div>
-            <p id="site-auth-message" class="status" role="status" aria-live="polite"></p>
-          </form>
+        </div>
+        <form id="site-auth-form" class="group settings-form site-auth-form">
+          <fieldset id="site-auth-fields" class="site-auth-fields" disabled>
+            <label for="site-auth-username">用户名<input id="site-auth-username" name="username" autocomplete="username" maxlength="128" spellcheck="false"></label>
+            <label for="site-auth-password">新密码<input id="site-auth-password" name="password" type="password" autocomplete="new-password" maxlength="1024" aria-describedby="site-auth-password-note"></label>
+            <label for="site-auth-confirm">确认新密码<input id="site-auth-confirm" name="password_confirmation" type="password" autocomplete="new-password" maxlength="1024"></label>
+            <p id="site-auth-password-note" class="field-hint">密码不会回显。留空时保留现有密码。</p>
+          </fieldset>
+          <div class="form-actions"><button id="site-auth-save" class="primary" type="submit" disabled>保存凭据</button><button id="site-auth-reload" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>重新读取</span></button></div>
+          <p id="site-auth-message" class="status" role="status" aria-live="polite"></p>
+        </form>
+        <div class="callout">
+          <span class="callout-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
           <div class="site-settings-note">
-            <p id="site-auth-storage" class="muted">鉴权配置正在读取。</p>
-            <p class="muted">开关与保存按钮均提交当前表单，立即生效；开启或修改凭据后需重新认证。关闭鉴权会开放实例访问，已保存凭据保留。</p>
-            <p class="muted">HTTP Basic 不加密传输，公网访问必须使用 HTTPS。所有通过认证的人均可操作实例中的账号、书库和下载。</p>
+            <p id="site-auth-storage">鉴权配置正在读取。</p>
+            <p>开关与保存按钮均提交当前表单，立即生效；开启或修改凭据后需重新认证。关闭鉴权会开放实例访问，已保存凭据保留。</p>
+            <p>HTTP Basic 不加密传输，公网访问必须使用 HTTPS。所有通过认证的人均可操作实例中的账号、书库和下载。</p>
           </div>
-        </section>
-        <section class="site-settings-card" aria-labelledby="settings-sources-title">
-          <div class="site-settings-card-head"><div><h2 id="settings-sources-title">图源管理</h2><p class="muted">图源开关、登录凭据与独立设置</p></div><button id="settings-sources-refresh" type="button" class="small">刷新图源</button></div>
-          <p class="muted">每个图源独立请求，某个图源不可用时不影响其他图源。关闭图源后停止使用并取消该源下载，账号、书库和已完成文件保留。</p>
-          <p id="settings-sources-message" class="status" role="status"></p>
-          <div id="source-list"></div>
-          <div class="site-settings-note"><p class="muted">圆点表示最近一次连通检测结果，关闭的图源不检测。</p><button id="health-recheck" type="button" class="small"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>重新检测</button></div>
-        </section>
-      </div>
+        </div>
+      </section>
+      <section id="settings-pane-sources" class="settings-pane" role="tabpanel" aria-labelledby="settings-sources-title" hidden>
+        <div class="pane-intro with-actions">
+          <div><h3 id="settings-sources-title">图源管理</h3><p>图源开关、登录凭据与独立设置</p></div>
+          <div class="pane-actions">
+            <button id="health-recheck" type="button" class="small" title="重新检测图源连通状态"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>重新检测</span></button>
+            <button id="settings-sources-refresh" type="button" class="small">刷新图源</button>
+          </div>
+        </div>
+        <p id="settings-sources-message" class="status" role="status"></p>
+        <div id="source-list" class="group source-list"></div>
+        <div class="pane-notes">
+          <p>每个图源独立请求，某个图源不可用时不影响其他图源。关闭图源后停止使用并取消该源下载，账号、书库和已完成文件保留。</p>
+          <p class="health-legend"><i class="health-dot ok"></i>圆点表示最近一次连通检测结果，关闭的图源不检测。</p>
+        </div>
+      </section>
     </div>
   </dialog>
   <nav id="tabbar" class="tabbar" aria-label="主导航">
@@ -195,60 +224,100 @@
       <button data-tab="bika-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="m9 10 2 2 4-4"/></svg><span>哔咔收藏</span></button>
     <button data-settings-open aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>设置</span></button>
   </nav>
-  <dialog id="jm-sync-settings" class="jm-sync-dialog">
-    <div class="dialog-head"><h2>JM 收藏同步设置</h2><button type="button" data-close="jm-sync-settings">关闭</button></div>
-    <form id="jm-sync-form" class="settings-form">
-      <label class="jm-check"><input type="checkbox" name="enabled">定时同步</label>
-      <p class="muted">更换或解除账号绑定后，定时同步自动关闭。</p>
-      <div id="jm-sync-switch-note" class="status warn jm-sync-switch-note" role="note" aria-labelledby="jm-sync-switch-title">
-        <strong id="jm-sync-switch-title">目录规则切换说明</strong>
-        <p>定时同步开启时，每次保存设置都会立即同步一次，包括仅修改目录规则或下载目录；不会等待下一个周期，之后按设定间隔运行。</p>
-        <p>旧漫画尚未通过“检查本地漫画”登记时，可能先重复下载图片，再因目标文件已存在而报告冲突。未登记的原文件不会被覆盖，但会消耗流量和时间。</p>
-        <p><strong>安全切换顺序：</strong>关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步。</p>
-        <p>运行中的任务完成或停止后才能修改设置。</p>
+  <dialog id="jm-sync-settings" class="modal modal-wide jm-sync-dialog" aria-labelledby="jm-sync-settings-title">
+    <div class="modal-head">
+      <div class="modal-title"><h2 id="jm-sync-settings-title">JM 收藏同步设置</h2><p>更换或解除账号绑定后，定时同步自动关闭。</p></div>
+      <button class="icon-btn ghost" type="button" data-close="jm-sync-settings" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <form id="jm-sync-form" class="modal-form settings-form">
+      <div class="modal-body" data-scroll-area>
+        <div id="jm-sync-switch-note" class="callout warn jm-sync-switch-note" role="note" aria-labelledby="jm-sync-switch-title">
+          <span class="callout-icon" role="presentation"><svg viewBox="0 0 24 24" focusable="false"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+          <span class="callout-body">
+            <strong id="jm-sync-switch-title">目录规则切换说明</strong>
+            <span class="callout-p">定时同步开启时，每次保存设置都会立即同步一次，包括仅修改目录规则或下载目录；不会等待下一个周期，之后按设定间隔运行。</span>
+            <span class="callout-p">旧漫画尚未通过“检查本地漫画”登记时，可能先重复下载图片，再因目标文件已存在而报告冲突。未登记的原文件不会被覆盖，但会消耗流量和时间。</span>
+            <span class="callout-p"><strong>安全切换顺序：</strong>关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步。</span>
+            <span class="callout-p">运行中的任务完成或停止后才能修改设置。</span>
+          </span>
+        </div>
+        <section class="form-section">
+          <h3>计划</h3>
+          <div class="group">
+            <label class="group-row jm-check"><span class="row-text"><strong>定时同步</strong><span>按下方间隔自动同步收藏图片</span></span><input type="checkbox" name="enabled"></label>
+            <label class="group-row inline-field"><span class="row-text"><strong>同步间隔</strong><span>分钟，5–10080</span></span><input name="interval_minutes" type="number" min="5" max="10080" required></label>
+          </div>
+        </section>
+        <section class="form-section">
+          <h3>下载与图片</h3>
+          <div class="jm-settings-grid">
+            <label>下载限速（KiB/s，0 为不限速）<input name="speed_limit_kbps" type="number" min="0" max="1048576" required></label>
+            <label>单张图片额外重试次数<input name="retries" type="number" min="0" max="5" required></label>
+            <label>图片格式<select name="image_format"><option value="original">保留图片格式</option><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
+            <label>JPEG / WebP 质量（1–100）<input name="quality" type="number" min="1" max="100" required></label>
+          </div>
+          <p class="field-hint">限速只作用于收藏同步图片，不限制在线阅读和现有 PDF 任务。图片先解码再转换；显式转换格式时，动图仅保存首帧。PNG 不使用质量参数。</p>
+        </section>
+        <section class="form-section">
+          <h3>保存位置</h3>
+          <label>服务器下载目录
+            <span class="input-action"><input name="download_dir" maxlength="2048" required><button id="jm-directory-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>选择服务器目录</span></button></span>
+          </label>
+          <p class="field-hint">目录位于运行服务的机器，不是当前浏览器所在设备。可选根目录由 JM_DOWNLOAD_ROOTS 控制，Docker 目录必须挂载持久化卷；可在所选根目录下填写新子目录。</p>
+          <label>目录层级<select name="directory_rule"><option value="Bd_Aauthoroname_Pindextitle">【作者】原标题 / 第N話 章节标题</option><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option></select></label>
+          <p id="jm-directory-preview" class="jm-path path-preview"></p>
+          <details class="hint-details">
+            <summary>目录规则说明</summary>
+            <p>“【作者】原标题 / 第N話 章节标题”对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle 规则：漫画目录为“【第一作者】原标题”，章节目录为“第N話 完整章节标题”。不附加 ID，不合并多位作者，不去重标题原有的“第N話”。本地检查按相同规则核对目录。</p>
+            <p>已有“漫画名 / 章节名 / 图片”目录可通过“检查本地漫画”识别，无需补上 ID；下载目录应设为所有漫画文件夹的上一级。目录层级只控制新下载的文件，不会重命名已检查的漫画。</p>
+            <p>“漫画标题 / 第N話 章节标题”是无 ID 规则，输出为“漫画标题/第1話 章节标题/图片”，不附加 ID，也不使用“001 -”。合法标题不截断；单个目录名超过 255 字节或目录已关联其他漫画时报告冲突。</p>
+          </details>
+        </section>
+        <section class="form-section">
+          <fieldset class="jm-folder-options"><legend>同步范围</legend><p class="field-hint">未勾选收藏夹时同步全部收藏。单本及所选同步不受此范围限制。</p><div id="jm-sync-folders"></div></fieldset>
+        </section>
+        <section class="form-section">
+          <h3>书库</h3>
+          <div class="group">
+            <label class="group-row jm-check"><span class="row-text"><strong>同步添加到本地书库</strong><span>保留已有分类</span></span><input name="add_to_library" type="checkbox"></label>
+          </div>
+          <p class="field-hint">已完成图片会校验并跳过，失败图片可在下次同步重试。变更目录或层级规则不会移动、清理旧文件；格式或质量变更可能替换本工具已记录的同路径图片。</p>
+        </section>
       </div>
-      <div class="jm-settings-grid">
-        <label>同步间隔（分钟）<input name="interval_minutes" type="number" min="5" max="10080" required></label>
-        <label>下载限速（KiB/s，0 为不限速）<input name="speed_limit_kbps" type="number" min="0" max="1048576" required></label>
-        <label>图片格式<select name="image_format"><option value="original">保留图片格式</option><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
-        <label>JPEG / WebP 质量（1–100）<input name="quality" type="number" min="1" max="100" required></label>
-        <label>单张图片额外重试次数<input name="retries" type="number" min="0" max="5" required></label>
-        <label>目录层级<select name="directory_rule"><option value="Bd_Aauthoroname_Pindextitle">【作者】原标题 / 第N話 章节标题</option><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option></select></label>
+      <div class="modal-foot">
+        <p id="jm-sync-settings-message" class="status" role="status"></p>
+        <button id="jm-sync-save" class="primary" type="submit">保存设置</button>
       </div>
-      <p class="muted">限速只作用于收藏同步图片，不限制在线阅读和现有 PDF 任务。图片先解码再转换；显式转换格式时，动图仅保存首帧。PNG 不使用质量参数。</p>
-      <fieldset class="jm-folder-options"><legend>同步范围</legend><p class="muted">未勾选收藏夹时同步全部收藏。单本及所选同步不受此范围限制。</p><div id="jm-sync-folders"></div></fieldset>
-      <label>服务器下载目录<input name="download_dir" maxlength="2048" required></label>
-      <button id="jm-directory-open" type="button">选择服务器目录</button>
-      <p class="muted">目录位于运行服务的机器，不是当前浏览器所在设备。可选根目录由 JM_DOWNLOAD_ROOTS 控制，Docker 目录必须挂载持久化卷；可在所选根目录下填写新子目录。</p>
-      <p id="jm-directory-preview" class="jm-path"></p>
-      <p class="muted">“【作者】原标题 / 第N話 章节标题”对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle 规则：漫画目录为“【第一作者】原标题”，章节目录为“第N話 完整章节标题”。不附加 ID，不合并多位作者，不去重标题原有的“第N話”。本地检查按相同规则核对目录。</p>
-      <p class="muted">已有“漫画名 / 章节名 / 图片”目录可通过“检查本地漫画”识别，无需补上 ID；下载目录应设为所有漫画文件夹的上一级。目录层级只控制新下载的文件，不会重命名已检查的漫画。</p>
-      <p class="muted">“漫画标题 / 第N話 章节标题”是无 ID 规则，输出为“漫画标题/第1話 章节标题/图片”，不附加 ID，也不使用“001 -”。合法标题不截断；单个目录名超过 255 字节或目录已关联其他漫画时报告冲突。</p>
-      <label class="jm-check"><input name="add_to_library" type="checkbox">同步添加到本地书库（保留已有分类）</label>
-      <p class="muted">已完成图片会校验并跳过，失败图片可在下次同步重试。变更目录或层级规则不会移动、清理旧文件；格式或质量变更可能替换本工具已记录的同路径图片。</p>
-      <button id="jm-sync-save" class="primary" type="submit">保存设置</button>
-      <p id="jm-sync-settings-message" class="status" role="status"></p>
     </form>
   </dialog>
-  <dialog id="jm-directory-dialog" class="jm-sync-dialog">
-    <div class="dialog-head"><h2>服务器目录</h2><button type="button" data-close="jm-directory-dialog">关闭</button></div>
-    <div id="jm-directory-roots" class="jm-toolbar"></div>
-    <p id="jm-directory-current" class="jm-path"></p>
-    <div class="jm-toolbar"><button id="jm-directory-parent" type="button">上一级</button><button id="jm-directory-select" type="button" class="primary">使用此目录</button></div>
-    <p id="jm-directory-message" class="status" role="status"></p>
-    <div id="jm-directory-list"></div>
+  <dialog id="jm-directory-dialog" class="modal jm-sync-dialog" aria-labelledby="jm-directory-title">
+    <div class="modal-head">
+      <button class="icon-btn ghost back-btn" type="button" data-close="jm-directory-dialog" title="返回同步设置" aria-label="返回同步设置"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
+      <div class="modal-title"><h2 id="jm-directory-title">服务器目录</h2></div>
+    </div>
+    <div class="modal-body" data-scroll-area>
+      <div id="jm-directory-roots" class="dir-roots"></div>
+      <div class="dir-current"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><p id="jm-directory-current" class="jm-path"></p></div>
+      <p id="jm-directory-message" class="status" role="status"></p>
+      <div id="jm-directory-list" class="dir-list"></div>
+    </div>
+    <div class="modal-foot"><button id="jm-directory-parent" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span>上一级</span></button><button id="jm-directory-select" type="button" class="primary">使用此目录</button></div>
   </dialog>
   <button id="to-top" class="icon-btn" type="button" title="回到顶部" aria-label="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>
 
-  <dialog id="detail-dialog" class="sheet">
-    <div class="dialog-head floating"><h2 id="detail-title">漫画详情</h2><button class="icon-btn" data-close="detail-dialog" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>
-    <div id="detail-body"></div>
+  <dialog id="detail-dialog" class="modal sheet detail-sheet" aria-labelledby="detail-title">
+    <div class="dialog-head floating"><h2 id="detail-title">漫画详情</h2><button class="icon-btn" data-close="detail-dialog" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div id="detail-scroll" class="detail-scroll" data-scroll-area><div id="detail-body"></div></div>
   </dialog>
-  <dialog id="source-settings-dialog"><div class="dialog-head"><h2 id="source-settings-title">图源设置</h2><button class="icon-btn" data-close="source-settings-dialog" type="button" title="返回图源列表" aria-label="返回图源列表"><svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button></div>
-    <div id="source-settings-body"></div>
+  <dialog id="source-settings-dialog" class="modal" aria-labelledby="source-settings-title">
+    <div class="modal-head"><button class="icon-btn ghost back-btn" data-close="source-settings-dialog" type="button" title="返回图源列表" aria-label="返回图源列表"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button><div class="modal-title"><h2 id="source-settings-title">图源设置</h2></div></div>
+    <div class="modal-body" data-scroll-area><div id="source-settings-body"></div></div>
   </dialog>
-  <dialog id="credentials-dialog"><div class="dialog-head"><h2 id="credentials-title">登录凭证</h2><button class="icon-btn" data-close="credentials-dialog" type="button" title="返回设置" aria-label="返回设置"><svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button></div><div id="account-state"></div><form id="login-form"></form></dialog>
-  <dialog id="ask-dialog" class="ask">
+  <dialog id="credentials-dialog" class="modal" aria-labelledby="credentials-title">
+    <div class="modal-head"><button class="icon-btn ghost back-btn" data-close="credentials-dialog" type="button" title="返回设置" aria-label="返回设置"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button><div class="modal-title"><h2 id="credentials-title">登录凭证</h2></div></div>
+    <div class="modal-body" data-scroll-area><div id="account-state" class="callout subtle"></div><form id="login-form"></form></div>
+  </dialog>
+  <dialog id="ask-dialog" class="modal ask">
     <form id="ask-form" method="dialog">
       <h2 id="ask-title"></h2>
       <p id="ask-message" class="muted"></p>

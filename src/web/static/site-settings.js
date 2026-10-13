@@ -112,7 +112,22 @@ function closeSiteSettings(){
   if(dialog.open)dialog.close();
   leaveSiteSettings();syncSiteSettingsDialog();
 }
+// Two panes share one dialog; switching keeps both forms mounted so drafts and scroll survive.
+function showSettingsPane(name){
+  document.querySelectorAll('[data-settings-pane]').forEach(tab=>{
+    const on=tab.dataset.settingsPane===name;tab.setAttribute('aria-selected',String(on));tab.tabIndex=on?0:-1;
+    $(tab.getAttribute('aria-controls')).hidden=!on;
+  });
+}
 function initSiteSettings(){
+  const tabs=[...document.querySelectorAll('[data-settings-pane]')];
+  tabs.forEach((tab,index)=>{
+    tab.onclick=()=>showSettingsPane(tab.dataset.settingsPane);
+    tab.onkeydown=event=>{
+      const step=event.key==='ArrowRight'||event.key==='ArrowDown'?1:event.key==='ArrowLeft'||event.key==='ArrowUp'?-1:0;if(!step)return;
+      event.preventDefault();const next=tabs[(index+step+tabs.length)%tabs.length];showSettingsPane(next.dataset.settingsPane);next.focus();
+    };
+  });
   document.querySelectorAll('[data-settings-open]').forEach(control=>control.onclick=()=>run(openSiteSettings));
   const dialog=$('settings-dialog');
   dialog.addEventListener('close',()=>{if(!dialog.open)closeSiteSettings();});

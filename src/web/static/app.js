@@ -31,8 +31,10 @@ const icons = {
   play:'<polygon points="6 3 20 12 6 21 6 3"/>',
   check:'<polyline points="20 6 9 17 4 12"/>',
   image:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
-  'toggle-left':'<rect x="2" y="6" width="20" height="12" rx="6"/><circle cx="8" cy="12" r="3"/>',
-  'toggle-right':'<rect x="2" y="6" width="20" height="12" rx="6"/><circle cx="16" cy="12" r="3"/>',
+  'toggle-left':'<rect class="switch-track" x="1" y="5" width="22" height="14" rx="7"/><circle class="switch-knob" cx="8" cy="12" r="5"/>',
+  'toggle-right':'<rect class="switch-track" x="1" y="5" width="22" height="14" rx="7"/><circle class="switch-knob" cx="16" cy="12" r="5"/>',
+  folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  'shield-check':'<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
   sort:'<path d="M11 5h10M11 9h7M11 13h4"/><path d="M3 17l3 3 3-3M6 20V4"/>',
   'chevron-left':'<polyline points="15 18 9 12 15 6"/>',
   'chevron-right':'<polyline points="9 18 15 12 9 6"/>',
@@ -368,7 +370,8 @@ function syncSearchMode(){
     state.searchDeduplicate=!deduplicate;
     if(state.search){Object.assign(state.search,{deduplicate:state.searchDeduplicate,page:1});return loadSearch();}
     syncSearchMode();
-  },'chip'+(deduplicate?' active':''));
+  },'chip dedup-chip'+(deduplicate?' active':''));
+  toggle.textContent='';toggle.append(node('i',undefined,'dedup-switch'),node('span',`结果去重：${deduplicate?'开启':'关闭'}`));
   toggle.setAttribute('role','switch');toggle.setAttribute('aria-label','结果去重');toggle.setAttribute('aria-checked',String(deduplicate));
   toggle.title='仅合并本页高置信度重复作品，保留所有版本入口';$('search-mode').append(toggle);
   $('keyword').placeholder=mode==='tag'?'输入标签名称；拷贝使用题材…':'搜索漫画、作者…';
@@ -633,11 +636,12 @@ const inLibrary=d=>state.books.some(b=>b.source===d.source&&String(b.id)===Strin
 /* ---------- detail ---------- */
 function detailHero(item,loading){
   const hero=node('div',undefined,'detail-hero'+(loading?' loading':''));
-  const backdrop=node('div',undefined,'detail-backdrop'),url=coverFor(item);
+  const ambient=node('div',undefined,'detail-ambient'),backdrop=node('div',undefined,'detail-backdrop'),url=coverFor(item);
   if(url)backdrop.style.backgroundImage=`url("${url.replace(/"/g,'%22')}")`;
+  ambient.setAttribute('aria-hidden','true');ambient.append(backdrop);
   const text=node('div',undefined,'detail-text');
   text.append(node('h2',item.title||'未命名','detail-name'));
-  hero.append(backdrop,coverBox(item,'detail-cover'),text);
+  hero.append(ambient,coverBox(item,'detail-cover'),text);
   if(loading)text.append(node('i',undefined,'line'),node('i',undefined,'line short'),node('i',undefined,'line'));
   return {hero,text};
 }
@@ -647,7 +651,7 @@ async function openComic(item,opts={}) {
   const request=++state.detailRequest,dlg=$('detail-dialog');state.detail=null;state.detailItem=item;
   $('detail-title').textContent=item.title||'漫画详情';
   $('detail-body').replaceChildren(detailHero(item,true).hero);
-  if(!dlg.open)dlg.showModal();dlg.scrollTop=0;syncDetailHead();
+  if(!dlg.open)dlg.showModal();$('detail-scroll').scrollTop=0;syncDetailHead();
   try{
     const detail=await api(`/api/comic/${enc(item.source)}/${enc(item.id)}`);if(request!==state.detailRequest)return;
     state.detail={...detail,cover:detail.cover||item.cover,category:detail.category||item.category};renderDetail();
@@ -762,8 +766,8 @@ function renderDetail() {
   const section=node('section',undefined,'chapters'),head=node('div',undefined,'chapters-head'),tools=node('div',undefined,'chapters-tools');
   head.append(node('h3','章节'),node('span',String(detail.chapters.length),'count'),tools);
   if(detail.chapters.length){const preview=button('',toggleChapterPreviews,'small chapter-previews-toggle');preview.id='chapter-previews-toggle';preview.setAttribute('role','switch');preview.setAttribute('aria-label','章节封面');preview.title='使用章节首图，按可见范围加载；设置仅保存在当前浏览器。';tools.append(preview);}
-  if(detail.chapters.length>15){const filter=node('input');filter.id='chapter-filter';filter.type='search';filter.placeholder='筛选章节';filter.maxLength=50;filter.setAttribute('aria-label','筛选章节');filter.oninput=()=>drawChapters(true);tools.append(filter);}
-  if(detail.chapters.length>1){const sort=node('button',undefined,'small');sort.id='chapter-sort';sort.type='button';sort.onclick=()=>{state.chapterDesc=!state.chapterDesc;saveLocal('comic:chapter-desc',state.chapterDesc);syncChapterSort();drawChapters(true);};tools.append(sort);}
+  if(detail.chapters.length>15){const box=node('div',undefined,'input-icon chapter-search'),filter=node('input');box.innerHTML=svgIcon('search');filter.id='chapter-filter';filter.type='search';filter.placeholder='筛选章节';filter.maxLength=50;filter.setAttribute('aria-label','筛选章节');filter.oninput=()=>drawChapters(true);box.append(filter);tools.append(box);}
+  if(detail.chapters.length>1){const sort=node('button',undefined,'small chapter-sort');sort.id='chapter-sort';sort.type='button';sort.onclick=()=>{state.chapterDesc=!state.chapterDesc;saveLocal('comic:chapter-desc',state.chapterDesc);syncChapterSort();drawChapters(true);};tools.append(sort);}
   const list=node('div',undefined,'chapter-list');list.id='chapter-list';section.append(head,list);
   body.append(hero,section);syncChapterSort();syncChapterPreviews();drawChapters(true);
   // Long synopses collapse to a few lines with an explicit toggle.
@@ -811,7 +815,7 @@ function cloudFavoriteButton(detail){
   };
   loadStatus();return control;
 }
-function syncDetailHead(){const dlg=$('detail-dialog');dlg.querySelector('.dialog-head').classList.toggle('scrolled',dlg.scrollTop>150);}
+function syncDetailHead(){$('detail-dialog').querySelector('.dialog-head').classList.toggle('scrolled',$('detail-scroll').scrollTop>150);}
 const taskPayload=(detail,chapter)=>write('POST',{source:detail.source,comic_id:String(detail.id),chapter_id:String(chapter.id),title:detail.title,chapter:chapter.name});
 async function queueDownload(detail,chapter){await api('/api/downloads',taskPayload(detail,chapter));toast(`已加入下载：${chapter.name}`,{action:{label:'查看',run:openDownloads}});refreshTaskDot();}
 async function downloadAll(detail){
@@ -882,11 +886,11 @@ function renderSourceList(){
   const list=$('source-list');list.replaceChildren();state.healthDots={};
   for(const plugin of state.sources){
     const row=node('article',undefined,'source-row'),info=node('div',undefined,'source-info');
-    const h3=node('h3');const dot=node('span',undefined,'health-dot');syncHealthDot(plugin.id,dot);h3.append(dot,document.createTextNode(plugin.name));
-    const account=node('span',accountLabel(plugin),'account-state'+(needsLogin(plugin)?' warn':''));
-    const caps=node('div',undefined,'caps');caps.append(account,...plugin.capabilities.filter(c=>CAP_LABELS[c]&&c!=='login').map(c=>node('span',CAP_LABELS[c],'cap')));
+    const h3=node('h3');const dot=node('span',undefined,'health-dot');syncHealthDot(plugin.id,dot);h3.append(dot,node('span',plugin.name,'source-name'));
+    const account=node('span',accountLabel(plugin),'account-state'+(needsLogin(plugin)?' warn':''));h3.append(account);
+    const caps=node('p',plugin.capabilities.filter(c=>CAP_LABELS[c]&&c!=='login').map(c=>CAP_LABELS[c]).join(' · '),'caps');
     info.append(h3,caps);
-    const actions=node('div',undefined,'source-actions');actions.append(sourceToggle(plugin),iconBtn('settings',`${plugin.name}设置`,()=>{state.settingsSource=plugin.id;renderSourceSettings();$('source-settings-dialog').showModal();}));
+    const actions=node('div',undefined,'source-actions');actions.append(sourceToggle(plugin),iconBtn('settings',`${plugin.name}设置`,()=>{state.settingsSource=plugin.id;renderSourceSettings();$('source-settings-dialog').showModal();},'ghost'));
     row.classList.toggle('source-off',plugin.enabled===false);row.append(info,actions);list.append(row);
   }
 }
@@ -916,21 +920,26 @@ function runHealthChecks(force){for(const plugin of activeSources())if(state.hea
 function renderSourceSettings(){
   const plugin=state.sources.find(s=>s.id===state.settingsSource),body=$('source-settings-body');body.replaceChildren();if(!plugin)return;
   $('source-settings-title').textContent=plugin.name+' · 设置';
-  if(plugin.enabled===false)body.append(node('p','图源已关闭；服务器设置和已保存凭据保留。登录、浏览与下载需先在「设置 → 图源管理」中启用。','muted'));
-  for(const field of plugin.settings_fields||[]){const section=node('section',undefined,'setting-section');section.append(node('h3',field.label),node('p',field.description||'','muted'));
-    const form=node('form',undefined,'settings-form'),label=node('label',field.label);let input;
+  // A navigation row opens a nested page; it reads as a single tappable line inside a grouped card.
+  const linkRow=(icon,title,desc,action)=>{const row=button('',action,'link-row');row.innerHTML=svgIcon(icon);const text=node('span',undefined,'row-text');text.append(node('strong',title),node('span',desc));row.append(text);row.insertAdjacentHTML('beforeend',svgIcon('chevron-right'));return row;};
+  const section=(title,desc,className)=>{const box=node('section',undefined,'setting-section'+(className?' '+className:''));box.append(node('h3',title));if(desc)box.append(node('p',desc,'muted'));body.append(box);return box;};
+  if(plugin.enabled===false)body.append(node('p','图源已关闭；服务器设置和已保存凭据保留。登录、浏览与下载需先在「设置 → 图源管理」中启用。','callout subtle'));
+  for(const field of plugin.settings_fields||[]){const box=section(field.label,field.description||'');
+    const form=node('form',undefined,'settings-form inline-form'),label=node('label');let input;
     if(field.type==='select'&&Array.isArray(field.options)){input=node('select');input.name=field.name;
       for(const option of field.options){const opt=node('option',option.label??option.value);opt.value=option.value;input.append(opt);}
       input.value=plugin.settings?.[field.name]??field.options[0]?.value??'';
       if(![...input.options].some(o=>o.value===input.value))input.selectedIndex=0;
-    }else{input=node('input');input.name=field.name;input.type=field.type==='url'?'url':'text';input.value=plugin.settings?.[field.name]||'';}
-    label.append(input);
-    const submit=node('button','保存','primary');submit.type='submit';form.append(label,submit);form.onsubmit=event=>{event.preventDefault();run(async()=>{await api(`/api/sources/${enc(plugin.id)}/settings`,write('PUT',{...plugin.settings,[field.name]:input.value}));await loadSources();toast('设置已保存，后续请求立即生效');},submit);};section.append(form);body.append(section);}
-  if(plugin.capabilities.includes('login')){const section=node('section',undefined,'setting-section');section.append(node('h3','登录凭证'),node('p',accountLabel(plugin),'muted'),labelBtn('key','管理登录凭证',()=>{configureAccount();$('credentials-dialog').showModal();}));body.append(section);}
-  if(plugin.id==='jm'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','收藏与本地同步'),node('p','浏览远端收藏夹，按目录规则增量保存图片。','muted'),labelBtn('bookmark','打开 JM 收藏',()=>{$('source-settings-dialog').close();showTab('jm-favorites');}));body.append(section);}
-  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','哔咔收藏'),node('p','浏览账号的全部云端收藏；默认与本地书库独立，可单独开启收藏同步到书库。','muted'),labelBtn('bookmark','打开哔咔收藏',()=>{$('source-settings-dialog').close();showTab('bika-favorites');}));body.append(section);}
+    }else{input=node('input');input.name=field.name;input.type=field.type==='url'?'url':'text';input.value=plugin.settings?.[field.name]||'';input.placeholder='留空使用部署默认值';}
+    input.setAttribute('aria-label',field.label);label.append(input);
+    const submit=node('button','保存','primary');submit.type='submit';form.append(label,submit);form.onsubmit=event=>{event.preventDefault();run(async()=>{await api(`/api/sources/${enc(plugin.id)}/settings`,write('PUT',{...plugin.settings,[field.name]:input.value}));await loadSources();toast('设置已保存，后续请求立即生效');},submit);};box.append(form);}
+  const links=node('div',undefined,'group');
+  if(plugin.capabilities.includes('login'))links.append(linkRow('key','登录凭证',accountLabel(plugin),()=>{configureAccount();$('credentials-dialog').showModal();}));
+  if(plugin.id==='jm'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites'))links.append(linkRow('bookmark','收藏与本地同步','浏览远端收藏夹，按目录规则增量保存图片。',()=>{$('source-settings-dialog').close();showTab('jm-favorites');}));
+  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites'))links.append(linkRow('bookmark','哔咔收藏','浏览账号的全部云端收藏；默认与本地书库独立，可单独开启收藏同步到书库。',()=>{$('source-settings-dialog').close();showTab('bika-favorites');}));
+  if(links.children.length)section('账号与收藏').append(links);
   if(['jm','bika'].includes(plugin.id)&&plugin.capabilities.includes('favorites'))body.append(favoriteLibrarySettings(plugin));
-  if(!(plugin.settings_fields||[]).length&&!plugin.capabilities.includes('login'))body.append(node('p','此图源使用自动服务器配置，无需登录，暂无可修改选项。','muted'));
+  if(!(plugin.settings_fields||[]).length&&!plugin.capabilities.includes('login'))body.append(node('p','此图源使用自动服务器配置，无需登录，暂无可修改选项。','callout subtle'));
 }
 function favoriteLibrarySettings(plugin){
   const section=node('section',undefined,'setting-section library-sync-settings'),content=node('div');
@@ -941,23 +950,29 @@ function favoriteLibrarySettings(plugin){
     const toggle=labelBtn(settings.enabled?'toggle-right':'toggle-left',settings.enabled?'自动同步已开启':'自动同步已关闭',async()=>{
       if(busy)return;busy=true;
       try{render(await api(path,write('PUT',{...settings,enabled:!settings.enabled})));toast('书库同步设置已保存');await loadLibrary();}finally{busy=false;}
-    },'small source-toggle'+(settings.enabled?' on':''));
+    },'small source-toggle switch-only'+(settings.enabled?' on':''));
     toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked',String(settings.enabled));toggle.setAttribute('aria-label',`${plugin.name}收藏自动同步到书库`);
     toggle.disabled=!settings.enabled&&(plugin.enabled===false||!(plugin.account.authenticated||plugin.account.configured));
     const actions=node('div',undefined,'form-actions'),sync=labelBtn('refresh-cw','立即同步',async()=>{
       if(busy)return;busy=true;
       try{render(await api(path+'/run',{method:'POST'}));}finally{busy=false;}
     },'small');sync.disabled=!settings.enabled||active||paused;
-    actions.append(toggle,sync,labelBtn('refresh-cw','刷新状态',async()=>{await refresh();await loadLibrary();},'small'));
+    actions.append(sync,labelBtn('refresh-cw','刷新状态',async()=>{await refresh();await loadLibrary();},'small'));
     const labels={idle:'等待同步',running:'同步中',completed:'同步完成',partial:'部分完成',failed:'同步失败',stopped:'同步已停止',interrupted:'同步已中断'};
     const summary=active?'同步中':labels[current.status]||'等待同步';
-    content.replaceChildren(node('p',`开启后创建「${category}」分类并立即同步全部收藏，之后每 ${settings.interval_minutes} 分钟增补。服务运行时自动执行，无需保持页面打开。`,'muted'),actions);
-    if(paused)content.append(node('p','图源已关闭，自动同步暂停。','muted'));
-    else if(!(plugin.account.authenticated||plugin.account.configured))content.append(node('p','绑定账号后可开启自动同步。','muted'));
-    if(current.status!=='idle')content.append(node('p',`${summary} · 已处理 ${current.processed||0}/${current.total||0} 本 · 新增 ${current.added||0} 本 · 失败 ${current.failed||0} 本`,'muted'));
-    if(data.next_run_at)content.append(node('p',`下次同步：${new Date(data.next_run_at*1000).toLocaleString('zh-CN')}`,'muted'));
-    if(current.error)content.append(node('p',current.error,'error'));
-    for(const error of current.errors||[])content.append(node('p',`${error.comic_id}：${error.message}`,'error'));
+    const head=node('div',undefined,'group-row');const text=node('span',undefined,'row-text');
+    text.append(node('strong','自动同步'),node('span',`开启后创建「${category}」分类并立即同步全部收藏，之后每 ${settings.interval_minutes} 分钟增补。服务运行时自动执行，无需保持页面打开。`));
+    head.append(text,toggle);
+    const group=node('div',undefined,'group');group.append(head);
+    const status=node('div',undefined,'sync-status');
+    if(paused)status.append(node('p','图源已关闭，自动同步暂停。','muted'));
+    else if(!(plugin.account.authenticated||plugin.account.configured))status.append(node('p','绑定账号后可开启自动同步。','muted'));
+    if(current.status!=='idle')status.append(node('p',`${summary} · 已处理 ${current.processed||0}/${current.total||0} 本 · 新增 ${current.added||0} 本 · 失败 ${current.failed||0} 本`,'muted'));
+    if(data.next_run_at)status.append(node('p',`下次同步：${new Date(data.next_run_at*1000).toLocaleString('zh-CN')}`,'muted'));
+    if(current.error)status.append(node('p',current.error,'error'));
+    for(const error of current.errors||[])status.append(node('p',`${error.comic_id}：${error.message}`,'error'));
+    if(status.children.length){const row=node('div',undefined,'group-row stacked');row.append(status);group.append(row);}
+    content.replaceChildren(group,actions);
   }
   async function refresh(){
     if(busy)return;busy=true;
@@ -1103,7 +1118,7 @@ function closeReader(silent){
   saveProgress();state.readerAbort?.abort();++state.readerRequest;state.observer?.disconnect();state.mounter?.disconnect();state.reader=null;
   if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
   $('reader-dialog').close();$('reader-pages').replaceChildren();renderContinue();
-  if(!silent&&state.detail&&$('detail-dialog').open){const dlg=$('detail-dialog'),top=dlg.scrollTop;renderDetail();dlg.scrollTop=top;}
+  if(!silent&&state.detail&&$('detail-dialog').open){const scroller=$('detail-scroll'),top=scroller.scrollTop;renderDetail();scroller.scrollTop=top;}
 }
 
 /* ---------- wiring ---------- */
@@ -1113,7 +1128,7 @@ document.querySelectorAll('[data-close]').forEach(n=>n.onclick=()=>{if(n.dataset
 document.querySelectorAll('dialog:not(#reader-dialog)').forEach(dlg=>dlg.addEventListener('click',event=>{if(event.target!==dlg)return;const r=dlg.getBoundingClientRect();if(event.clientX>=r.left&&event.clientX<=r.right&&event.clientY>=r.top&&event.clientY<=r.bottom)return;if(dlg.id==='detail-dialog')++state.detailRequest;dlg.close();}));
 $('detail-dialog').addEventListener('close',()=>{if(!$('detail-dialog').open){++state.detailRequest;chapterPreviews.stop();}});
 $('detail-dialog').addEventListener('cancel',()=>chapterPreviews.stop());
-$('detail-dialog').addEventListener('scroll',syncDetailHead,{passive:true});
+$('detail-scroll').addEventListener('scroll',syncDetailHead,{passive:true});
 $('browse-form').onsubmit=browse;
 function syncClear(){$('keyword-clear').hidden=!$('keyword').value;}
 $('keyword').addEventListener('input',syncClear);

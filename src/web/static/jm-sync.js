@@ -18,7 +18,9 @@ function renderJmSchedule(){
   const s=jm.settings,scope=s.folder_ids.length?`${s.folder_ids.length} 个指定收藏夹`:'全部收藏';
   const next=jm.nextRun?` · 下次：${jmDate(jm.nextRun)}`:'';
   if(jm.paused||sourcePlugin('jm')?.enabled===false){$('jm-sync-schedule').textContent='JM 图源已关闭，定时同步暂停；重新启用后按原计划恢复。';return;}
-  $('jm-sync-schedule').textContent=`${s.enabled?`定时同步 · 每 ${s.interval_minutes} 分钟${next}`:'定时同步关闭'} · ${scope} · ${s.download_dir}`;
+  const schedule=$('jm-sync-schedule');schedule.replaceChildren();
+  const status=node('span',s.enabled?`定时同步 · 每 ${s.interval_minutes} 分钟${next}`:'定时同步关闭','schedule-state'+(s.enabled?' on':''));
+  schedule.append(status,node('span',scope),node('span',s.download_dir,'jm-path'));
 }
 function jmCanRead(){const p=sourcePlugin('jm');return p?.enabled!==false&&p?.capabilities.includes('favorites')&&(p.account?.authenticated||p.account?.configured);}
 async function loadJmFavorites(){
@@ -54,11 +56,12 @@ function filteredJmBooks(){
 function renderJmBooks(){
   const items=filteredJmBooks();
   $('jm-favorites-books').replaceChildren(...items.map(item=>{
-    const box=card(item,{showSource:false}),label=node('label',undefined,'jm-check'),check=node('input');
+    const box=card(item,{showSource:false}),label=node('label',undefined,'jm-check select-mark'),check=node('input');
     check.type='checkbox';check.checked=jm.selected.has(String(item.id));check.setAttribute('aria-label',`选择 ${item.title}`);
-    check.onchange=()=>{if(check.checked)jm.selected.add(String(item.id));else jm.selected.delete(String(item.id));syncJmSelection();};
-    label.append(check,document.createTextNode('选择同步'));
-    const actions=node('div',undefined,'card-actions');actions.append(labelBtn('download','同步本书',()=>startJmSync([String(item.id)]),'small'));
+    const sync=()=>{box.classList.toggle('selected',check.checked);};
+    check.onchange=()=>{if(check.checked)jm.selected.add(String(item.id));else jm.selected.delete(String(item.id));sync();syncJmSelection();};
+    label.title='选择同步';label.append(check);sync();
+    const actions=node('div',undefined,'card-actions');actions.append(labelBtn('download','同步本书',()=>startJmSync([String(item.id)]),'small ghost-pill'));
     box.append(label,actions);return box;
   }));
   if(!items.length)$('jm-favorites-books').append(emptyState(jm.items.length?'本页没有匹配漫画':'收藏夹为空',jm.items.length?'筛选仅作用于当前页。':'远端账号在此收藏夹中暂无漫画。',null,'bookmark'));
@@ -66,6 +69,7 @@ function renderJmBooks(){
 }
 function syncJmSelection(){
   const selected=$('jm-sync-selected');selected.hidden=!jm.selected.size;selected.textContent=`同步所选（${jm.selected.size}）`;selected.disabled=jm.active;
+  $('jm-favorites-books').classList?.toggle('selecting',jm.selected.size>0);
   $('jm-select-page').disabled=!jm.items.length;
 }
 async function startJmSync(albumIds){
@@ -100,6 +104,9 @@ function jmRunCard(item){
     box.append(node('p',`漫画已处理 ${item.albums_done} / ${item.albums_total} · 新下载 ${item.downloaded} 张 · 校验跳过 ${item.skipped} 张 · 失败 ${item.failed} 项`));
     const elapsed=Math.max(1,(item.finished_at||Date.now()/1000)-item.started_at);
     box.append(node('p',`累计接收 ${jmBytes(item.received_bytes)} · 本次平均 ${(item.received_bytes/1024/elapsed).toFixed(1)} KiB/s`,'muted'));
+  }
+  if(item.albums_total&&(item.status==='running'||item.status==='cancelling')){
+    const bar=node('div',undefined,'bar'),fill=node('i');fill.style.width=`${Math.min(100,Math.round(item.albums_done/item.albums_total*100))}%`;bar.append(fill);box.append(bar);
   }
   if(item.status==='running'||item.status==='cancelling'){
     box.append(node('p',item.stage==='scanning'?'正在扫描收藏分页…':item.stage==='matching'?`正在读取漫画详情并核对重名目录：${item.title||''}`:`${item.title||''} / ${item.chapter||''}${item.pages?` · 本章第 ${item.page} / ${item.pages} 张`:''}`));
@@ -149,8 +156,8 @@ async function openJmSettings(){
   const folders=new Map(jm.folders.filter(f=>f.id!=='0').map(f=>[f.id,f]));
   for(const id of s.folder_ids)if(!folders.has(id))folders.set(id,{id,name:id==='0'?'全部收藏':`收藏夹 ${id}（尚未加载）`});
   $('jm-sync-folders').replaceChildren(...[...folders.values()].map(folder=>{
-    const label=node('label',undefined,'jm-check'),input=node('input');input.type='checkbox';input.name='folder_ids';input.value=folder.id;input.checked=s.folder_ids.includes(folder.id);
-    label.append(input,document.createTextNode(folder.name));return label;
+    const label=node('label',undefined,'jm-check folder-chip'),input=node('input');input.type='checkbox';input.name='folder_ids';input.value=folder.id;input.checked=s.folder_ids.includes(folder.id);
+    label.append(input,node('span',folder.name));return label;
   }));
   if(!folders.size)$('jm-sync-folders').append(node('span','没有已加载的自建收藏夹；当前范围为全部收藏。','muted'));
   updateJmPreview();$('jm-sync-settings').showModal();
@@ -176,11 +183,11 @@ async function browseJmDirectory(path=''){
   try{
     const data=await api('/api/jm/sync/directories?'+new URLSearchParams({path}));if(request!==jm.directoryRequest)return;
     jm.directory=data.path;
-    $('jm-directory-roots').replaceChildren(...data.roots.map(root=>button(root,()=>browseJmDirectory(root),'small')));
+    $('jm-directory-roots').replaceChildren(...data.roots.map(root=>{const control=button(root,()=>browseJmDirectory(root),'small root-chip');control.classList.toggle('active',data.path===root||data.path.startsWith(root.replace(/[\\/]$/,'')+'/'));return control;}));
     $('jm-directory-current').textContent=data.path;
     $('jm-directory-parent').disabled=!data.parent;$('jm-directory-parent').onclick=()=>run(()=>browseJmDirectory(data.parent));
     $('jm-directory-select').disabled=false;
-    $('jm-directory-list').replaceChildren(...data.directories.map(dir=>labelBtn('chevron-right',dir.name,()=>browseJmDirectory(dir.path))));
+    $('jm-directory-list').replaceChildren(...data.directories.map(dir=>{const row=labelBtn('folder',dir.name,()=>browseJmDirectory(dir.path),'link-row');row.insertAdjacentHTML('beforeend',svgIcon('chevron-right'));return row;}));
     $('jm-directory-message').textContent=data.truncated?'目录较多，仅显示前 500 项。':data.directories.length?'':'当前目录没有可选子目录；不存在的目录会在同步时创建。';
   }catch(error){if(request===jm.directoryRequest)$('jm-directory-message').textContent=error.message;}
 }
@@ -209,7 +216,7 @@ $('jm-sync-form').onsubmit=event=>{
 for(const name of ['download_dir','directory_rule','image_format'])jmField(name).addEventListener('input',updateJmPreview);
 $('jm-directory-open').onclick=()=>run(async()=>{
   $('jm-directory-dialog').showModal();
-  $('jm-directory-roots').replaceChildren(...(jm.options?.roots||[]).map(root=>button(root,()=>browseJmDirectory(root),'small')));
+  $('jm-directory-roots').replaceChildren(...(jm.options?.roots||[]).map(root=>button(root,()=>browseJmDirectory(root),'small root-chip')));
   await browseJmDirectory(jmField('download_dir').value);
 });
 $('jm-directory-select').onclick=()=>{jmField('download_dir').value=jm.directory;updateJmPreview();$('jm-directory-dialog').close();};
