@@ -14,7 +14,7 @@ from urllib.parse import urlparse, urlencode
 from src.clients.base import BaseClient
 from src.config import Config
 from src.errors import ComicApiError
-from src.metadata import comic_labels
+from src.metadata import comic_authors, comic_labels, comic_page_count
 
 
 class BikaClient(BaseClient):
@@ -428,13 +428,16 @@ class BikaClient(BaseClient):
             })
 
         chapters.sort(key=lambda x: x["order"])
+        authors = comic_authors(data.get("author"))
 
         return {
             "id": comic_id,
             "title": title,
             "cover": cover_url,
             "description": description,
-            "author": data.get("author", ""),
+            "author": " / ".join(authors),
+            "authors": authors,
+            "page_count": comic_page_count(data.get("pagesCount")),
             "chapters": chapters,
             "tags": comic_labels(data.get("tags")),
             "categories": comic_labels(data.get("categories")),
@@ -483,12 +486,15 @@ class BikaClient(BaseClient):
             cover_url = ""
             if isinstance(cover, dict):
                 cover_url = f"{cover.get('fileServer', '')}/static/{cover.get('path', '')}"
+            authors = comic_authors(item.get("author"))
             results.append({
                 "id": cid,
                 "title": title,
                 "cover": cover_url,
                 "source": "bika",
-                "author": item.get("author", ""),
+                "author": " / ".join(authors),
+                "authors": authors,
+                "page_count": comic_page_count(item.get("pagesCount")),
                 "category": " · ".join(entry["label"] for entry in comic_labels(item.get("categories"))),
                 "categories": comic_labels(item.get("categories")),
                 "tags": comic_labels(item.get("tags")),

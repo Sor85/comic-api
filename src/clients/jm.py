@@ -13,7 +13,7 @@ from Crypto.Util.Padding import unpad
 from src.clients.base import BaseClient
 from src.config import Config
 from src.errors import ComicApiError
-from src.metadata import comic_labels
+from src.metadata import comic_authors, comic_labels, comic_page_count
 
 log = logging.getLogger("comic.jm")
 
@@ -546,6 +546,8 @@ class JmClient(BaseClient):
                             "cover": detail["cover"],
                             "source": "jm",
                             "author": detail["author"],
+                            "authors": detail.get("authors", []),
+                            "page_count": detail.get("page_count"),
                             "category": "",
                             "description": detail["description"],
                             "tags": detail.get("tags", [])
@@ -605,13 +607,15 @@ class JmClient(BaseClient):
                     "order": idx + 1
                 })
 
+        authors = comic_authors(data.get("author"))
         return {
             "id": comic_id,
             "title": title,
             "cover": cover_url,
             "description": description,
-            "author": "/".join(data.get("author", [])) if isinstance(data.get("author"), list) else data.get("author", ""),
-            "authors": data.get("author", []) if isinstance(data.get("author"), list) else ([data["author"]] if data.get("author") else []),
+            "author": "/".join(authors),
+            "authors": authors,
+            "page_count": comic_page_count(data.get("total_photo")),
             "chapters": chapters,
             "tags": comic_labels(data.get("tags")),
             "source": "jm"
@@ -680,13 +684,16 @@ class JmClient(BaseClient):
             else:
                 cover_url = f"{self.image_base}/media/albums/{cid}_3x4.jpg"
 
+            authors = comic_authors(item.get("author"))
             results.append({
                 "id": cid,
                 "title": title,
                 "cover": cover_url,
                 "source": "jm",
                 "tags": comic_labels(item.get("tags")),
-                "author": item.get("author", ""),
+                "author": "/".join(authors),
+                "authors": authors,
+                "page_count": comic_page_count(item.get("total_photo")),
                 "category": item.get("category", {}).get("title", "") if isinstance(item.get("category"), dict) else "",
                 "description": item.get("description", "")
             })

@@ -11,9 +11,10 @@ function comicLabels(values){
   }
   return result;
 }
-function searchKey(search){return JSON.stringify([search.keyword,search.mode||'keyword',search.page||1]);}
+function searchKey(search){return JSON.stringify([search.keyword,search.mode||'keyword',search.page||1,search.deduplicate===true]);}
 function searchParams(search){
   const params=new URLSearchParams({keyword:search.keyword,page:search.page||1});
+  if(search.deduplicate===true)params.set('deduplicate','true');
   if(search.mode==='tag')params.set('mode','tag');
   if(search.source){
     params.set('source',search.source);

@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from src.errors import ComicApiError
 from src.services.image_proxy import ImageProxy
 from src.services.pdf import build_chapter_pdf
+from src.services.search_dedup import search_result_payload
 from src.sources import load_sources
 from src.storage import Store
 
@@ -103,7 +104,8 @@ class AggregatorService:
         items = [dict(item, source=source) for item in result]
         return items if mode == "tag" else self.rank_results(keyword, items)
 
-    async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword") -> Dict[str, Any]:
+    async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword",
+                               deduplicate: bool = False) -> Dict[str, Any]:
         """Search registered sources independently and retain partial failures."""
         capability = "tag_search" if mode == "tag" else "search"
         keys = [key for key, plugin in self.sources.items() if self.is_enabled(key) and capability in plugin.capabilities]
@@ -120,8 +122,8 @@ class AggregatorService:
                 candidates.extend(all_results[key])
         if mode == "keyword":
             candidates = self.rank_results(keyword, candidates)
-        return {"keyword": keyword, "best_match": candidates[0] if candidates else None,
-                "items": candidates, "all_results": all_results, "errors": errors}
+        result = search_result_payload(candidates, all_results, errors, deduplicate=deduplicate)
+        return dict(result, keyword=keyword, best_match=result['items'][0] if result['items'] else None)
 
     async def get_comic_detail(self, source: str, comic_id: str) -> Dict[str, Any]:
         """获取指定渠道下的漫画详情与章节"""

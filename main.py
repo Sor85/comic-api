@@ -20,6 +20,7 @@ from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services.downloads import DownloadManager, pdf_password_for
 from src.services.jm_sync import JmSync, SyncSettings
+from src.services.search_dedup import search_result_payload
 from src.storage import Store
 
 load_dotenv()
@@ -269,7 +270,7 @@ def create_app(store=None, sources=None):
                      page: int = Query(1, ge=1, le=1000), sort: str = Query(default="", max_length=64),
                      mode: Literal["keyword", "tag"] = "keyword",
                      tag_value: str = Query(default="", max_length=200),
-                     category: str = Query(default="", max_length=200)):
+                     category: str = Query(default="", max_length=200), deduplicate: bool = False):
         keyword, tag_value, category = keyword.strip(), tag_value.strip(), category.strip()
         if not keyword or (tag_value and (mode != "tag" or not source)):
             raise ComicApiError("搜索参数无效", 422, "invalid_request", source or None)
@@ -277,8 +278,8 @@ def create_app(store=None, sources=None):
             raise ComicApiError("分类和排序仅适用于单一图源搜索", 422, "invalid_request")
         if source:
             items = await service.search_source(source, keyword, page, sort, mode, tag_value, category)
-            return {"items": items, "all_results": {source: items}, "errors": {}}
-        return await service.aggregate_search(keyword, page, mode)
+            return search_result_payload(items, {source: items}, {}, deduplicate=deduplicate)
+        return await service.aggregate_search(keyword, page, mode, deduplicate=deduplicate)
 
     @app.get("/api/comic/{source}/{comic_id}")
     async def detail(source: str, comic_id: str):

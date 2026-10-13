@@ -32,7 +32,10 @@ python main.py
 
 ## 数据与功能
 
-- **混合搜索**：各图源结果统一展示并标注来源，按标题完全匹配、包含关键词、字符相似度排序；忽略大小写、全半角与标点差异。同名的不同图源版本保留独立入口。排序范围是本次返回的结果（聚合搜索为各源首页），不是全站全部漫画，也不包含语义理解或简繁转换。
+- **混合搜索**：各图源结果统一展示并标注来源，按标题完全匹配、包含关键词、字符相似度排序；忽略大小写、全半角与标点差异。排序与去重范围是本次返回的结果（聚合搜索为各源的当前页），不是全站全部漫画，不跨页隐藏记录，也不包含语义理解或简繁转换。
+- **作者搜索**：漫画卡片与详情中的作者名称可点击，多作者分别展示入口；使用作者名在全部已启用图源发起关键词搜索，重置页码并清除标签、分类和排序条件。实际匹配范围由各图源的关键词检索决定，不冒充原生作者索引或精确作者筛选。未知作者不提供搜索入口，阅读历史卡片仍保留续读进度。
+- **搜索去重**：搜索框下的「结果去重」开关默认关闭，关闭时保留全部原始结果。开启后，关键词、标签、单源和聚合搜索均在当前页合并高置信度重复作品；开关状态随搜索链接与最近搜索保留，切换开关回到第 1 页。合并时保留排名靠前的卡片，并以「作品版本」按钮保留每个图源及同源不同 ID 的原始入口，不修改书库、收藏或阅读进度。同源相同 ID 只显示一次；不同 ID 需规范化标题一致且作者集合相同。只清理可识别的作者、语言和汉化方括号／括号信息，不删除任意副标题、卷号、篇章或版本标记，也不使用模糊标题相似度合并。双方有页数时，允许的差值为较少页数的 3% 向下取整、最少 1 页、最多 4 页；超过即分开。作者缺失时，仅较长标题（规范化后至少 6 字符）及已知页数完全一致才合并；明确作者冲突、通用标题或元数据不足时保留独立结果。合并组内任意两项都须匹配，避免缺失信息串联不同作品。
+  页数只取上游返回的作品图片总数：禁漫 `total_photo`、哔咔 `pagesCount`（存在且有效时），拷贝未知；不把章节数或 API 分页数当页数，不为去重逐本请求详情。开启去重时，结果区与「全部」显示合并后的本页作品数，各图源徽标仍表示原始条目数，结果区另列合并数量；关闭时全部数量均按原始结果计算。
 
 - **标签与分类搜索**：详情页保留并展示全部标签，超过 12 项可展开；点击标签在该图源搜索，也可在搜索框下切换「关键词／标签」并输入名称。禁漫使用标签域 `main_tag=3`，哔咔使用 `comics?t=`，拷贝使用 `theme` 题材标识；标签搜索保留图源顺序，不按标题相似度重排。拷贝中文题材先匹配已知题材或完整题材目录，目录缓存 10 分钟，未知题材或目录失败明确报错，不退化成普通关键词搜索。各源标签含义、简繁和匹配规则不保证相同。
 - **哔咔搜索分类**：单独查看哔咔搜索结果时显示动态获取的分类，可与关键词或标签搜索叠加；「全部分类」清除筛选，换源时清除原分类及图源专用标签标识。分类目录在当前页面缓存 5 分钟，失败可重试且不阻止普通搜索。搜索 URL 与最近搜索保留搜索方式、图源和筛选条件；旧关键词历史仍可使用。图源分类与个人书库分类互相独立。
@@ -200,7 +203,7 @@ services:
 
 核心接口：
 
-- `search(keyword, page)`：漫画列表，每项含 `id/title/cover/author`。
+- `search(keyword, page)`：漫画列表，每项含 `id/title/cover/author`；可提供 `authors: [名称]` 和 `page_count: 正整数`，分别表示独立作者及作品总图片页数，用于搜索去重。未知页数省略或设为 `null`，不得填章节数、接口分页总数或 `0`；没有这些可选字段的旧插件继续可用。
 - `detail(comic_id)`：漫画详情及 `chapters: [{id, name, order}]`；可附 `tags: [{label, value}]`、`categories: [{label, value}]`，分别表示显示名称与检索值。禁漫/哔咔的标签两者相同，拷贝由 `theme.name/path_word` 映射，缺少有效标识的题材不伪造检索值。
 - 可选 `search_tag(keyword, page, tag_value="", sort="")`：声明 `tag_search` 能力后提供图源原生标签检索；可用 `tag_sorts` 声明排序。聚合标签搜索只调用支持此能力的插件，旧插件的 `search(keyword, page)` 签名不变。
 - 可选 `search_categories()`：声明 `search_categories` 能力后返回分类选项 `[{label, value}]`，并在 `search` / `search_tag` 中接收可选 `category`。目录应按需获取，不应在构造 manifest 时发出网络请求。
@@ -219,6 +222,8 @@ services:
 
 完整参数见 `/docs`。例如 `GET /api/search?keyword=科幻&mode=tag&source=copy&tag_value=kehuan` 按拷贝题材标识查询；`GET /api/search?keyword=职场&source=bika&category=全彩` 组合哔咔关键词与分类，加入 `mode=tag` 则使用标签与分类。
 
+搜索默认不去重，响应的 `items` 保留本页原始结果；只有传入 `deduplicate=true` 才返回去重结果。发生跨 ID 合并的条目附 `variants`（包含主版本在内的原始条目列表，各自保留 `source/id`）；`all_results` 保留各图源的合并前列表，`raw_count` 是原始条目总数，`duplicate_count` 是减少的卡片数。关闭去重时 `duplicate_count` 为 `0`。聚合响应的 `best_match` 始终指向 `items` 首项，空结果为 `null`；这些数量均不是全站命中总数。
+
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/sources` | 插件能力、账号状态与 enabled 开关，不返回凭据；包含已关闭图源 |
@@ -233,7 +238,7 @@ services:
 | POST | `/api/jm/sync/run` | JSON `{}` 同步设置范围，或 `{"album_ids":["123"]}` 指定最多 200 本 |
 | POST | `/api/jm/sync/check-local` | 检查设置范围内收藏对应的已有漫画，完整校验后登记为已下载，不下载图片 |
 | POST | `/api/jm/sync/cancel` | 停止本次同步或本地检查，不关闭定时计划 |
-| GET | `/api/search?keyword=&source=&page=&sort=&mode=&tag_value=&category=` | `mode=keyword`（默认）或 `tag`；省略 source 聚合支持该模式的图源；sort 按 search_sorts/tag_sorts 校验，tag_value 仅单源标签搜索可用，category 仅支持搜索分类的单源可用（内置为哔咔） |
+| GET | `/api/search?keyword=&source=&page=&sort=&mode=&tag_value=&category=&deduplicate=` | `deduplicate=false`（默认不去重），传 `true` 开启；`mode=keyword`（默认）或 `tag`；省略 source 聚合支持该模式的图源；sort 按 search_sorts/tag_sorts 校验，tag_value 仅单源标签搜索可用，category 仅支持搜索分类的单源可用（内置为哔咔） |
 | GET | `/api/sources/{source}/search-categories` | 按需获取搜索分类目录；内置仅哔咔支持，需要该图源登录 |
 | GET | `/api/comic/{source}/{comic_id}` | 详情 |
 | GET | `/api/chapter/{source}/{comic_id}/{chapter_id}` | 图片代理列表 |

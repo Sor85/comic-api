@@ -34,6 +34,7 @@ function harness() {
     syncChapterSort(){},syncChapterPreviews(){},drawChapters(){},requestAnimationFrame(){},
     detailHero:()=>{const hero=new Element('div'),text=new Element('div');hero.append(text);return {hero,text};},
   });
+  vm.runInContext(readFileSync(join(__dirname, '../src/web/static/comic-authors.js'), 'utf8'),context);
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
   vm.runInContext(app.slice(app.indexOf('function cloudFavoriteButton('),app.indexOf('function syncDetailHead(')),context);
   vm.runInContext(app.slice(app.indexOf('function renderDetail('),app.indexOf('async function toggleFavorite(')),context);
@@ -61,6 +62,18 @@ test('详情中的本地书库与 JM 账号收藏使用独立按钮',async()=>{
   const controls=h.roots['detail-body'].querySelectorAll('.detail-actions')[0];
   const texts=controls.querySelectorAll('button').map(button=>button.textContent);
   assert.ok(texts.includes('加入书库'));assert.ok(texts.includes('加入 JM 收藏'));
+});
+
+test('详情中的每位作者有独立搜索按钮，搜索时关闭详情',async()=>{
+  const h=harness(),searches=[];
+  h.state.detail={...detail,authors:['作者一','作者二']};h.state.detailRequest=0;
+  h.roots['reader-dialog']={open:false};h.roots['detail-dialog']={open:true,close(){this.open=false;}};
+  h.context.startSearch=(...args)=>searches.push(args);
+  h.context.renderDetail();await flush();
+  const links=h.roots['detail-body'].querySelectorAll('.author-link');
+  assert.equal(links.length,2);await links[1].onclick();
+  assert.equal(searches[0][0],'作者二');assert.equal(searches[0][2].mode,'keyword');
+  assert.equal(h.roots['detail-dialog'].open,false);assert.equal(h.state.detailRequest,1);
 });
 
 test('只有支持加入收藏的 JM 图源显示云端操作，未绑定时只显示绑定入口',async()=>{

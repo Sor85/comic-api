@@ -9,7 +9,7 @@ from urllib.parse import quote, urlparse
 
 from src.clients.base import BaseClient
 from src.errors import ComicApiError
-from src.metadata import comic_labels
+from src.metadata import comic_authors, comic_labels
 from src.sources import SourcePlugin
 
 # 线路域名映射参考 Breeze-plugin-copyComic 的 API_DOMAIN_BASE_MAP。
@@ -214,9 +214,10 @@ class CopyPlugin(SourcePlugin):
             raise ComicApiError("拷贝漫画响应格式已变化", 502, "invalid_response", self.id) from exc
 
     def _comic(self, item):
+        authors = comic_authors(item.get("author"))
         return {"id": str(item["path_word"]), "source": self.id, "title": item.get("name", ""),
                 "cover": item.get("cover", ""), "description": item.get("brief", ""),
-                "author": " / ".join(author.get("name", "") for author in item.get("author", [])),
+                "author": " / ".join(authors), "authors": authors,
                 "tags": comic_labels(item.get("theme"), value_key="path_word")}
 
     def _items(self, data):
