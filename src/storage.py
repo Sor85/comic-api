@@ -43,6 +43,13 @@ class Store:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY(source, comic_id)
                 );
+                CREATE TABLE IF NOT EXISTS library_categories (
+                    name TEXT PRIMARY KEY
+                );
+                CREATE TABLE IF NOT EXISTS library_category_members (
+                    category TEXT NOT NULL, source TEXT NOT NULL, comic_id TEXT NOT NULL,
+                    PRIMARY KEY(category, source, comic_id)
+                );
                 CREATE TABLE IF NOT EXISTS downloads (
                     id TEXT PRIMARY KEY, source TEXT NOT NULL, comic_id TEXT NOT NULL,
                     chapter_id TEXT NOT NULL, title TEXT NOT NULL, chapter TEXT NOT NULL,
@@ -90,7 +97,7 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS jm_sync_files_path ON jm_sync_files(path);
                 CREATE INDEX IF NOT EXISTS jm_sync_local_files_path ON jm_sync_local_files(path);
-                PRAGMA user_version=5;
+                PRAGMA user_version=6;
             """)
 
     @contextmanager
@@ -234,8 +241,37 @@ class Store:
     def books(self):
         with self.connect() as db:
             rows = db.execute("SELECT * FROM library ORDER BY updated_at DESC").fetchall()
-        return [dict(json.loads(r["metadata"]), source=r["source"], id=r["comic_id"], library_category=r["category"], updated_at=r["updated_at"])
-                for r in rows]
+            memberships = db.execute("SELECT * FROM library_category_members").fetchall()
+        categories = {}
+        for member in memberships:
+            categories.setdefault((member["source"], member["comic_id"]), set()).add(member["category"])
+        result = []
+        for row in rows:
+            names = categories.get((row["source"], row["comic_id"]), set())
+            if row["category"]:
+                names.add(row["category"])
+            result.append(dict(json.loads(row["metadata"]), source=row["source"], id=row["comic_id"],
+                               library_category=row["category"], library_categories=sorted(names),
+                               updated_at=row["updated_at"]))
+        return result
+
+    def library_categories(self):
+        with self.connect() as db:
+            return [row[0] for row in db.execute("""SELECT name FROM library_categories
+                UNION SELECT category FROM library WHERE category != '' ORDER BY 1""")]
+
+    def create_library_category(self, name):
+        with self.connect() as db:
+            db.execute("INSERT OR IGNORE INTO library_categories(name) VALUES (?)", (name,))
+
+    def import_favorite_book(self, source, comic_id, metadata, category):
+        """Add a cloud collection membership without replacing manual metadata/categories."""
+        with self.connect() as db:
+            added = db.execute("""INSERT OR IGNORE INTO library(source,comic_id,metadata) VALUES (?,?,?)""",
+                               (source, comic_id, json.dumps(metadata, ensure_ascii=False))).rowcount
+            db.execute("INSERT OR IGNORE INTO library_categories(name) VALUES (?)", (category,))
+            db.execute("INSERT OR IGNORE INTO library_category_members VALUES (?,?,?)", (category, source, comic_id))
+        return bool(added)
 
     def save_book(self, source, comic_id, metadata, category=""):
         with self.connect() as db:
@@ -251,6 +287,7 @@ class Store:
 
     def remove_book(self, source, comic_id):
         with self.connect() as db:
+            db.execute("DELETE FROM library_category_members WHERE source=? AND comic_id=?", (source, comic_id))
             db.execute("DELETE FROM library WHERE source=? AND comic_id=?", (source, comic_id))
 
     def tasks(self):

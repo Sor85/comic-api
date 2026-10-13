@@ -569,7 +569,7 @@ function card(item,{showSource=true,library=false,history=null}={}){
   if(history)info.append(node('p',`${history.chapterName||''} · ${history.index+1}/${history.total} 页`,'card-sub accent'));
   open.append(cover,info);el.append(open);
   if(!history)el.append(renderComicAuthors(item));
-  if(library)el.append(node('p',`${item.library_category||'未分类'} · ${item.chapters?.length||0} 章`,'card-sub'));
+  if(library)el.append(node('p',`${bookCategories(item).join(' / ')||'未分类'} · ${item.chapters?.length||0} 章`,'card-sub'));
   if(item.variants?.length>1)el.append(renderComicVariants(item.variants));
   if(library)el.append(libraryActions(item));
   return el;
@@ -597,12 +597,13 @@ function libraryActions(item){
   return controls;
 }
 async function editCategory(item){
-  const category=await ask({title:'设置分类',message:`《${item.title}》`,input:true,value:item.library_category||'',placeholder:'留空为未分类',choices:state.categories});
+  const category=await ask({title:'设置分类',message:`《${item.title}》 · 手动分类不影响收藏同步分类。`,input:true,value:item.library_category||'',placeholder:'留空清除手动分类',choices:state.categories});
   if(category===null)return;
-  await api(bookPath(item),write('PATCH',{category}));toast(category?`已移至「${category}」`:'已设为未分类');await loadLibrary();
+  await api(bookPath(item),write('PATCH',{category}));toast(category?`手动分类已设为「${category}」`:'手动分类已清除');await loadLibrary();
 }
 
 /* ---------- library ---------- */
+function bookCategories(item){return item.library_categories||[item.library_category].filter(Boolean);}
 async function loadLibrary() {
   const data=await api('/api/library');state.books=data.items;state.categories=data.categories||[];
   options($('library-category'),[{value:'*',label:'全部分类'},{value:'',label:'未分类'},...state.categories.map(v=>({value:v,label:v}))],$('library-category').value);
@@ -613,7 +614,7 @@ function filterBooks(){
   const category=$('library-category').value,sort=$('library-sort').value,needle=($('library-filter').value||'').trim().toLowerCase(),box=$('books');
   if(!state.books.length){box.replaceChildren(emptyState('书库为空','漫画详情中的「加入书库」用于收藏到本地书库，支持追更和继续阅读。',labelBtn('compass','发现漫画',()=>showTab('browse'),'primary'),'bookmark'));return;}
   const lastRead=new Map(readHistory().map(h=>[h.source+':'+h.id,h.updatedAt||0]));
-  const items=state.books.filter(b=>(category==='*'||b.library_category===category)&&(!needle||(b.title||'').toLowerCase().includes(needle)||(b.author||'').toLowerCase().includes(needle)));
+  const items=state.books.filter(b=>(category==='*'||(category?bookCategories(b).includes(category):!bookCategories(b).length))&&(!needle||(b.title||'').toLowerCase().includes(needle)||(b.author||'').toLowerCase().includes(needle)));
   if(sort==='read')items.sort((a,b)=>(lastRead.get(b.source+':'+b.id)||0)-(lastRead.get(a.source+':'+a.id)||0));
   else if(sort==='title')items.sort((a,b)=>String(a.title||'').localeCompare(String(b.title||''),'zh'));
   if(!items.length){box.replaceChildren(emptyState('没有符合条件的漫画','试试其他分类或关键词',undefined,'search'));return;}
@@ -866,7 +867,7 @@ function sourceToggle(plugin){
   const enabled=plugin.enabled!==false;
   const control=labelBtn(enabled?'toggle-right':'toggle-left',enabled?'已启用':'已关闭',()=>setSourceEnabled(plugin.id,!enabled),'small source-toggle'+(enabled?' on':''));
   control.setAttribute('role','switch');control.setAttribute('aria-checked',String(enabled));control.setAttribute('aria-label',`${plugin.name}启用状态`);
-  control.title='关闭后停止使用该图源并取消其下载；账号、书库和已完成文件保留。JM 定时同步暂停，重新启用后按原计划恢复。';
+  control.title='关闭后停止使用该图源并取消其下载；账号、书库和已完成文件保留。收藏同步到书库与 JM 图片定时同步暂停，重新启用后按原计划恢复。';
   return control;
 }
 function renderSourceList(){
@@ -919,8 +920,44 @@ function renderSourceSettings(){
     const submit=node('button','保存','primary');submit.type='submit';form.append(label,submit);form.onsubmit=event=>{event.preventDefault();run(async()=>{await api(`/api/sources/${enc(plugin.id)}/settings`,write('PUT',{...plugin.settings,[field.name]:input.value}));await loadSources();toast('设置已保存，后续请求立即生效');},submit);};section.append(form);body.append(section);}
   if(plugin.capabilities.includes('login')){const section=node('section',undefined,'setting-section');section.append(node('h3','登录凭证'),node('p',accountLabel(plugin),'muted'),labelBtn('key','管理登录凭证',()=>{configureAccount();$('credentials-dialog').showModal();}));body.append(section);}
   if(plugin.id==='jm'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','收藏与本地同步'),node('p','浏览远端收藏夹，按目录规则增量保存图片。','muted'),labelBtn('bookmark','打开 JM 收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('jm-favorites');}));body.append(section);}
-  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','哔咔收藏'),node('p','浏览账号的全部云端收藏，与本地书库独立。','muted'),labelBtn('bookmark','打开哔咔收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('bika-favorites');}));body.append(section);}
+  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','哔咔收藏'),node('p','浏览账号的全部云端收藏；默认与本地书库独立，可单独开启收藏同步到书库。','muted'),labelBtn('bookmark','打开哔咔收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('bika-favorites');}));body.append(section);}
+  if(['jm','bika'].includes(plugin.id)&&plugin.capabilities.includes('favorites'))body.append(favoriteLibrarySettings(plugin));
   if(!(plugin.settings_fields||[]).length&&!plugin.capabilities.includes('login'))body.append(node('p','此图源使用自动服务器配置，无需登录，暂无可修改选项。','muted'));
+}
+function favoriteLibrarySettings(plugin){
+  const section=node('section',undefined,'setting-section library-sync-settings'),content=node('div');
+  const path=`/api/sources/${enc(plugin.id)}/library-sync`;let busy=false;
+  section.append(node('h3','收藏同步到书库'),node('p','默认关闭，仅同步书目信息，不下载图片、不修改云收藏。手动分类保留，关闭同步或取消云收藏不删除已入库漫画。','muted'),content);
+  function render(data){
+    const {settings,category,current,active,paused}=data;
+    const toggle=labelBtn(settings.enabled?'toggle-right':'toggle-left',settings.enabled?'自动同步已开启':'自动同步已关闭',async()=>{
+      if(busy)return;busy=true;
+      try{render(await api(path,write('PUT',{...settings,enabled:!settings.enabled})));toast('书库同步设置已保存');await loadLibrary();}finally{busy=false;}
+    },'small source-toggle'+(settings.enabled?' on':''));
+    toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked',String(settings.enabled));toggle.setAttribute('aria-label',`${plugin.name}收藏自动同步到书库`);
+    toggle.disabled=!settings.enabled&&(plugin.enabled===false||!(plugin.account.authenticated||plugin.account.configured));
+    const actions=node('div',undefined,'form-actions'),sync=labelBtn('refresh-cw','立即同步',async()=>{
+      if(busy)return;busy=true;
+      try{render(await api(path+'/run',{method:'POST'}));}finally{busy=false;}
+    },'small');sync.disabled=!settings.enabled||active||paused;
+    actions.append(toggle,sync,labelBtn('refresh-cw','刷新状态',async()=>{await refresh();await loadLibrary();},'small'));
+    const labels={idle:'等待同步',running:'同步中',completed:'同步完成',partial:'部分完成',failed:'同步失败',stopped:'同步已停止',interrupted:'同步已中断'};
+    const summary=active?'同步中':labels[current.status]||'等待同步';
+    content.replaceChildren(node('p',`开启后创建「${category}」分类并立即同步全部收藏，之后每 ${settings.interval_minutes} 分钟增补。服务运行时自动执行，无需保持页面打开。`,'muted'),actions);
+    if(paused)content.append(node('p','图源已关闭，自动同步暂停。','muted'));
+    else if(!(plugin.account.authenticated||plugin.account.configured))content.append(node('p','绑定账号后可开启自动同步。','muted'));
+    if(current.status!=='idle')content.append(node('p',`${summary} · 已处理 ${current.processed||0}/${current.total||0} 本 · 新增 ${current.added||0} 本 · 失败 ${current.failed||0} 本`,'muted'));
+    if(data.next_run_at)content.append(node('p',`下次同步：${new Date(data.next_run_at*1000).toLocaleString('zh-CN')}`,'muted'));
+    if(current.error)content.append(node('p',current.error,'error'));
+    for(const error of current.errors||[])content.append(node('p',`${error.comic_id}：${error.message}`,'error'));
+  }
+  async function refresh(){
+    if(busy)return;busy=true;
+    try{render(await api(path,{cache:'no-store'}));}
+    catch(e){content.replaceChildren(node('p',e.message,'error'),labelBtn('refresh-cw','重新读取',refresh,'small'));}
+    finally{busy=false;}
+  }
+  content.append(node('p','正在读取同步设置…','muted'));refresh();return section;
 }
 function configureAccount(){
   const plugin=state.sources.find(s=>s.id===state.settingsSource),form=$('login-form');form.replaceChildren();if(!plugin)return;

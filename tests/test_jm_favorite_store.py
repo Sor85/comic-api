@@ -55,7 +55,7 @@ def test_v3_database_migrates_without_losing_existing_data(tmp_path):
         db.execute("PRAGMA user_version=3")
     migrated = Store(tmp_path)
     with migrated.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
     assert migrated.account("jm")["account"] == "test"
     assert migrated.books()[0]["library_category"] == "Existing category"
     owner = migrated.account_owner("test")

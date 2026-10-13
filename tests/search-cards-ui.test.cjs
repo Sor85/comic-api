@@ -26,6 +26,7 @@ function harness(){
   });
   vm.runInContext(readFileSync(join(__dirname, '../src/web/static/comic-authors.js'), 'utf8'),context);
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
+  vm.runInContext(app.slice(app.indexOf('function bookCategories('),app.indexOf('async function loadLibrary(')),context);
   vm.runInContext(app.slice(app.indexOf('function card('),app.indexOf('function libraryActions(')),context);
   return {context,opened,searches};
 }
@@ -43,6 +44,11 @@ test('普通卡片与书库卡片的作者按钮不嵌套，点击作者不打�
     await card.querySelectorAll('.card-open')[0].onclick();
     assert.equal(h.opened[0][0].id,'1');
   }
+});
+
+test('书库卡片同时显示手动分类和云收藏分类',()=>{
+  const h=harness(),card=h.context.card({...book,library_category:'追更',library_categories:['JM 收藏','追更']},{library:true});
+  assert.match(card.textContent,/JM 收藏 \/ 追更/);assert.doesNotMatch(card.textContent,/未分类/);
 });
 
 test('合并卡片为每个原始版本保留独立入口，同源版本不重名',async()=>{

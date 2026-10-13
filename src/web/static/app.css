@@ -411,6 +411,8 @@ dialog[open]{animation:pop .18s ease-out}
 .settings-form{display:grid;gap:14px}
 .settings-form input{width:100%}
 .settings-form button{justify-self:start}
+.library-sync-settings{font-size:15px;line-height:1.6}
+.library-sync-settings p{overflow-wrap:anywhere}
 
 /* Bika cloud favorites */
 .bika-favorites-view{font-size:15px;line-height:1.6}

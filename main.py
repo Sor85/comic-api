@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services.downloads import DownloadManager, pdf_password_for
+from src.services.favorites_library_sync import FavoritesLibrarySettings, FavoritesLibrarySync
 from src.services.jm_sync import JmSync, SyncSettings
 from src.services.search_dedup import search_result_payload
 from src.storage import Store
@@ -86,20 +87,23 @@ def create_app(store=None, sources=None):
     service = AggregatorService(store, sources)
     downloads = DownloadManager(store, service)
     jm_sync = JmSync(store, service)
+    library_sync = FavoritesLibrarySync(store, service)
 
     @asynccontextmanager
     async def lifespan(app):
         await downloads.start()
         await jm_sync.start()
+        await library_sync.start()
         try:
             yield
         finally:
+            await library_sync.stop()
             await jm_sync.stop()
             await downloads.stop()
 
     app = FastAPI(title="Comic · 图源与书库", version="2.0.0", lifespan=lifespan)
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
-    app.state.jm_sync = jm_sync
+    app.state.jm_sync, app.state.library_sync = jm_sync, library_sync
     app.mount("/static", VersionedStaticFiles(directory=WEB_STATIC), name="static")
 
     @app.exception_handler(ComicApiError)
@@ -135,6 +139,7 @@ def create_app(store=None, sources=None):
             downloads.cancel_source(source)
         if source == "jm":
             jm_sync.source_changed()
+        library_sync.source_changed(source)
         return {"success": True, "source": service.manifest(source)}
 
     @app.post("/api/sources/{source}/login")
@@ -148,9 +153,10 @@ def create_app(store=None, sources=None):
         if source == "jm":
             jm_sync.guard_account_change()
         try:
-            await service.call(source, "login", values)
-            if source == "jm":
-                jm_sync.account_changed()
+            async with library_sync.account_change(source):
+                await service.call(source, "login", values)
+                if source == "jm":
+                    jm_sync.account_changed()
         finally:
             if source == "jm":
                 jm_sync.account_changing = False
@@ -172,13 +178,26 @@ def create_app(store=None, sources=None):
         if source == "jm":
             jm_sync.guard_account_change()
         try:
-            await service.call(source, "logout")
-            if source == "jm":
-                jm_sync.account_changed()
+            async with library_sync.account_change(source):
+                await service.call(source, "logout")
+                if source == "jm":
+                    jm_sync.account_changed()
         finally:
             if source == "jm":
                 jm_sync.account_changing = False
         return {"success": True}
+
+    @app.get("/api/sources/{source}/library-sync")
+    async def library_sync_status(source: str):
+        return JSONResponse(library_sync.status(source), headers={"Cache-Control": "no-store"})
+
+    @app.put("/api/sources/{source}/library-sync")
+    async def save_library_sync_settings(source: str, values: FavoritesLibrarySettings):
+        return library_sync.save_settings(source, values)
+
+    @app.post("/api/sources/{source}/library-sync/run", status_code=202)
+    async def run_library_sync(source: str):
+        return library_sync.launch(source)
 
     @app.get("/api/jm/favorites")
     async def jm_favorites(page: int = Query(1, ge=1, le=1000),
@@ -305,8 +324,9 @@ def create_app(store=None, sources=None):
     @app.get("/api/library")
     async def library(category: str | None = None):
         all_books = store.books()
-        return {"items": all_books if category is None else [item for item in all_books if item["library_category"] == category],
-                "categories": sorted({item["library_category"] for item in all_books if item["library_category"]})}
+        return {"items": all_books if category is None else [item for item in all_books
+                if category in item["library_categories"] or (category == "" and not item["library_categories"])],
+                "categories": store.library_categories()}
 
     @app.put("/api/library/{source}/{comic_id}")
     async def save_book(source: str, comic_id: str, data: BookInput):
