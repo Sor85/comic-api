@@ -43,4 +43,3 @@ $('bika-favorites-keyword').oninput=renderBikaFavorites;
 $('bika-favorites-sort').onchange=()=>{bikaFavorites.sort=$('bika-favorites-sort').value;bikaFavorites.page=1;run(loadBikaFavorites);};
 $('bika-favorites-prev').onclick=()=>{if(bikaFavorites.page>1){bikaFavorites.page--;run(loadBikaFavorites);}};
 $('bika-favorites-next').onclick=()=>{if(bikaFavorites.hasNext){bikaFavorites.page++;run(loadBikaFavorites);}};
-appReady.then(()=>{if(new URLSearchParams(location.search).get('tab')==='bika-favorites')showTab('bika-favorites');});

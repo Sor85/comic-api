@@ -80,7 +80,7 @@ def test_invalid_enabled_config_fails_without_echoing_secrets(username, password
 def test_bad_switch_and_missing_credentials_stop_app_creation(app_factory, monkeypatch):
     import main
 
-    monkeypatch.setattr(main, "Store", lambda: pytest.fail("invalid auth must fail before store creation"))
+    monkeypatch.setattr(main, "AggregatorService", lambda *args: pytest.fail("invalid auth must fail before service creation"))
     monkeypatch.setenv("AUTH_ENABLED", "tru")
     with pytest.raises(ValueError, match="AUTH_ENABLED"):
         main.create_app()

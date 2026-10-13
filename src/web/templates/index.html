@@ -10,6 +10,7 @@
   <script src="/static/comic-tags.js?v=27" defer></script>
   <script src="/static/comic-authors.js?v=27" defer></script>
   <script src="/static/chapter-previews.js?v=27" defer></script>
+  <script src="/static/site-settings.js?v=27" defer></script>
   <script src="/static/app.js?v=27" defer></script>
   <script src="/static/jm-sync.js?v=27" defer></script>
   <script src="/static/bika-favorites.js?v=27" defer></script>
@@ -33,8 +34,8 @@
         <svg class="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
         <svg class="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
       </button>
-      <button id="accounts" class="icon-btn ghost" type="button" title="图源管理" aria-label="图源管理">
-        <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+      <button id="settings-open" data-settings-open aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false" class="icon-btn ghost" type="button" title="设置" aria-label="设置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg>
       </button>
     </div>
   </header>
@@ -149,12 +150,50 @@
       <div id="bika-favorites-pager" class="pager" hidden><button id="bika-favorites-prev" type="button">上一页</button><span id="bika-favorites-page"></span><button id="bika-favorites-next" type="button">下一页</button></div>
     </section>
   </main>
+  <dialog id="settings-dialog" class="site-settings-dialog" aria-labelledby="settings-title">
+    <div class="dialog-head"><h2 id="settings-title">设置</h2><button class="icon-btn" data-close="settings-dialog" type="button" title="关闭设置" aria-label="关闭设置" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="site-settings-body">
+      <p class="muted site-settings-intro">站点访问与图源配置保存在服务器，对所有浏览器生效。</p>
+      <div class="site-settings-grid">
+        <section class="site-settings-card" aria-labelledby="site-auth-title">
+          <div class="site-settings-card-head">
+            <div><h2 id="site-auth-title">站点鉴权</h2><p class="muted">独立于图源账号的访问凭据</p></div>
+            <button id="site-auth-toggle" class="source-toggle small" type="button" role="switch" aria-checked="false" aria-label="站点鉴权" disabled>状态未读取</button>
+          </div>
+          <p class="muted">默认关闭。开启后，页面、API、图片和下载均需要用户名与密码，健康检查保持公开。</p>
+          <form id="site-auth-form" class="settings-form">
+            <fieldset id="site-auth-fields" class="site-auth-fields" disabled>
+              <label for="site-auth-username">用户名<input id="site-auth-username" name="username" autocomplete="username" maxlength="128" spellcheck="false"></label>
+              <label for="site-auth-password">新密码<input id="site-auth-password" name="password" type="password" autocomplete="new-password" maxlength="1024" aria-describedby="site-auth-password-note"></label>
+              <p id="site-auth-password-note" class="muted">密码不会回显。留空时保留现有密码。</p>
+              <label for="site-auth-confirm">确认新密码<input id="site-auth-confirm" name="password_confirmation" type="password" autocomplete="new-password" maxlength="1024"></label>
+            </fieldset>
+            <div class="form-actions"><button id="site-auth-save" class="primary" type="submit" disabled>保存凭据</button><button id="site-auth-reload" type="button">重新读取</button></div>
+            <p id="site-auth-message" class="status" role="status" aria-live="polite"></p>
+          </form>
+          <div class="site-settings-note">
+            <p id="site-auth-storage" class="muted">鉴权配置正在读取。</p>
+            <p class="muted">开关与保存按钮均提交当前表单，立即生效；开启或修改凭据后需重新认证。关闭鉴权会开放实例访问，已保存凭据保留。</p>
+            <p class="muted">HTTP Basic 不加密传输，公网访问必须使用 HTTPS。所有通过认证的人均可操作实例中的账号、书库和下载。</p>
+          </div>
+        </section>
+        <section class="site-settings-card" aria-labelledby="settings-sources-title">
+          <div class="site-settings-card-head"><div><h2 id="settings-sources-title">图源管理</h2><p class="muted">图源开关、登录凭据与独立设置</p></div><button id="settings-sources-refresh" type="button" class="small">刷新图源</button></div>
+          <p class="muted">每个图源独立请求，某个图源不可用时不影响其他图源。关闭图源后停止使用并取消该源下载，账号、书库和已完成文件保留。</p>
+          <p id="settings-sources-message" class="status" role="status"></p>
+          <div id="source-list"></div>
+          <div class="site-settings-note"><p class="muted">圆点表示最近一次连通检测结果，关闭的图源不检测。</p><button id="health-recheck" type="button" class="small"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>重新检测</button></div>
+        </section>
+      </div>
+    </div>
+  </dialog>
   <nav id="tabbar" class="tabbar" aria-label="主导航">
     <button data-tab="browse" class="active" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg><span>发现</span></button>
     <button data-tab="library" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg><span>书库</span></button>
     <button data-tab="downloads" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>下载</span><i class="tab-dot" data-downloads-dot hidden></i></button>
     <button data-tab="jm-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m8 14 3 3 5-5"/></svg><span>JM 收藏</span></button>
       <button data-tab="bika-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="m9 10 2 2 4-4"/></svg><span>哔咔收藏</span></button>
+    <button data-settings-open aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>设置</span></button>
   </nav>
   <dialog id="jm-sync-settings" class="jm-sync-dialog">
     <div class="dialog-head"><h2>JM 收藏同步设置</h2><button type="button" data-close="jm-sync-settings">关闭</button></div>
@@ -204,11 +243,6 @@
   <dialog id="detail-dialog" class="sheet">
     <div class="dialog-head floating"><h2 id="detail-title">漫画详情</h2><button class="icon-btn" data-close="detail-dialog" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>
     <div id="detail-body"></div>
-  </dialog>
-  <dialog id="account-dialog"><div class="dialog-head"><h2>图源管理</h2><button class="icon-btn" data-close="account-dialog" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>
-    <p class="dialog-intro muted">每个图源独立请求，某个图源不可用时不影响其他图源。启用开关的状态保存在服务器，关闭后停止使用并取消该源下载，账号、书库和已完成文件保留。圆点表示最近一次连通检测结果，关闭的图源不检测。</p>
-    <div id="source-list"></div>
-    <div class="dialog-foot"><button id="health-recheck" type="button" class="small"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>重新检测</button></div>
   </dialog>
   <dialog id="source-settings-dialog"><div class="dialog-head"><h2 id="source-settings-title">图源设置</h2><button class="icon-btn" data-close="source-settings-dialog" type="button" title="返回图源列表" aria-label="返回图源列表"><svg viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></button></div>
     <div id="source-settings-body"></div>

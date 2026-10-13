@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from src.auth import AuthSettings, BasicAuthMiddleware
+from src.auth import AuthManager, AuthUpdate, BasicAuthMiddleware
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services.downloads import DownloadManager, pdf_password_for
@@ -84,8 +84,8 @@ class SyncInput(BaseModel):
 
 
 def create_app(store=None, sources=None):
-    auth = AuthSettings.from_env()
     store = store or Store()
+    auth = AuthManager(store)
     service = AggregatorService(store, sources)
     downloads = DownloadManager(store, service)
     jm_sync = JmSync(store, service)
@@ -104,8 +104,8 @@ def create_app(store=None, sources=None):
             await downloads.stop()
 
     app = FastAPI(title="Comic · 图源与书库", version="2.0.0", lifespan=lifespan)
-    if auth.enabled:
-        app.add_middleware(BasicAuthMiddleware, settings=auth)
+    app.add_middleware(BasicAuthMiddleware, auth=auth)
+    app.state.auth = auth
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
     app.state.jm_sync, app.state.library_sync = jm_sync, library_sync
     app.mount("/static", VersionedStaticFiles(directory=WEB_STATIC), name="static")
@@ -130,6 +130,14 @@ def create_app(store=None, sources=None):
     @app.get("/")
     async def home():
         return HTMLResponse(versioned_index_html(), headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/settings/auth")
+    async def auth_settings():
+        return JSONResponse(auth.status(), headers={"Cache-Control": "no-store"})
+
+    @app.put("/api/settings/auth")
+    async def save_auth_settings(values: AuthUpdate):
+        return JSONResponse(await auth.save(values), headers={"Cache-Control": "no-store"})
 
     @app.get("/api/sources")
     async def sources_list():

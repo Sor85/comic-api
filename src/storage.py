@@ -130,10 +130,10 @@ class Store:
             db.execute("INSERT INTO source_settings VALUES (?,?) ON CONFLICT(source) DO UPDATE SET settings=excluded.settings",
                        (source, json.dumps(values)))
 
-    def settings(self, name):
+    def settings(self, name, default=None):
         with self.connect() as db:
             row = db.execute("SELECT settings FROM app_settings WHERE name=?", (name,)).fetchone()
-        return json.loads(row[0]) if row else {}
+        return json.loads(row[0]) if row else ({} if default is None else default)
 
     def save_settings(self, name, values):
         with self.connect() as db:

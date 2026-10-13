@@ -11,6 +11,7 @@ const state = {
 };
 const BROWSE_ACTIONS = {latest: '最新更新', category: '分类浏览', leaderboard: '排行榜', random: '随机推荐'};
 const BROWSE_ORDER = ['latest', 'category', 'leaderboard', 'random'];
+const TAB_LABELS = {browse:'发现漫画',library:'我的书库',downloads:'下载任务','jm-favorites':'JM 收藏','bika-favorites':'哔咔收藏'};
 const statuses = {queued:'排队中',running:'下载中',cancelling:'正在取消',cancelled:'已取消',failed:'失败',completed:'已完成',fetching:'获取章节',downloading:'下载图片',packaging:'打包 PDF',interrupted:'重启中断'};
 const TONES = {queued:'muted',running:'info',cancelling:'warn',cancelled:'muted',failed:'danger',interrupted:'danger',completed:'ok'};
 const CAP_LABELS = {search:'搜索',latest:'最新',category:'分类',leaderboard:'排行',random:'随机',login:'账号',favorites:'收藏夹',add_favorite:'加入收藏'};
@@ -140,7 +141,7 @@ function syncSourceNavigation(){
   for(const source of ['jm','bika']){
     const p=sourcePlugin(source),hidden=!p||p.enabled===false||!p.capabilities.includes('favorites'),tab=`${source}-favorites`;
     document.querySelectorAll(`[data-tab="${tab}"]`).forEach(control=>control.hidden=hidden);
-    if(hidden&&state.tab===tab)showTab('browse');
+    if(hidden&&state.tab===tab)showTab('browse',true,false);
   }
 }
 function refreshSourceViews(){
@@ -185,6 +186,7 @@ function setView(view){
   $('results-view').hidden=view!=='results';
 }
 function viewURL(){
+  if(state.tab&&state.tab!=='browse')return '?'+new URLSearchParams({tab:state.tab});
   if(state.view!=='results')return location.pathname;
   const params=new URLSearchParams();
   if(state.search){for(const [key,value] of searchParams(state.search))params.set(key==='keyword'?'q':key,value);}
@@ -192,9 +194,9 @@ function viewURL(){
   return '?'+params;
 }
 function syncHistory(push){
-  const snap={view:state.view,search:state.search&&{...state.search},discover:{...state.discover}};
+  const snap={tab:state.tab,view:state.view,search:state.search&&{...state.search},discover:{...state.discover}};
   try{history[push?'pushState':'replaceState'](snap,'',viewURL());}catch{}
-  document.title=state.view==='results'?`${state.search?state.search.keyword:BROWSE_ACTIONS[state.discover.action]} · Comic`:'Comic · 聚合漫画';
+  document.title=state.tab!=='browse'?`${TAB_LABELS[state.tab]} · Comic`:state.view==='results'?`${state.search?state.search.keyword:BROWSE_ACTIONS[state.discover.action]} · Comic`:'Comic · 聚合漫画';
 }
 function openResults(){
   const push=state.view!=='results';
@@ -211,6 +213,7 @@ function showHome(){
   if(!state.shelvesLoaded||state.shelfBlocked||state.shelfFailed)run(loadShelves);
 }
 function goHome(){
+  if(state.tab!=='browse'){showTab('browse',false);showHome();syncHistory(true);return;}
   if(state.view==='results'&&state.pushedResults&&history.state?.view==='results'){history.back();return;}
   showHome();syncHistory(false);
 }
@@ -218,7 +221,9 @@ function initBrowse(){
   state.browseReady=true;
   const saved=readLocal('comic:discover');if(saved&&typeof saved==='object')Object.assign(state.discover,saved,{page:1});
   renderQuick();renderRecent();renderContinue();syncSearchMode();
-  const params=new URLSearchParams(location.search);
+  const params=new URLSearchParams(location.search),tab=params.get('tab');
+  if(tab==='settings')run(openSiteSettings);
+  if(tab&&Object.hasOwn(TAB_LABELS,tab)&&tab!=='browse'){setView('home');showTab(tab,false);syncHistory(false);return;}
   const q=(params.get('q')||'').trim().slice(0,200),src=params.get('source'),action=params.get('browse');
   if(q){
     state.search={keyword:q,source:sourcePlugin(src)?src:'',page:Math.min(1000,Math.max(1,parseInt(params.get('page'),10)||1)),sort:params.get('sort')||'',mode:params.get('mode')==='tag'?'tag':'keyword',tag_value:(params.get('tag_value')||'').slice(0,200),category:(params.get('category')||'').slice(0,200),deduplicate:['true','1'].includes(params.get('deduplicate'))};
@@ -286,7 +291,7 @@ async function loadShelves(){
   state.shelvesLoaded=true;state.shelfBlocked=state.shelfFailed=false;
   const current=discoverPlugin(),list=browsable().sort((a,b)=>(b===current)-(a===current));
   box.replaceChildren();
-  if(!list.length){box.append(emptyState('暂无已启用的浏览图源','图源启用状态可在右上角「图源管理」中设置。'));return;}
+  if(!list.length){box.append(emptyState('暂无已启用的浏览图源','图源启用状态位于「设置 → 图源管理」。'));return;}
   const jobs=[];
   for(const p of list){
     jobs.push(loadShelf(p,request));
@@ -460,7 +465,7 @@ function showMoreResults(){
 }
 function showNoEnabledSources(){
   beginResults();renderFilters();$('results-title').textContent='暂无已启用的图源';$('results-meta').textContent='';
-  showResults([],'暂无已启用的图源','图源启用状态可在右上角「图源管理」中设置。');
+  showResults([],'暂无已启用的图源','图源启用状态位于「设置 → 图源管理」。');
 }
 async function loadDiscover(){
   const p=normalizeDiscover();if(!p){showNoEnabledSources();return;}
@@ -541,12 +546,15 @@ function searchElsewhere(title){
 }
 
 /* ---------- tabs & cards ---------- */
-function showTab(tab) {
+function showTab(tab,updateHistory=true,dismissSettings=true) {
+  if(tab==='settings'){run(openSiteSettings);return;}
+  if(dismissSettings)closeSiteSettings();
+  if(!Object.hasOwn(TAB_LABELS,tab))tab='browse';
   if(['jm-favorites','bika-favorites'].includes(tab)){const p=sourcePlugin(tab.replace('-favorites',''));if(!p||p.enabled===false||!p.capabilities.includes('favorites'))tab='browse';}
   const changed=state.tab!==tab;state.tab=tab;
-  for(const id of ['browse','library','downloads','jm-favorites','bika-favorites'])$(id).hidden=id!==tab;
+  for(const id of Object.keys(TAB_LABELS))$(id).hidden=id!==tab;
   document.querySelectorAll('[data-tab]').forEach(n=>{const on=n.dataset.tab===tab;n.classList.toggle('active',on);n.setAttribute('aria-current',on?'page':'false');});
-  if(changed)window.scrollTo({top:0});
+  if(changed){window.scrollTo({top:0});if(updateHistory&&state.browseReady)syncHistory(true);}
   if(tab==='browse'&&state.view==='home')renderContinue();
   if(tab==='library')run(loadLibrary);
   if(tab==='downloads')run(loadTasks);
@@ -634,7 +642,7 @@ function detailHero(item,loading){
   return {hero,text};
 }
 async function openComic(item,opts={}) {
-  if(sourcePlugin(item.source)?.enabled===false){toast('图源已关闭，可在图源管理中重新启用');return;}
+  if(sourcePlugin(item.source)?.enabled===false){toast('图源已关闭，重新启用入口位于「设置 → 图源管理」');return;}
   chapterPreviews.stop();
   const request=++state.detailRequest,dlg=$('detail-dialog');state.detail=null;state.detailItem=item;
   $('detail-title').textContent=item.title||'漫画详情';
@@ -780,7 +788,7 @@ function cloudFavoriteButton(detail){
   const sync=busy=>{control.innerHTML=svgIcon(confirmed?'check':'star');control.append(node('span',busy?`读取${space}${name}…`:!loaded?'收藏状态未确认':confirmed?'已收藏':`加入${space}${name}`));control.classList.toggle('on',confirmed===true);control.title=loaded&&confirmed===null?'本地收藏表尚无此漫画的状态，添加前实时检查远端；不提供取消收藏':`${account}收藏与本地书库独立；状态读取失败时点击重试，不提供取消收藏`;};
   const report=error=>toast(error.message,{tone:'error',...(error.code==='login_required'?{action:{label:`绑定${space}${account}`,run:()=>bindButton(source).onclick()}}:{})});
   const control=button('',async()=>{
-    if(sourcePlugin(source)?.enabled===false){report(new Error('图源已关闭，可在图源管理中重新启用'));return;}
+    if(sourcePlugin(source)?.enabled===false){report(new Error('图源已关闭，重新启用入口位于「设置 → 图源管理」'));return;}
     if(!loaded){await loadStatus();return;}
     sync(true);
     try{
@@ -908,7 +916,7 @@ function runHealthChecks(force){for(const plugin of activeSources())if(state.hea
 function renderSourceSettings(){
   const plugin=state.sources.find(s=>s.id===state.settingsSource),body=$('source-settings-body');body.replaceChildren();if(!plugin)return;
   $('source-settings-title').textContent=plugin.name+' · 设置';
-  if(plugin.enabled===false)body.append(node('p','图源已关闭；服务器设置和已保存凭据保留。登录、浏览与下载需先在图源管理中启用。','muted'));
+  if(plugin.enabled===false)body.append(node('p','图源已关闭；服务器设置和已保存凭据保留。登录、浏览与下载需先在「设置 → 图源管理」中启用。','muted'));
   for(const field of plugin.settings_fields||[]){const section=node('section',undefined,'setting-section');section.append(node('h3',field.label),node('p',field.description||'','muted'));
     const form=node('form',undefined,'settings-form'),label=node('label',field.label);let input;
     if(field.type==='select'&&Array.isArray(field.options)){input=node('select');input.name=field.name;
@@ -919,8 +927,8 @@ function renderSourceSettings(){
     label.append(input);
     const submit=node('button','保存','primary');submit.type='submit';form.append(label,submit);form.onsubmit=event=>{event.preventDefault();run(async()=>{await api(`/api/sources/${enc(plugin.id)}/settings`,write('PUT',{...plugin.settings,[field.name]:input.value}));await loadSources();toast('设置已保存，后续请求立即生效');},submit);};section.append(form);body.append(section);}
   if(plugin.capabilities.includes('login')){const section=node('section',undefined,'setting-section');section.append(node('h3','登录凭证'),node('p',accountLabel(plugin),'muted'),labelBtn('key','管理登录凭证',()=>{configureAccount();$('credentials-dialog').showModal();}));body.append(section);}
-  if(plugin.id==='jm'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','收藏与本地同步'),node('p','浏览远端收藏夹，按目录规则增量保存图片。','muted'),labelBtn('bookmark','打开 JM 收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('jm-favorites');}));body.append(section);}
-  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','哔咔收藏'),node('p','浏览账号的全部云端收藏；默认与本地书库独立，可单独开启收藏同步到书库。','muted'),labelBtn('bookmark','打开哔咔收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('bika-favorites');}));body.append(section);}
+  if(plugin.id==='jm'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','收藏与本地同步'),node('p','浏览远端收藏夹，按目录规则增量保存图片。','muted'),labelBtn('bookmark','打开 JM 收藏',()=>{$('source-settings-dialog').close();showTab('jm-favorites');}));body.append(section);}
+  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','哔咔收藏'),node('p','浏览账号的全部云端收藏；默认与本地书库独立，可单独开启收藏同步到书库。','muted'),labelBtn('bookmark','打开哔咔收藏',()=>{$('source-settings-dialog').close();showTab('bika-favorites');}));body.append(section);}
   if(['jm','bika'].includes(plugin.id)&&plugin.capabilities.includes('favorites'))body.append(favoriteLibrarySettings(plugin));
   if(!(plugin.settings_fields||[]).length&&!plugin.capabilities.includes('login'))body.append(node('p','此图源使用自动服务器配置，无需登录，暂无可修改选项。','muted'));
 }
@@ -1112,7 +1120,7 @@ $('keyword').addEventListener('input',syncClear);
 $('keyword').addEventListener('keydown',event=>{if(event.key==='Escape'&&$('keyword').value){event.preventDefault();$('keyword').value='';syncClear();}});
 $('keyword-clear').onclick=()=>{$('keyword').value='';syncClear();$('keyword').focus();};
 $('home-link').onclick=event=>{event.preventDefault();goHome();$('keyword').focus();};
-$('brand').onclick=event=>{event.preventDefault();if(state.tab!=='browse')showTab('browse');goHome();};
+$('brand').onclick=event=>{event.preventDefault();goHome();};
 $('results-back').onclick=goHome;
 $('discover-prev').onclick=()=>turnPage(-1);$('discover-next').onclick=()=>turnPage(1);
 $('discover-again').onclick=()=>run(loadDiscover,$('discover-again'));
@@ -1122,17 +1130,23 @@ $('recent-clear').onclick=()=>{saveLocal('comic:recent',[]);renderRecent();};
 $('history-clear').onclick=()=>run(async()=>{if(!await ask({title:'清除阅读记录',message:'清空「继续阅读」列表？各章节的阅读进度会保留。',ok:'清除',danger:true}))return;saveLocal('comic:history',[]);renderContinue();});
 {const row=$('continue-row'),shelf=row.parentElement;shelf.append(state.continueScroller=scrollerFor(row));}
 window.addEventListener('resize',()=>document.querySelectorAll('.scroller').forEach(s=>s.syncArrows?.()),{passive:true});
-// Back/forward moves between the home view and results, restoring the query and filters.
-window.addEventListener('popstate',event=>{
-  const snap=event.state;if(!state.browseReady)return;
-  if(state.tab!=='browse')showTab('browse');
-  if(snap?.view==='results'){
-    state.search=snap.search?{...snap.search}:null;Object.assign(state.discover,snap.discover||{});
-    $('keyword').value=state.search?.keyword||'';syncClear();setView('results');run(state.search?loadSearch:loadDiscover);
-  }else showHome();
-});
+// Restore tabs as well as browse queries when navigating back or forward.
+function restorePage(snap){
+  if(!state.browseReady)return;
+  const tab=snap?.tab||new URLSearchParams(location.search).get('tab')||'browse';
+  showTab(tab==='settings'?'browse':tab,false);
+  if(state.tab==='browse'){
+    if(snap?.view==='results'){
+      state.search=snap.search?{...snap.search}:null;Object.assign(state.discover,snap.discover||{});
+      $('keyword').value=state.search?.keyword||'';syncClear();setView('results');run(state.search?loadSearch:loadDiscover);
+    }else showHome();
+  }
+  syncHistory(false);
+  if(tab==='settings')run(openSiteSettings);
+}
+window.addEventListener('popstate',event=>restorePage(event.state));
 $('library-refresh').onclick=()=>run(loadLibrary,$('library-refresh'));$('library-category').onchange=filterBooks;$('library-sort').onchange=filterBooks;$('library-filter').oninput=filterBooks;$('tasks-refresh').onclick=()=>run(loadTasks,$('tasks-refresh'));
-$('accounts').onclick=()=>run(async()=>{await loadSources();$('account-dialog').showModal();runHealthChecks(false);});
+initSiteSettings();
 $('health-recheck').onclick=()=>runHealthChecks(true);
 $('login-form').onsubmit=event=>{event.preventDefault();const source=state.settingsSource;run(async()=>{await api(`/api/sources/${enc(source)}/login`,write('POST',Object.fromEntries(new FormData(event.target))));await loadSources();configureAccount();if(source==='bika')refreshBikaAccountViews();toast('图源账号已保存');},event.submitter);};
 $('reader-close').onclick=()=>closeReader();$('reader-dialog').addEventListener('cancel',event=>{event.preventDefault();closeReader();});
@@ -1180,4 +1194,6 @@ syncThemeColor();
 setInterval(()=>{if((state.tab==='downloads'||state.activeTasks)&&!document.hidden&&!loadTasks.busy){loadTasks.busy=true;loadTasks().catch(e=>{if(state.tab==='downloads')toast(e.message);}).finally(()=>loadTasks.busy=false);}},2500);
 // autofocus pops the on-screen keyboard on touch devices; drop it there.
 if(matchMedia('(pointer:coarse)').matches&&document.activeElement===$('keyword'))$('keyword').blur();
-const appReady=run(async()=>{await loadSources();await loadLibrary();refreshTaskDot();});
+// All deferred feature scripts must be ready before restoring a deep-linked tab.
+const appReady=new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}))
+  .then(()=>run(async()=>{await loadSources();await loadLibrary();refreshTaskDot();}));

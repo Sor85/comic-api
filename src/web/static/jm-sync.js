@@ -217,4 +217,3 @@ setInterval(()=>{
   if(state.tab!=='jm-favorites'||document.hidden||jm.polling)return;
   jm.polling=true;loadJmStatus().catch(error=>{$('jm-sync-schedule').textContent=`同步状态读取失败：${error.message}`;}).finally(()=>jm.polling=false);
 },2500);
-appReady.then(()=>{if(new URLSearchParams(location.search).get('tab')==='jm-favorites')showTab('jm-favorites');});

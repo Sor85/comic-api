@@ -380,8 +380,35 @@ dialog[open]{animation:pop .18s ease-out}
 .toast-action{flex:0 0 auto;border:0;background:none;color:var(--accent);font-weight:600;padding:4px 8px;font-size:13px}
 .toast-action:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}
 
+/* unified settings */
+.site-settings-dialog{font-size:15px;line-height:1.6;width:min(1100px,94vw);padding:0;overflow:hidden}
+.site-settings-dialog[open]{display:flex;flex-direction:column}
+.site-settings-dialog>.dialog-head{flex-shrink:0;margin:0;padding:18px 24px}
+.site-settings-body{overflow-y:auto;overscroll-behavior:contain;min-height:0;padding:0 24px 24px}
+body.site-settings-open{overflow:hidden}
+.site-settings-intro{margin:0 0 24px}
+.site-settings-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);align-items:start;gap:24px}
+.site-settings-card{min-width:0;padding:24px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+.site-settings-card>p,.site-settings-note p{font-size:13px;overflow-wrap:anywhere}
+.site-settings-card-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
+.site-settings-card-head h2{margin:0 0 4px;font-size:20px;line-height:1.4}
+.site-settings-card-head p{margin:0;font-size:13px}
+.site-auth-fields{display:grid;gap:14px;border:0;padding:0;margin:0;min-width:0}
+.site-auth-fields p{margin:-8px 0 0;font-size:12px}
+.site-settings-note{border-top:1px solid var(--line);margin-top:18px;padding-top:18px}
+.site-settings-note p:last-child{margin-bottom:0}
+#site-auth-message:empty,#settings-sources-message:empty{display:none}
+[data-settings-open][aria-expanded="true"]{background:var(--soft);color:var(--accent)}
+@media(max-width:1000px){.site-settings-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:700px){
+  .site-settings-dialog{width:calc(100vw - 24px);max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);margin:auto;padding:0;border-radius:18px;border-bottom:1px solid var(--line)}
+  .site-settings-dialog>.dialog-head{padding:14px 16px}
+  .site-settings-body{padding:0 16px 16px}
+  .site-settings-grid{gap:18px}.site-settings-card{padding:16px}.site-settings-card-head{gap:12px}
+}
+
 /* source management */
-#account-dialog{font-size:15px;line-height:1.6}
+#source-settings-dialog,#credentials-dialog{font-size:15px;line-height:1.6}
 .source-actions{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:8px;flex-shrink:0}
 .source-toggle{min-width:92px}
 .source-toggle svg{width:24px;height:24px}
