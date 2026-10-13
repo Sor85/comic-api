@@ -205,7 +205,7 @@
     <div id="detail-body"></div>
   </dialog>
   <dialog id="account-dialog"><div class="dialog-head"><h2>图源管理</h2><button class="icon-btn" data-close="account-dialog" type="button" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>
-    <p class="dialog-intro muted">每个图源独立请求，某个图源不可用时不影响其他图源。圆点表示最近一次连通检测结果。</p>
+    <p class="dialog-intro muted">每个图源独立请求，某个图源不可用时不影响其他图源。启用开关的状态保存在服务器，关闭后停止使用并取消该源下载，账号、书库和已完成文件保留。圆点表示最近一次连通检测结果，关闭的图源不检测。</p>
     <div id="source-list"></div>
     <div class="dialog-foot"><button id="health-recheck" type="button" class="small"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>重新检测</button></div>
   </dialog>

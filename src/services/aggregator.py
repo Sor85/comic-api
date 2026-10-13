@@ -18,14 +18,33 @@ class AggregatorService:
         self.sources = load_sources(self.store) if sources is None else sources
         self._slots = {key: asyncio.Semaphore(2) for key in self.sources}
         self._image_proxy = ImageProxy(self.store)
+        self._enabled = self.store.settings("source_states")
 
-    def source(self, source):
+    def is_enabled(self, source):
+        return source in self.sources and self._enabled.get(source) is not False
+
+    def source(self, source, *, allow_disabled=False):
         if source not in self.sources:
             raise ComicApiError("未知图源", 404, "unknown_source", source)
+        if not allow_disabled and not self.is_enabled(source):
+            raise ComicApiError("图源已关闭，可在图源管理中重新启用", 409, "source_disabled", source)
         return self.sources[source]
 
+    def manifest(self, source):
+        return dict(self.source(source, allow_disabled=True).manifest(), enabled=self.is_enabled(source))
+
+    def set_enabled(self, source, enabled):
+        self.source(source, allow_disabled=True)
+        if not isinstance(enabled, bool):
+            raise ComicApiError("图源开关必须为布尔值", 422, "invalid_request", source)
+        states = {**self._enabled, source: enabled}
+        self.store.save_settings("source_states", states)
+        self._enabled = states
+
     async def call(self, source, method, *args, **kwargs):
-        plugin = self.source(source)
+        # Account removal remains available without re-enabling upstream requests.
+        allow_disabled = method == "logout"
+        plugin = self.source(source, allow_disabled=allow_disabled)
         operation = getattr(plugin, method, None)
         if not callable(operation):
             raise ComicApiError("图源不支持此功能", 400, "unsupported", source)
@@ -34,8 +53,13 @@ class AggregatorService:
             await asyncio.wait_for(slot.acquire(), timeout=10)
         except asyncio.TimeoutError as exc:
             raise ComicApiError("图源繁忙，请稍后重试", 429, "busy", source) from exc
+        def invoke():
+            # A request may have waited for a source slot or an executor thread.
+            self.source(source, allow_disabled=allow_disabled)
+            return operation(*args, **kwargs)
+
         # Cancellation must not release the permit while the underlying thread is running.
-        task = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+        task = asyncio.create_task(asyncio.to_thread(invoke))
         task.add_done_callback(lambda completed: (slot.release(), completed.exception() if not completed.cancelled() else None))
         try:
             return await asyncio.shield(task)
@@ -82,10 +106,12 @@ class AggregatorService:
     async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword") -> Dict[str, Any]:
         """Search registered sources independently and retain partial failures."""
         capability = "tag_search" if mode == "tag" else "search"
-        keys = [key for key, plugin in self.sources.items() if capability in plugin.capabilities]
+        keys = [key for key, plugin in self.sources.items() if self.is_enabled(key) and capability in plugin.capabilities]
         results = await asyncio.gather(*(self.search_source(key, keyword, page, mode=mode) for key in keys), return_exceptions=True)
         all_results, errors, candidates = {}, {}, []
         for key, result in zip(keys, results):
+            if not self.is_enabled(key):
+                continue
             if isinstance(result, Exception):
                 errors[key] = result.payload() if isinstance(result, ComicApiError) else {"message": "图源异常"}
                 all_results[key] = []
@@ -109,7 +135,8 @@ class AggregatorService:
         return await self.call(source, "pages", comic_id, chapter_id)
 
     async def image(self, source, url, chapter_id=""):
-        return await self._image_proxy.image(self.source(source), source, url, chapter_id)
+        return await self._image_proxy.image(self.source(source), source, url, chapter_id,
+                                             check=lambda: self.source(source))
 
     async def download_chapter_pdf(self, source: str, comic_id: str, chapter_id: str,
                                    concurrency: int = 4, password: str = "",
@@ -117,4 +144,5 @@ class AggregatorService:
         """下载章节并打包成自适应压缩的 PDF，返回本地临时 PDF 路径"""
         return await build_chapter_pdf(self, source, comic_id, chapter_id,
                                        concurrency=concurrency, password=password,
-                                       progress=progress, cancelled=cancelled)
+                                       progress=progress,
+                                       cancelled=lambda: not self.is_enabled(source) or bool(cancelled and cancelled()))

@@ -6,6 +6,7 @@ const jmDate = value => value ? new Date(value*1000).toLocaleString() : '尚未�
 const jmBytes = value => value<1024*1024 ? `${(value/1024).toFixed(1)} KiB` : `${(value/1024/1024).toFixed(1)} MiB`;
 
 async function loadJmFavoritesView(){
+  if(sourcePlugin('jm')?.enabled===false){await loadJmFavorites();return;}
   await Promise.all([loadJmSettings(),loadJmStatus()]);
   await loadJmFavorites();
 }
@@ -16,12 +17,14 @@ function renderJmSchedule(){
   if(!jm.settings)return;
   const s=jm.settings,scope=s.folder_ids.length?`${s.folder_ids.length} 个指定收藏夹`:'全部收藏';
   const next=jm.nextRun?` · 下次：${jmDate(jm.nextRun)}`:'';
+  if(jm.paused||sourcePlugin('jm')?.enabled===false){$('jm-sync-schedule').textContent='JM 图源已关闭，定时同步暂停；重新启用后按原计划恢复。';return;}
   $('jm-sync-schedule').textContent=`${s.enabled?`定时同步 · 每 ${s.interval_minutes} 分钟${next}`:'定时同步关闭'} · ${scope} · ${s.download_dir}`;
 }
-function jmCanRead(){const p=sourcePlugin('jm');return p?.capabilities.includes('favorites')&&(p.account?.authenticated||p.account?.configured);}
+function jmCanRead(){const p=sourcePlugin('jm');return p?.enabled!==false&&p?.capabilities.includes('favorites')&&(p.account?.authenticated||p.account?.configured);}
 async function loadJmFavorites(){
   const request=++jm.request,box=$('jm-favorites-books');jm.selected.clear();jm.items=[];syncJmSelection();
   $('jm-favorites-message').replaceChildren();$('jm-favorites-pager').hidden=true;$('jm-favorites-count').textContent='';
+  if(sourcePlugin('jm')?.enabled===false){box.replaceChildren(emptyState('JM 图源已关闭','账号、收藏和已完成文件保留；图源管理中可重新启用。',null,'bookmark'));return;}
   if(!jmCanRead()){
     box.replaceChildren(emptyState('禁漫收藏需要登录','账号凭证加密保存在当前服务器。',sourcePlugin('jm')?bindButton('jm'):null,'bookmark'));
     return;
@@ -121,7 +124,7 @@ function jmRunCard(item){
   return box;
 }
 async function loadJmStatus(){
-  const data=await api('/api/jm/sync');jm.active=data.active;jm.nextRun=data.next_run_at;
+  const data=await api('/api/jm/sync');jm.active=data.active;jm.nextRun=data.next_run_at;jm.paused=data.paused;
   const latest=data.active?data.current:data.history[0];
   const signature=JSON.stringify(latest||null);
   if(signature!==jm.statusSignature){
@@ -131,7 +134,7 @@ async function loadJmStatus(){
   const history=data.history.filter(item=>item.id!==latest?.id),historySignature=JSON.stringify(history);
   if(historySignature!==jm.historySignature){jm.historySignature=historySignature;$('jm-sync-history-list').replaceChildren(...history.map(jmRunCard));}
   $('jm-sync-history').hidden=!history.length;
-  $('jm-sync-run').disabled=data.active;$('jm-sync-check-local').disabled=data.active;$('jm-sync-cancel').hidden=!data.active;$('jm-sync-cancel').disabled=data.current?.status==='cancelling';
+  $('jm-sync-run').disabled=data.active||data.paused;$('jm-sync-check-local').disabled=data.active||data.paused;$('jm-sync-cancel').hidden=!data.active;$('jm-sync-cancel').disabled=data.current?.status==='cancelling';
   $('jm-sync-save').disabled=data.active;
   syncJmSelection();renderJmSchedule();
 }

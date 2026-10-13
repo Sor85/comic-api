@@ -123,11 +123,11 @@ test('迟到的上一页或旧账号响应不覆盖新列表',async()=>{
   resolve(page([detail]));await first;assert.match(h.roots['bika-favorites-books'].textContent,/需要登录/);assert.equal(h.view.items.length,0);
 });
 
-test('桌面和移动导航有哔咔收藏入口，并支持五列及独立排版基线',()=>{
+test('桌面和移动导航有哔咔收藏入口，并支持动态列数及独立排版基线',()=>{
   const html=readFileSync(join(__dirname,'../src/web/templates/index.html'),'utf8');
   const css=readFileSync(join(__dirname,'../src/web/static/app.css'),'utf8');
   assert.equal(html.match(/data-tab="bika-favorites"/g).length,2);
   assert.match(html,/bika-favorites.js\?v=/);assert.match(css,/\.bika-favorites-view\{font-size:15px;line-height:1\.6\}/);
-  assert.match(css,/\.tabbar\{display:grid;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/);
+  assert.match(css,/\.tabbar\{display:grid;grid-auto-flow:column;grid-auto-columns:minmax\(0,1fr\)/);
   assert.match(app,/if\(tab==='bika-favorites'\)run\(loadBikaFavorites\)/);
 });

@@ -5,6 +5,7 @@ async function loadBikaFavorites(){
   const view=bikaFavorites,request=++view.request,box=$('bika-favorites-books');view.items=[];view.hasNext=false;
   $('bika-favorites-message').replaceChildren();$('bika-favorites-pager').hidden=true;$('bika-favorites-count').textContent='';
   const plugin=sourcePlugin('bika');
+  if(plugin?.enabled===false){box.replaceChildren(emptyState('哔咔图源已关闭','账号和收藏保留；图源管理中可重新启用。',null,'bookmark'));return;}
   if(!plugin?.capabilities.includes('favorites')||!(plugin.account?.authenticated||plugin.account?.configured)){
     box.replaceChildren(emptyState('哔咔收藏需要登录','账号凭证加密保存在当前服务器。',plugin?bindButton('bika'):null,'bookmark'));
     return;

@@ -124,8 +124,14 @@ class JmSync:
             return [json.loads(row[0]) for row in db.execute("SELECT state FROM jm_sync_runs ORDER BY rowid DESC LIMIT 10")]
 
     def status(self):
-        return {"active": self.active, "current": self.current, "history": self.history(),
-                "next_run_at": self.next_run_at if self.settings()["enabled"] and not self.active else None}
+        paused = not self.service.is_enabled("jm")
+        return {"active": self.active, "current": self.current, "history": self.history(), "paused": paused,
+                "next_run_at": self.next_run_at if self.settings()["enabled"] and not self.active and not paused else None}
+
+    def source_changed(self):
+        if not self.service.is_enabled("jm") and self.active:
+            self.cancel()
+        self.wake.set()
 
     async def start(self):
         for state in self.history():
@@ -147,7 +153,8 @@ class JmSync:
         while not self.stopping:
             self.wake.clear()
             config = self.settings()
-            if config["enabled"] and not self.active and time.time() >= self.next_run_at:
+            scheduled = config["enabled"] and self.service.is_enabled("jm")
+            if scheduled and not self.active and time.time() >= self.next_run_at:
                 try:
                     self.launch(automatic=True)
                 except ComicApiError as exc:
@@ -155,7 +162,7 @@ class JmSync:
                     state.update(status="failed", error=str(exc), finished_at=time.time())
                     self._persist(state)
                     self._schedule_next()
-            delay = max(1, min(60, self.next_run_at - time.time())) if config["enabled"] and not self.active else 60
+            delay = max(1, min(60, self.next_run_at - time.time())) if scheduled and not self.active else 60
             try:
                 await asyncio.wait_for(self.wake.wait(), timeout=delay)
             except asyncio.TimeoutError:
@@ -305,8 +312,11 @@ class JmSync:
         except DownloadCancelled:
             state["status"] = "interrupted" if self.stopping else "cancelled"
         except Exception as exc:
-            state.update(status="failed", error=str(exc) if isinstance(exc, ComicApiError) else "同步失败，需检查目录权限和图源状态")
-            log.warning("JM sync failed", exc_info=True)
+            if self.signal.is_set():
+                state["status"] = "interrupted" if self.stopping else "cancelled"
+            else:
+                state.update(status="failed", error=str(exc) if isinstance(exc, ComicApiError) else "同步失败，需检查目录权限和图源状态")
+                log.warning("JM sync failed", exc_info=True)
         finally:
             state.update(finished_at=time.time(), stage="finished")
             self._persist(state)

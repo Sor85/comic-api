@@ -171,7 +171,7 @@ function uiHarness(saved) {
     location: {origin: 'http://ui.test'}, URL, URLSearchParams, AbortController, setTimeout, clearTimeout,
     IntersectionObserver: Observer, svgIcon: name => `<svg data-test-icon="${name}"></svg>`, toast() {},
     api: async path => { requests.push(path); return {images: [`/api/image/proxy?source=jm&chapter_id=1&url=${encodeURIComponent(path)}`]}; },
-    openReader: id => read.push(id), queueDownload: (...args) => downloads.push(args),
+    openReader: id => read.push(id), queueDownload: (...args) => downloads.push(args), sourcePlugin: () => ({enabled:true}),
   });
   vm.runInContext(script, context);
   vm.runInContext(app.slice(app.indexOf('function readLocal('), app.indexOf('function progressKey(')), context);

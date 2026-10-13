@@ -68,6 +68,12 @@ class DownloadManager:
         self.store.update_task(task_id, status="cancelling" if task["status"] != "queued" else "cancelled")
         return self.require(task_id)
 
+    def cancel_source(self, source):
+        for task_id in list(self.signals):
+            task = self.require(task_id)
+            if task["source"] == source and task["status"] in ("queued", "running", "cancelling"):
+                self.cancel(task_id)
+
     def retry(self, task_id):
         task = self.require(task_id)
         # A cancelled queued item may still be in the in-memory queue.
@@ -125,8 +131,11 @@ class DownloadManager:
             except DownloadCancelled:
                 self.store.update_task(task_id, status="cancelled", stage="cancelled")
             except Exception as exc:
-                self.store.update_task(task_id, status="failed", stage="failed",
-                                       error=str(exc) if isinstance(exc, ComicApiError) else "下载或打包失败，请重试")
+                if signal.is_set():
+                    self.store.update_task(task_id, status="cancelled", stage="cancelled")
+                else:
+                    self.store.update_task(task_id, status="failed", stage="failed",
+                                           error=str(exc) if isinstance(exc, ComicApiError) else "下载或打包失败，请重试")
             finally:
                 if result and os.path.exists(result):
                     os.remove(result)

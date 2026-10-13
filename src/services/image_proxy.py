@@ -76,7 +76,7 @@ class ImageProxy:
         self.store = store
         self._slots = asyncio.Semaphore(8)
 
-    async def image(self, plugin, source, url, chapter_id="") -> bytes:
+    async def image(self, plugin, source, url, chapter_id="", check=None) -> bytes:
         try:
             await asyncio.wait_for(self._slots.acquire(), timeout=10)
         except asyncio.TimeoutError as exc:
@@ -87,6 +87,8 @@ class ImageProxy:
         path = cache / f"{key}.img"
 
         def process():
+            if check:
+                check()
             if path.is_file():
                 return path.read_bytes()
             data = plugin.transform_image(download_image(plugin.client, url), chapter_id, url)

@@ -60,6 +60,10 @@ class VersionedStaticFiles(StaticFiles):
         return response
 
 
+class SourceStateInput(BaseModel):
+    enabled: bool = Field(strict=True)
+
+
 class BookInput(BaseModel):
     category: str = Field(default="", max_length=100)
 
@@ -120,7 +124,17 @@ def create_app(store=None, sources=None):
 
     @app.get("/api/sources")
     async def sources_list():
-        return {"sources": [plugin.manifest() for plugin in service.sources.values()]}
+        return JSONResponse({"sources": [service.manifest(source) for source in service.sources]},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.put("/api/sources/{source}/state")
+    async def set_source_state(source: str, values: SourceStateInput):
+        service.set_enabled(source, values.enabled)
+        if not values.enabled:
+            downloads.cancel_source(source)
+        if source == "jm":
+            jm_sync.source_changed()
+        return {"success": True, "source": service.manifest(source)}
 
     @app.post("/api/sources/{source}/login")
     @app.post("/api/{source}/login", include_in_schema=False)
@@ -143,16 +157,16 @@ def create_app(store=None, sources=None):
 
     @app.put("/api/sources/{source}/settings")
     async def save_source_settings(source: str, values: dict[str, str]):
-        plugin = service.source(source)
+        plugin = service.source(source, allow_disabled=True)
         if not plugin.settings_fields:
             raise ComicApiError("该图源暂无可修改的服务器设置", 400, "unsupported", source)
         # Serialize updates on the event loop. Existing requests retain their adapter.
         service.sources[source] = plugin.save_settings(values)
-        return {"success": True, "source": service.source(source).manifest()}
+        return {"success": True, "source": service.manifest(source)}
 
     @app.delete("/api/sources/{source}/account")
     async def logout(source: str):
-        if "login" not in service.source(source).capabilities:
+        if "login" not in service.source(source, allow_disabled=True).capabilities:
             raise ComicApiError("该图源不提供登录", 400, "unsupported", source)
         if source == "jm":
             jm_sync.guard_account_change()

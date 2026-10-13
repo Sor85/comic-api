@@ -113,6 +113,7 @@ def test_create_compressed_pdf_uses_scale_fallback_until_under_limit(monkeypatch
 
 def test_download_rejects_invalid_source_with_404():
     service = AggregatorService.__new__(AggregatorService)
+    service._enabled = {}
     service.sources = {}
 
     with pytest.raises(ComicApiError) as error:
@@ -123,6 +124,7 @@ def test_download_rejects_invalid_source_with_404():
 
 def test_download_propagates_plugin_login_error(monkeypatch):
     service = AggregatorService.__new__(AggregatorService)
+    service._enabled = {}
     service.sources = {"account_source": types.SimpleNamespace(client=object())}
     async def pages(*args):
         raise ComicApiError("login required", 401, "login_required")
@@ -136,6 +138,7 @@ def test_download_propagates_plugin_login_error(monkeypatch):
 
 def test_download_rejects_empty_chapter_images_with_404(monkeypatch):
     service = AggregatorService.__new__(AggregatorService)
+    service._enabled = {}
     service.sources = {"jm": types.SimpleNamespace(client=object())}
 
     async def fake_images(_source, _comic_id, _chapter_id):
