@@ -94,7 +94,7 @@ def test_library_crud_and_no_server_read_progress(client):
     assert client.post(path+'/refresh').json()['new_chapters']==0
     with client.app.state.store.connect() as db:
         tables={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert tables=={'accounts','library','downloads','source_settings','app_settings','jm_sync_runs','jm_sync_files','jm_sync_local_files','jm_favorites','jm_favorite_catalog'}
+    assert tables=={'accounts','library','downloads','source_settings','app_settings','jm_sync_runs','jm_sync_files','jm_sync_local_files','jm_favorites','jm_favorite_catalog','bika_favorites','bika_favorite_catalog'}
     assert client.delete(path).status_code==200
     assert client.get('/api/library').json()['items']==[]
 

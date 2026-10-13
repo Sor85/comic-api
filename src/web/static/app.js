@@ -499,13 +499,14 @@ function searchElsewhere(title){
 /* ---------- tabs & cards ---------- */
 function showTab(tab) {
   const changed=state.tab!==tab;state.tab=tab;
-  for(const id of ['browse','library','downloads','jm-favorites'])$(id).hidden=id!==tab;
+  for(const id of ['browse','library','downloads','jm-favorites','bika-favorites'])$(id).hidden=id!==tab;
   document.querySelectorAll('[data-tab]').forEach(n=>{const on=n.dataset.tab===tab;n.classList.toggle('active',on);n.setAttribute('aria-current',on?'page':'false');});
   if(changed)window.scrollTo({top:0});
   if(tab==='browse'&&state.view==='home')renderContinue();
   if(tab==='library')run(loadLibrary);
   if(tab==='downloads')run(loadTasks);
   if(tab==='jm-favorites')run(loadJmFavoritesView);
+  if(tab==='bika-favorites')run(loadBikaFavorites);
 }
 function card(item,{showSource=true,library=false,history=null}={}){
   const el=node('article',undefined,'card'+(history?' card-history':''));
@@ -684,7 +685,7 @@ function renderDetail() {
   const fav=button('',()=>toggleFavorite(detail).then(syncFav));
   const syncFav=()=>{const saved=inLibrary(detail);fav.innerHTML=svgIcon(saved?'check':'star');fav.append(node('span',saved?'已在书库':'加入书库'));fav.classList.toggle('on',saved);fav.title=saved?'移出书库':'加入书库';};
   syncFav();controls.append(fav);
-  const jmFav=jmFavoriteButton(detail);if(jmFav)controls.append(jmFav);
+  const cloudFav=cloudFavoriteButton(detail);if(cloudFav)controls.append(cloudFav);
   if(detail.chapters.length)controls.append(labelBtn('download','下载全部',()=>downloadAll(detail)));
   controls.append(iconBtn('search','在其他图源搜索同名漫画',()=>searchElsewhere(detail.title)));
   text.append(controls);
@@ -707,23 +708,24 @@ async function toggleFavorite(detail){
   const book=state.books.find(b=>b.source===detail.source&&String(b.id)===String(detail.id));
   toast('已加入书库',{action:{label:'设置分类',run:()=>book&&run(()=>editCategory(book))}});
 }
-function jmFavoriteButton(detail){
-  const plugin=sourcePlugin('jm');
-  if(detail.source!=='jm'||!plugin?.capabilities.includes('add_favorite'))return null;
-  if(!(plugin.account?.authenticated||plugin.account?.configured)){const bind=bindButton('jm');bind.title='加入 JM 收藏需要绑定账号';return bind;}
+function cloudFavoriteButton(detail){
+  const source=detail.source,label={jm:'JM',bika:'哔咔'}[source],plugin=sourcePlugin(source);
+  if(!label||!plugin?.capabilities.includes('add_favorite'))return null;
+  const space=source==='jm'?' ':'',name=label+space+'收藏',account=label+space+'账号';
+  if(!(plugin.account?.authenticated||plugin.account?.configured)){const bind=bindButton(source);bind.title=`加入${space}${name}需要绑定账号`;return bind;}
   let confirmed=null,loaded=false;
-  const path=`/api/jm/favorites/${enc(detail.id)}`;
-  const sync=busy=>{control.innerHTML=svgIcon(confirmed?'check':'star');control.append(node('span',busy?'读取 JM 收藏…':!loaded?'收藏状态未确认':confirmed?'已收藏':'加入 JM 收藏'));control.classList.toggle('on',confirmed===true);control.title=loaded&&confirmed===null?'本地收藏表尚无此漫画的状态，添加前实时检查远端；不提供取消收藏':'JM 账号收藏与本地书库独立；状态读取失败时点击重试，不提供取消收藏';};
-  const report=error=>toast(error.message,{tone:'error',...(error.code==='login_required'?{action:{label:'绑定 JM 账号',run:()=>bindButton('jm').onclick()}}:{})});
+  const path=`/api/${enc(source)}/favorites/${enc(detail.id)}`;
+  const sync=busy=>{control.innerHTML=svgIcon(confirmed?'check':'star');control.append(node('span',busy?`读取${space}${name}…`:!loaded?'收藏状态未确认':confirmed?'已收藏':`加入${space}${name}`));control.classList.toggle('on',confirmed===true);control.title=loaded&&confirmed===null?'本地收藏表尚无此漫画的状态，添加前实时检查远端；不提供取消收藏':`${account}收藏与本地书库独立；状态读取失败时点击重试，不提供取消收藏`;};
+  const report=error=>toast(error.message,{tone:'error',...(error.code==='login_required'?{action:{label:`绑定${space}${account}`,run:()=>bindButton(source).onclick()}}:{})});
   const control=button('',async()=>{
     if(!loaded){await loadStatus();return;}
     sync(true);
     try{
       const data=await api(path,{method:'POST'});
-      if(!data.success||data.favorited!==true)throw new Error('禁漫未确认加入收藏');
+      if(!data.success||data.favorited!==true)throw new Error(`${source==='jm'?'禁漫':'哔咔'}未确认加入收藏`);
       confirmed=true;loaded=true;
-      toast(data.already_favorited?'漫画已在 JM 收藏中':'已加入 JM 收藏');
-      if(state.tab==='jm-favorites')await loadJmFavorites().catch(report);
+      toast(data.already_favorited?`漫画已在${space}${name}中`:`已加入${space}${name}`);
+      if(state.tab===`${source}-favorites`)await (source==='jm'?loadJmFavorites():loadBikaFavorites()).catch(report);
     }catch(error){confirmed=null;loaded=false;report(error);}
     finally{sync(false);}
   });
@@ -831,6 +833,7 @@ function renderSourceSettings(){
     const submit=node('button','保存','primary');submit.type='submit';form.append(label,submit);form.onsubmit=event=>{event.preventDefault();run(async()=>{await api(`/api/sources/${enc(plugin.id)}/settings`,write('PUT',{...plugin.settings,[field.name]:input.value}));await loadSources();toast('设置已保存，后续请求立即生效');},submit);};section.append(form);body.append(section);}
   if(plugin.capabilities.includes('login')){const section=node('section',undefined,'setting-section');section.append(node('h3','登录凭证'),node('p',accountLabel(plugin),'muted'),labelBtn('key','管理登录凭证',()=>{configureAccount();$('credentials-dialog').showModal();}));body.append(section);}
   if(plugin.id==='jm'&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','收藏与本地同步'),node('p','浏览远端收藏夹，按目录规则增量保存图片。','muted'),labelBtn('bookmark','打开 JM 收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('jm-favorites');}));body.append(section);}
+  if(plugin.id==='bika'&&plugin.capabilities.includes('favorites')){const section=node('section',undefined,'setting-section');section.append(node('h3','哔咔收藏'),node('p','浏览账号的全部云端收藏，与本地书库独立。','muted'),labelBtn('bookmark','打开哔咔收藏',()=>{$('source-settings-dialog').close();$('account-dialog').close();showTab('bika-favorites');}));body.append(section);}
   if(!(plugin.settings_fields||[]).length&&!plugin.capabilities.includes('login'))body.append(node('p','此图源使用自动服务器配置，无需登录，暂无可修改选项。','muted'));
 }
 function configureAccount(){
@@ -841,7 +844,7 @@ function configureAccount(){
   for(const field of plugin.login_fields){const label=node('label',field.label);const input=node('input');input.name=field.name;input.type=field.type==='password'?'password':'text';input.autocomplete=field.type==='password'?'current-password':'username';input.required=true;label.append(input);form.append(label);}
   const actions=node('div',undefined,'form-actions');
   const submit=node('button','登录并保存','primary');submit.type='submit';actions.append(submit);
-  if(plugin.account.configured||plugin.account.authenticated)actions.append(labelBtn('unlink','解除绑定',async()=>{if(!await ask({title:'解除绑定',message:`删除已保存的${plugin.name}账号与会话？`,ok:'解除',danger:true}))return;await api(`/api/sources/${enc(plugin.id)}/account`,{method:'DELETE'});await loadSources();configureAccount();toast('已解除绑定');}));
+  if(plugin.account.configured||plugin.account.authenticated)actions.append(labelBtn('unlink','解除绑定',async()=>{if(!await ask({title:'解除绑定',message:`删除已保存的${plugin.name}账号与会话？`,ok:'解除',danger:true}))return;await api(`/api/sources/${enc(plugin.id)}/account`,{method:'DELETE'});await loadSources();configureAccount();if(plugin.id==='bika')refreshBikaAccountViews();toast('已解除绑定');}));
   form.append(actions);
 }
 
@@ -1007,7 +1010,7 @@ window.addEventListener('popstate',event=>{
 $('library-refresh').onclick=()=>run(loadLibrary,$('library-refresh'));$('library-category').onchange=filterBooks;$('library-sort').onchange=filterBooks;$('library-filter').oninput=filterBooks;$('tasks-refresh').onclick=()=>run(loadTasks,$('tasks-refresh'));
 $('accounts').onclick=()=>run(async()=>{await loadSources();$('account-dialog').showModal();runHealthChecks(false);});
 $('health-recheck').onclick=()=>runHealthChecks(true);
-$('login-form').onsubmit=event=>{event.preventDefault();const source=state.settingsSource;run(async()=>{await api(`/api/sources/${enc(source)}/login`,write('POST',Object.fromEntries(new FormData(event.target))));await loadSources();configureAccount();toast('图源账号已保存');},event.submitter);};
+$('login-form').onsubmit=event=>{event.preventDefault();const source=state.settingsSource;run(async()=>{await api(`/api/sources/${enc(source)}/login`,write('POST',Object.fromEntries(new FormData(event.target))));await loadSources();configureAccount();if(source==='bika')refreshBikaAccountViews();toast('图源账号已保存');},event.submitter);};
 $('reader-close').onclick=()=>closeReader();$('reader-dialog').addEventListener('cancel',event=>{event.preventDefault();closeReader();});
 $('reader-download').onclick=()=>{const r=state.reader,book=r?.book||state.detail;if(!book)return;const chapter=(book.chapters||[]).find(c=>String(c.id)===(r?r.chapterId:$('reader-chapter').value));if(chapter)queueDownload(book,chapter);};
 const toggleReaderUI=()=>{const dlg=$('reader-dialog');const on=!dlg.classList.contains('ui-open');dlg.classList.toggle('ui-open',on);dlg.classList.toggle('ui-pinned',on);};

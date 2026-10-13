@@ -3,6 +3,7 @@ import hmac
 import json
 import math
 import os
+import re
 import threading
 import time
 import uuid
@@ -21,6 +22,7 @@ class BikaClient(BaseClient):
         super().__init__()
         self.api_base = Config.BIKA_DEFAULT_API_BASE
         self._auth_lock = threading.RLock()
+        self._favorite_pages = {}
         self.authorization = ""
         from src.storage import Store
         self.store = store or Store()
@@ -118,6 +120,7 @@ class BikaClient(BaseClient):
         params: dict = None,
         json_body: dict = None,
         authorization: str = "",
+        allow_redirects: bool = True,
     ):
         url = f"{self.api_base}{path}"
 
@@ -156,7 +159,8 @@ class BikaClient(BaseClient):
 
         kwargs = {
             "headers": headers,
-            "timeout": 15
+            "timeout": 15,
+            "allow_redirects": allow_redirects,
         }
         if params:
             kwargs["params"] = params
@@ -196,6 +200,7 @@ class BikaClient(BaseClient):
         self._account = account
         self._password = password
         self.authorization = token
+        self._favorite_pages.clear()
         return token
 
     def _refresh_authorization(self, failed_token: str) -> None:
@@ -225,13 +230,15 @@ class BikaClient(BaseClient):
         params: dict = None,
         json_body: dict = None,
         _auth_retry: bool = False,
+        _retry_safe: bool = True,
     ) -> Any:
         used_token = self.authorization
-        res = self._send_bika_request(path, method, params, json_body, used_token)
+        res = self._send_bika_request(path, method, params, json_body, used_token,
+                                      allow_redirects=_retry_safe)
         if res.status_code < 200 or res.status_code >= 300:
             err_msg = self._response_error(res)
             if self._is_auth_failure(res, err_msg):
-                if used_token and not _auth_retry:
+                if used_token and not _auth_retry and _retry_safe:
                     self._refresh_authorization(used_token)
                     return self.bika_request(path, method, params, json_body, _auth_retry=True)
 
@@ -252,6 +259,113 @@ class BikaClient(BaseClient):
             raise ComicApiError("哔咔账号和密码不能为空", 422, "invalid_request", "bika")
         with self._auth_lock:
             return self._login_locked(account, password)
+
+    @staticmethod
+    def _favorite_id(comic_id: str) -> str:
+        if not isinstance(comic_id, str) or not re.fullmatch(r"[0-9a-fA-F]{24}", comic_id):
+            raise ComicApiError("漫画编号无效", 422, "invalid_request", "bika")
+        return comic_id.lower()
+
+    def _favorite_owner(self):
+        return self.store.account_owner(self._account)
+
+    def favorites(self, page=1, sort="dd") -> dict:
+        if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= 1000 or sort not in ("dd", "da", "ld", "vd"):
+            raise ComicApiError("收藏查询参数无效", 422, "invalid_request", "bika")
+        with self._auth_lock:
+            self.ensure_authenticated()
+            try:
+                response = self.bika_request("users/favourite", params={"s": sort, "page": str(page)})
+                data = response["data"]["comics"]
+                if not isinstance(data, dict) or not isinstance(data.get("docs"), list):
+                    raise ValueError()
+                values = [data[key] for key in ("page", "limit", "total", "pages")]
+                if any(isinstance(value, bool) or not str(value).isascii() or not str(value).isdigit() for value in values):
+                    raise ValueError()
+                actual_page, limit, total, pages = map(int, values)
+                if actual_page != page or not 1 <= limit <= 1000 or pages not in ({0, 1} if total == 0 else {math.ceil(total / limit)}):
+                    raise ValueError()
+                items = self._parse_comics_list(response)
+                ids = [self._favorite_id(item["id"]) for item in items]
+                if len(items) != len(data["docs"]) or len(set(ids)) != len(ids) or len(ids) != min(limit, max(0, total - (page - 1) * limit)):
+                    raise ValueError()
+                for item, comic_id in zip(items, ids):
+                    item["id"] = comic_id
+            except Exception as exc:
+                self._favorite_pages.pop(sort, None)
+                if isinstance(exc, ComicApiError) and exc.code != "invalid_request":
+                    raise
+                raise ComicApiError("哔咔收藏数据不完整，未作为空收藏处理", 502, "invalid_response", "bika") from exc
+            result = {"items": items, "total": total, "page": page, "page_size": limit, "has_next": page < pages}
+            self._record_favorite_page(result, sort)
+            return result
+
+    def _record_favorite_page(self, data, sort):
+        owner = self._favorite_owner()
+        if not owner:
+            return
+        ids = [item["id"] for item in data["items"]]
+        self.store.record_bika_favorites(owner, ids)
+        page, total = data["page"], data["total"]
+        if page == 1:
+            self._favorite_pages[sort] = {"next": 1, "total": total, "limit": data["page_size"], "ids": set()}
+        scan = self._favorite_pages.get(sort)
+        if (not scan or page != scan["next"] or total != scan["total"]
+                or data["page_size"] != scan["limit"] or scan["ids"].intersection(ids)):
+            self._favorite_pages.pop(sort, None)
+            return
+        scan["ids"].update(ids)
+        scan["next"] += 1
+        if not data["has_next"]:
+            if len(scan["ids"]) == total:
+                self.store.record_bika_favorites(owner, scan["ids"], complete=True)
+            self._favorite_pages.pop(sort, None)
+
+    def favorite_status(self, comic_id: str) -> dict:
+        comic_id = self._favorite_id(comic_id)
+        with self._auth_lock:
+            owner = self._favorite_owner()
+            if not owner or not (self.authorization or self._credentials_available()):
+                raise ComicApiError("哔咔收藏需要绑定账号", 401, "login_required", "bika")
+            return {"comic_id": comic_id, "favorited": self.store.bika_favorite_status(owner, comic_id)}
+
+    def add_favorite(self, comic_id: str) -> dict:
+        comic_id = self._favorite_id(comic_id)
+        # Serialize the live check and toggle with login/logout and other additions.
+        with self._auth_lock:
+            self.ensure_authenticated()
+            owner = self._favorite_owner()
+            if not owner:
+                raise ComicApiError("哔咔收藏需要绑定账号", 401, "login_required", "bika")
+            response = self.bika_request(f"comics/{comic_id}")
+            data = response.get("data") if isinstance(response, dict) else None
+            comic = data.get("comic") if isinstance(data, dict) else None
+            if (not isinstance(comic, dict) or str(comic.get("_id", "")).lower() != comic_id
+                    or not isinstance(comic.get("isFavourite"), bool)):
+                raise ComicApiError("哔咔未返回有效收藏状态，未执行添加", 502, "invalid_response", "bika")
+            already_favorited = comic["isFavourite"]
+            self._favorite_pages.clear()
+            self.store.set_bika_favorite(owner, comic_id, already_favorited)
+            if not already_favorited:
+                self.store.set_bika_favorite(owner, comic_id, None)
+                try:
+                    response = self.bika_request(f"comics/{comic_id}/favourite", method="POST", _retry_safe=False)
+                except Exception as exc:
+                    if isinstance(exc, ComicApiError) and exc.code in ("login_required", "busy"):
+                        raise
+                    raise ComicApiError("哔咔收藏结果未确认，再次添加前将重新检查远端状态", 502,
+                                        "favorite_unknown", "bika") from exc
+                data = response.get("data") if isinstance(response, dict) else None
+                if not isinstance(data, dict) or data.get("action") not in ("favourite", "un_favourite"):
+                    raise ComicApiError("哔咔未确认加入收藏，再次添加前将重新检查远端状态", 502,
+                                        "favorite_unknown", "bika")
+                if data["action"] == "un_favourite":
+                    self.store.set_bika_favorite(owner, comic_id, False)
+                    raise ComicApiError("上游返回取消收藏结果，收藏状态存在并发冲突，需在哔咔核对", 409,
+                                        "favorite_conflict", "bika")
+            self.store.set_bika_favorite(owner, comic_id, True)
+            return {"success": True, "comic_id": comic_id, "favorited": True,
+                    "already_favorited": already_favorited}
 
     def search(self, keyword: str, page: int = 1, sort: str = "dd", category: str = "") -> List[Dict[str, Any]]:
         """搜索漫画"""

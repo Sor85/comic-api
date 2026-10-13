@@ -35,13 +35,13 @@ function harness() {
     detailHero:()=>{const hero=new Element('div'),text=new Element('div');hero.append(text);return {hero,text};},
   });
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
-  vm.runInContext(app.slice(app.indexOf('function jmFavoriteButton('),app.indexOf('function syncDetailHead(')),context);
+  vm.runInContext(app.slice(app.indexOf('function cloudFavoriteButton('),app.indexOf('function syncDetailHead(')),context);
   vm.runInContext(app.slice(app.indexOf('function renderDetail('),app.indexOf('async function toggleFavorite(')),context);
   return {context,state,calls,toasts,bindings,roots,get refreshes(){return refreshes;}};
 }
 const detail={source:'jm',id:'123',title:'测试漫画',chapters:[]};
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-async function open(h,value=detail){const control=h.context.jmFavoriteButton({...value});await flush();return control;}
+async function open(h,value=detail){const control=h.context.cloudFavoriteButton({...value});await flush();return control;}
 
 test('重新打开详情或页面时，已加入 JM 收藏的漫画显示已收藏',async()=>{
   let favorited=false;
@@ -65,10 +65,10 @@ test('详情中的本地书库与 JM 账号收藏使用独立按钮',async()=>{
 
 test('只有支持加入收藏的 JM 图源显示云端操作，未绑定时只显示绑定入口',async()=>{
   const h=harness();
-  assert.equal(h.context.jmFavoriteButton({...detail,source:'bika'}),null);
-  h.state.sources[0].capabilities=['favorites'];assert.equal(h.context.jmFavoriteButton(detail),null);
+  assert.equal(h.context.cloudFavoriteButton({...detail,source:'bika'}),null);
+  h.state.sources[0].capabilities=['favorites'];assert.equal(h.context.cloudFavoriteButton(detail),null);
   h.state.sources[0].capabilities.push('add_favorite');h.state.sources[0].account={};
-  const control=h.context.jmFavoriteButton(detail);assert.match(control.title,/需要绑定账号/);
+  const control=h.context.cloudFavoriteButton(detail);assert.match(control.title,/需要绑定账号/);
   await control.onclick();assert.deepEqual(h.bindings,['jm']);assert.equal(h.calls.length,0);
 });
 
@@ -112,7 +112,7 @@ test('已经收藏也显示成功，当前收藏页在成功后刷新',async()=>
 test('状态检查期间禁用按钮，旧详情的迟到状态不覆盖新详情',async()=>{
   const h=harness();let resolve;
   h.context.api=()=>new Promise(done=>{resolve=done;});
-  const old=h.context.jmFavoriteButton(detail);
+  const old=h.context.cloudFavoriteButton(detail);
   assert.equal(old.disabled,true);assert.equal(old.textContent,'读取 JM 收藏…');
   const complete=resolve;h.context.api=async()=>({favorited:false});
   const current=await open(h,{...detail,id:'456'});

@@ -11,6 +11,7 @@
   <script src="/static/chapter-previews.js?v=27" defer></script>
   <script src="/static/app.js?v=27" defer></script>
   <script src="/static/jm-sync.js?v=27" defer></script>
+  <script src="/static/bika-favorites.js?v=27" defer></script>
 </head>
 <body>
   <div id="scroll-progress" aria-hidden="true"></div>
@@ -24,6 +25,7 @@
       <button data-tab="library" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg><span>我的书库</span></button>
       <button data-tab="downloads" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>下载任务</span><i class="tab-dot" data-downloads-dot hidden></i></button>
       <button data-tab="jm-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m8 14 3 3 5-5"/></svg><span>JM 收藏</span></button>
+      <button data-tab="bika-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="m9 10 2 2 4-4"/></svg><span>哔咔收藏</span></button>
     </nav>
     <div class="actions">
       <button id="theme" class="icon-btn ghost" type="button" title="切换主题" aria-label="切换主题">
@@ -130,12 +132,28 @@
       <div id="jm-favorites-books" class="grid"></div>
       <div id="jm-favorites-pager" class="pager" hidden><button id="jm-favorites-prev" type="button">上一页</button><span id="jm-favorites-page"></span><button id="jm-favorites-next" type="button">下一页</button></div>
     </section>
+    <section id="bika-favorites" class="bika-favorites-view" hidden>
+      <div class="section-head">
+        <div class="section-title"><h1>哔咔收藏</h1><span id="bika-favorites-count" class="count"></span></div>
+        <button id="bika-favorites-refresh" type="button">刷新</button>
+      </div>
+      <p class="muted">已绑定账号的全部云端收藏，与「我的书库」独立。漫画详情中的「加入哔咔收藏」写入账号收藏，不提供取消收藏；此页面不提供收藏分组或图片同步。</p>
+      <form id="bika-favorites-filter" class="bika-favorites-toolbar">
+        <select id="bika-favorites-sort" aria-label="收藏排序"><option value="dd">最新上架</option><option value="da">最旧上架</option><option value="ld">最多喜欢</option><option value="vd">最多观看</option></select>
+        <input id="bika-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选">
+        <button type="submit">筛选</button>
+      </form>
+      <p id="bika-favorites-message" class="status" role="status"></p>
+      <div id="bika-favorites-books" class="grid"></div>
+      <div id="bika-favorites-pager" class="pager" hidden><button id="bika-favorites-prev" type="button">上一页</button><span id="bika-favorites-page"></span><button id="bika-favorites-next" type="button">下一页</button></div>
+    </section>
   </main>
   <nav id="tabbar" class="tabbar" aria-label="主导航">
     <button data-tab="browse" class="active" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg><span>发现</span></button>
     <button data-tab="library" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg><span>书库</span></button>
     <button data-tab="downloads" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>下载</span><i class="tab-dot" data-downloads-dot hidden></i></button>
     <button data-tab="jm-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m8 14 3 3 5-5"/></svg><span>JM 收藏</span></button>
+      <button data-tab="bika-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="m9 10 2 2 4-4"/></svg><span>哔咔收藏</span></button>
   </nav>
   <dialog id="jm-sync-settings" class="jm-sync-dialog">
     <div class="dialog-head"><h2>JM 收藏同步设置</h2><button type="button" data-close="jm-sync-settings">关闭</button></div>

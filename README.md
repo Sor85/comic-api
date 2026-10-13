@@ -41,7 +41,7 @@ python main.py
 
 | 路径 | 内容 |
 | --- | --- |
-| `comic.sqlite` | 图源凭据密文、书库、下载记录、按账号隔离的 JM 收藏状态表 |
+| `comic.sqlite` | 图源凭据密文、书库、下载记录、按图源和账号隔离的 JM／哔咔收藏状态表 |
 | `credentials.key` | 凭据加密密钥，必须保密并与数据库一起备份 |
 | `downloads/` | 已生成的 PDF |
 | `jm-favorites/` | 默认 JM 收藏图片同步目录（可在允许的根目录内修改） |
@@ -60,6 +60,20 @@ Surge 等代理的 DNS 可能把公开 CDN 域名映射到 `198.18.0.0/15` 虚�
 以下情况仍会失败，不降级为无校验访问：直接输入 Fake-IP/私网/回环/链路本地地址；DNS 返回真实私网地址；Fake-IP 没有对应代理或被 `NO_PROXY` 排除；HTTPS DNS 解析失败或返回非公网结果。图片代理和 PDF 取图支持 301、302、303、307、308 跳转及相对目标地址，但每一跳都必须通过相同的地址、DNS 与代理检查；缺少目标、循环或超过 5 次的跳转会明确报错。JM 收藏同步的流式取图仍要求最终 CDN URL，不跟随重定向。
 
 本机服务通常可直接沿用现有代理环境，无需关闭 Surge 或放宽 SSRF 防护。Docker 内使用宿主机代理时，需要显式传入容器可访问的代理地址；容器内的 `127.0.0.1` 不是宿主机。环境变量变化后需要重启服务。
+
+## 哔咔收藏
+
+导航「哔咔收藏」（或 `/?tab=bika-favorites`）读取已绑定哔咔账号的全部云端收藏，支持分页、最新／最旧上架／最多喜欢／最多观看排序及本页标题、作者筛选。桌面导航、移动导航和哔咔图源设置均提供入口。收藏与「我的书库」独立；当前不提供命名收藏夹、分组管理、取消收藏或图片同步，阅读与 PDF 下载沿用原有功能。
+
+漫画详情的「加入哔咔收藏」沿用 JM 的交互与本地状态表：每次打开详情通过 `GET /api/bika/favorites/{comic_id}` 仅读取当前账号在 SQLite 中的记录，返回 `comic_id/favorited`，其中 `true/false/null` 分别表示已收藏、已确认未收藏和未知；不额外访问哔咔或加载章节。未知仍显示加入按钮并说明添加前实时检查远端；读取失败显示「收藏状态未确认」，点击只重读状态。状态接口和收藏列表响应均禁止缓存。
+
+收藏分页拉取时登记本页记录；同一排序下，从首页开始连续读取、页大小与总数一致且去重数量匹配的完整列表，才原子替换该账号的索引，并将未出现的漫画判定为未收藏。部分分页、乱序、重复、失败或发生数量变化时不删除已有记录、不把未出现项当作未收藏。本地表按账号指纹隔离，与 JM 收藏表及书库独立，重启和重新绑定同一账号后保留；其他哔咔客户端的改动需刷新收藏分页后更新。
+
+`POST /api/bika/favorites/{comic_id}` 无请求体，漫画编号为 24 位十六进制字符串；成功返回 `success/comic_id/favorited/already_favorited`。添加前实时请求上游 `GET comics/{id}` 并严格检查 `isFavourite` 布尔值，不用本地缺失记录判断是否写入，也不扫描全部收藏或加载章节。已收藏直接成功；未收藏仅发送一次 `POST comics/{id}/favourite`，验证 `data.action=favourite` 后登记。预检查与写入串行且与账号登录、退出互斥；禁用写入请求的重定向及会话失效后的自动重发。
+
+网络失败或响应不完整时，该漫画状态保留为未知，不自动重发切换；再次添加仍先查询远端。上游返回 `un_favourite` 时登记为未收藏并报告并发冲突，不自动补偿。上游不提供原子“仅添加”，其他客户端在预检查与写入之间修改收藏仍可能产生冲突。站点没有用户认证，可访问服务的人都可操作绑定账号，不能直接暴露到公网。
+
+协议依据：[pica-go 请求实现](https://github.com/niuhuan/pica-go/blob/master/client.go)、[分页及收藏状态字段](https://github.com/niuhuan/pica-go/blob/master/dto.go)、[收藏动作枚举](https://github.com/niuhuan/pica-go/blob/master/enum.go)。
 
 ## JM 收藏与图片同步
 
@@ -201,6 +215,8 @@ services:
 | --- | --- | --- |
 | GET | `/api/sources` | 插件能力与账号状态，不返回凭据 |
 | POST / DELETE | `/api/sources/{source}/login` / `/api/sources/{source}/account` | 登录 / 退出 |
+| GET | `/api/bika/favorites?page=1&sort=dd` | 哔咔云端收藏，排序支持 dd/da/ld/vd |
+| GET / POST | `/api/bika/favorites/{comic_id}` | 读取当前账号本地收藏状态 / 实时预检查后加入云收藏，不提供取消 |
 | GET | `/api/jm/favorites?page=1&folder_id=0&order=mr` | 禁漫云端收藏与目录，排序支持 mr/mp |
 | GET / PUT | `/api/jm/sync/settings` | 同步设置与可用根目录；PUT 保存完整设置 |
 | GET | `/api/jm/sync/directories?path=` | 允许范围内的服务器子目录 |

@@ -193,6 +193,27 @@ def create_app(store=None, sources=None):
             raise ComicApiError("当前禁漫插件不支持加入收藏", 400, "unsupported", "jm")
         return await service.call("jm", "add_favorite", comic_id)
 
+    @app.get("/api/bika/favorites")
+    async def bika_favorites(page: int = Query(1, ge=1, le=1000),
+                             sort: str = Query("dd", pattern=r"^(dd|da|ld|vd)$")):
+        if "favorites" not in service.source("bika").capabilities:
+            raise ComicApiError("当前哔咔插件不支持收藏列表", 400, "unsupported", "bika")
+        data = await service.call("bika", "favorites", page=page, sort=sort)
+        return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/bika/favorites/{comic_id}")
+    async def bika_favorite_status(comic_id: str):
+        if "add_favorite" not in service.source("bika").capabilities:
+            raise ComicApiError("当前哔咔插件不支持收藏状态", 400, "unsupported", "bika")
+        data = await service.call("bika", "favorite_status", comic_id)
+        return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/bika/favorites/{comic_id}")
+    async def add_bika_favorite(comic_id: str):
+        if "add_favorite" not in service.source("bika").capabilities:
+            raise ComicApiError("当前哔咔插件不支持加入收藏", 400, "unsupported", "bika")
+        return await service.call("bika", "add_favorite", comic_id)
+
     @app.get("/api/jm/sync/settings")
     async def jm_sync_settings():
         return jm_sync.options()

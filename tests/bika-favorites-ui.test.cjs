@@ -1,0 +1,133 @@
+const assert = require('node:assert/strict');
+const {readFileSync} = require('node:fs');
+const {join} = require('node:path');
+const {test} = require('node:test');
+const vm = require('node:vm');
+const app = readFileSync(join(__dirname, '../src/web/static/app.js'), 'utf8');
+const listing = readFileSync(join(__dirname, '../src/web/static/bika-favorites.js'), 'utf8');
+
+class Element {
+  constructor(tag) {
+    this.tagName=tag;this.children=[];this.className='';this.disabled=false;this.value='';
+    this.classes=new Set();this.classList={toggle:(name,on)=>on?this.classes.add(name):this.classes.delete(name)};
+  }
+  set textContent(value) { this.text=String(value);this.children=[]; }
+  get textContent() { return (this.text||'')+this.children.map(child=>child.textContent).join(''); }
+  set innerHTML(value) { this.html=value;this.text='';this.children=[]; }
+  setAttribute(name,value) { this[name]=String(value); }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.text='';this.children=children; }
+  querySelectorAll(selector) {
+    return this.children.flatMap(child=>[...(selector==='button'&&child.tagName==='button'||selector.startsWith('.')&&child.className.split(' ').includes(selector.slice(1))?[child]:[]),...child.querySelectorAll(selector)]);
+  }
+}
+const detail={source:'bika',id:'00000000000000000000000a',title:'测试漫画',chapters:[]};
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+
+function harness(){
+  const state={tab:'browse',sources:[{id:'bika',capabilities:['favorites','add_favorite'],account:{authenticated:true}}]};
+  const roots={},calls=[],toasts=[],bindings=[],tabs=[];
+  const root=id=>roots[id]||(roots[id]=new Element('div'));
+  const context=vm.createContext({state,document:{createElement:tag=>new Element(tag)},$:root,enc:encodeURIComponent,URLSearchParams,
+    location:{search:''},appReady:Promise.resolve(),sourcePlugin:id=>state.sources.find(source=>source.id===id),
+    svgIcon:name=>`<svg>${name}</svg>`,run:async(action,control)=>{if(control)control.disabled=true;try{return await action();}finally{if(control)control.disabled=false;}},
+    api:async(path,options)=>{calls.push({path,options});return options?.method==='POST'?{success:true,favorited:true,already_favorited:false}:{favorited:null};},
+    toast:(message,options)=>toasts.push({message,options}),showTab:tab=>tabs.push(tab),
+    bindButton:id=>{const button=new Element('button');button.textContent='绑定哔咔账号';button.onclick=()=>bindings.push(id);return button;},
+    card:item=>{const el=new Element('article');el.textContent=item.title;el.item=item;return el;},skeletons:()=>[new Element('i')],
+  });
+  vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
+  vm.runInContext(app.slice(app.indexOf('function emptyState('),app.indexOf('function timeAgo(')),context);
+  vm.runInContext(app.slice(app.indexOf('function cloudFavoriteButton('),app.indexOf('function syncDetailHead(')),context);
+  vm.runInContext(listing,context);
+  return {context,state,roots,calls,toasts,bindings,tabs,view:vm.runInContext('bikaFavorites',context)};
+}
+const page=(items=[],total=items.length,hasNext=false)=>({items,total,page:1,page_size:2,has_next:hasNext});
+
+async function open(h){const control=h.context.cloudFavoriteButton(detail);await flush();return control;}
+
+test('哔咔详情独立读取本地云收藏状态，未知态仍需实时预检查，不写书库',async()=>{
+  const h=harness(),control=await open(h);
+  assert.equal(control.textContent,'加入哔咔收藏');assert.match(control.title,/本地收藏表尚无/);
+  assert.equal(h.calls[0].path,`/api/bika/favorites/${detail.id}`);assert.equal(h.calls[0].options.cache,'no-store');
+  await control.onclick();assert.equal(control.textContent,'已收藏');assert.equal(h.calls[1].options.method,'POST');
+  assert.equal(h.toasts[0].message,'已加入哔咔收藏');assert.ok(h.calls.every(call=>!call.path.includes('/library')));
+});
+
+test('重新打开哔咔详情读最新表状态，不复用旧按钮状态',async()=>{
+  const h=harness();let favorited=true;
+  h.context.api=async()=>({favorited});
+  assert.equal((await open(h)).textContent,'已收藏');favorited=false;
+  assert.equal((await open(h)).textContent,'加入哔咔收藏');
+});
+
+test('哔咔未绑定时提供账号入口，不查询或写入收藏',async()=>{
+  const h=harness();h.state.sources[0].account={};
+  const control=await open(h);await control.onclick();assert.deepEqual(h.bindings,['bika']);assert.equal(h.calls.length,0);
+  h.state.sources[0].capabilities=['favorites'];assert.equal(h.context.cloudFavoriteButton(detail),null);
+});
+
+test('哔咔写入失败后的第一次重试只读状态，不重发切换请求',async()=>{
+  const h=harness(),control=await open(h);let posts=0,reads=0;
+  h.context.api=async(_path,options={})=>{if(options.method==='POST'){posts++;throw Object.assign(new Error('结果未确认'),{code:'favorite_unknown'});}reads++;return {favorited:true};};
+  await control.onclick();assert.equal(control.textContent,'收藏状态未确认');
+  await control.onclick();assert.equal(posts,1);assert.equal(reads,1);assert.equal(control.textContent,'已收藏');
+});
+
+test('哔咔添加成功仅在哔咔收藏页刷新，已收藏响应也不调用 JM 列表',async()=>{
+  const h=harness();h.state.tab='bika-favorites';let refreshes=0;
+  const control=await open(h);h.context.loadBikaFavorites=async()=>{refreshes++;};
+  h.context.api=async()=>({success:true,favorited:true,already_favorited:true});
+  await control.onclick();assert.equal(refreshes,1);assert.equal(h.toasts[0].message,'漫画已在哔咔收藏中');
+});
+
+test('哔咔状态查询失效提供哔咔绑定操作，不执行写入',async()=>{
+  const h=harness();h.context.api=async()=>{throw Object.assign(new Error('登录失效'),{code:'login_required'});};
+  const control=await open(h);assert.equal(control.textContent,'收藏状态未确认');
+  await h.toasts[0].options.action.run();assert.deepEqual(h.bindings,['bika']);
+});
+
+test('列表使用真实分页、排序、无缓存和哔咔来源卡片',async()=>{
+  const h=harness(),items=[{...detail},{...detail,id:'b',title:'另一本'}];
+  h.context.api=async(path,options)=>{h.calls.push({path,options});return page(items,3,true);};
+  await h.context.loadBikaFavorites();
+  assert.equal(h.calls[0].path,'/api/bika/favorites?page=1&sort=dd');assert.equal(h.calls[0].options.cache,'no-store');
+  assert.equal(h.roots['bika-favorites-count'].textContent,'3 本');assert.equal(h.roots['bika-favorites-page'].textContent,'第 1 / 2 页');
+  assert.equal(h.roots['bika-favorites-prev'].disabled,true);assert.equal(h.roots['bika-favorites-next'].disabled,false);
+  assert.equal(h.roots['bika-favorites-books'].children[0].item.source,'bika');
+  h.roots['bika-favorites-next'].onclick();await flush();assert.match(h.calls.at(-1).path,/page=2/);
+  h.roots['bika-favorites-sort'].value='vd';h.roots['bika-favorites-sort'].onchange();await flush();
+  assert.match(h.calls.at(-1).path,/page=1&sort=vd/);
+});
+
+test('页内标题作者筛选不请求上游，筛选失败与空收藏分别显示',async()=>{
+  const h=harness();h.context.api=async()=>page([{...detail,author:'Alice'},{...detail,title:'Second'}]);
+  await h.context.loadBikaFavorites();h.roots['bika-favorites-keyword'].value='alice';h.context.renderBikaFavorites();
+  assert.equal(h.roots['bika-favorites-books'].children.length,1);
+  h.roots['bika-favorites-keyword'].value='unmatched';h.context.renderBikaFavorites();assert.match(h.roots['bika-favorites-books'].textContent,/本页没有匹配漫画/);
+  h.context.api=async()=>page();await h.context.loadBikaFavorites();assert.match(h.roots['bika-favorites-books'].textContent,/收藏为空/);
+  assert.equal(h.roots['bika-favorites-pager'].hidden,true);
+});
+
+test('未登录列表无请求，登录失效和上游错误不伪装为空收藏',async()=>{
+  const h=harness();h.state.sources[0].account={};await h.context.loadBikaFavorites();assert.equal(h.calls.length,0);
+  assert.match(h.roots['bika-favorites-books'].textContent,/需要登录/);
+  h.state.sources[0].account={configured:true};h.context.api=async()=>{throw Object.assign(new Error('登录已失效'),{code:'login_required'});};
+  await h.context.loadBikaFavorites();assert.match(h.roots['bika-favorites-books'].textContent,/收藏加载失败/);
+  assert.equal(h.roots['bika-favorites-message'].children[0].textContent,'绑定哔咔账号');
+});
+
+test('迟到的上一页或旧账号响应不覆盖新列表',async()=>{
+  const h=harness();let resolve;h.context.api=()=>new Promise(done=>{resolve=done;});
+  const first=h.context.loadBikaFavorites();h.state.sources[0].account={};await h.context.loadBikaFavorites();
+  resolve(page([detail]));await first;assert.match(h.roots['bika-favorites-books'].textContent,/需要登录/);assert.equal(h.view.items.length,0);
+});
+
+test('桌面和移动导航有哔咔收藏入口，并支持五列及独立排版基线',()=>{
+  const html=readFileSync(join(__dirname,'../src/web/templates/index.html'),'utf8');
+  const css=readFileSync(join(__dirname,'../src/web/static/app.css'),'utf8');
+  assert.equal(html.match(/data-tab="bika-favorites"/g).length,2);
+  assert.match(html,/bika-favorites.js\?v=/);assert.match(css,/\.bika-favorites-view\{font-size:15px;line-height:1\.6\}/);
+  assert.match(css,/\.tabbar\{display:grid;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/);
+  assert.match(app,/if\(tab==='bika-favorites'\)run\(loadBikaFavorites\)/);
+});

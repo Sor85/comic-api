@@ -399,6 +399,11 @@ dialog[open]{animation:pop .18s ease-out}
 .settings-form input{width:100%}
 .settings-form button{justify-self:start}
 
+/* Bika cloud favorites */
+.bika-favorites-view{font-size:15px;line-height:1.6}
+.bika-favorites-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+.bika-favorites-toolbar select,.bika-favorites-toolbar input{max-width:100%;min-width:0}
+
 /* JM favorites & local image sync */
 .jm-sync-view,.jm-sync-dialog{font-size:15px;line-height:1.6}
 .jm-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
@@ -505,7 +510,7 @@ dialog[open]{animation:pop .18s ease-out}
   .brand svg{width:24px;height:24px}
   header .actions .icon-btn{width:38px;height:38px}
   body{padding-bottom:var(--tabbar-h)}
-  .tabbar{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;left:0;right:0;bottom:0;z-index:30;height:var(--tabbar-h);padding-bottom:env(safe-area-inset-bottom);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:saturate(1.4) blur(16px);-webkit-backdrop-filter:saturate(1.4) blur(16px);border-top:1px solid var(--line)}
+  .tabbar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:30;height:var(--tabbar-h);padding-bottom:env(safe-area-inset-bottom);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:saturate(1.4) blur(16px);-webkit-backdrop-filter:saturate(1.4) blur(16px);border-top:1px solid var(--line)}
   .tabbar button{position:relative;flex-direction:column;gap:2px;border:0;background:none;border-radius:0;padding:6px 0;color:var(--muted);font-size:11px;font-weight:500}
   .tabbar button svg{width:22px;height:22px}
   .tabbar button:active{transform:none;opacity:.7}

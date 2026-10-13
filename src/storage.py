@@ -79,9 +79,18 @@ class Store:
                 CREATE TABLE IF NOT EXISTS jm_favorite_catalog (
                     owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS bika_favorites (
+                    owner TEXT NOT NULL, comic_id TEXT NOT NULL,
+                    favorited INTEGER CHECK(favorited IN (0,1)),
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(owner, comic_id)
+                );
+                CREATE TABLE IF NOT EXISTS bika_favorite_catalog (
+                    owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE INDEX IF NOT EXISTS jm_sync_files_path ON jm_sync_files(path);
                 CREATE INDEX IF NOT EXISTS jm_sync_local_files_path ON jm_sync_local_files(path);
-                PRAGMA user_version=4;
+                PRAGMA user_version=5;
             """)
 
     @contextmanager
@@ -175,6 +184,49 @@ class Store:
                 FROM (SELECT ? AS owner) wanted
                 LEFT JOIN jm_favorites f ON f.owner=wanted.owner AND f.comic_id=?
                 LEFT JOIN jm_favorite_catalog c ON c.owner=wanted.owner""", (owner, comic_id)).fetchone()
+        if row["comic_id"] is not None:
+            return None if row["favorited"] is None else bool(row["favorited"])
+        return False if row["complete"] is not None else None
+
+    @staticmethod
+    def _bika_comic_id(value):
+        value = str(value).lower()
+        if len(value) != 24 or any(char not in "0123456789abcdef" for char in value):
+            raise ValueError("Invalid Bika comic ID")
+        return value
+
+    def record_bika_favorites(self, owner, comic_ids, complete=False):
+        if not owner:
+            return
+        ids = list(dict.fromkeys(self._bika_comic_id(value) for value in comic_ids))
+        with self.connect() as db:
+            if complete:
+                db.execute("DELETE FROM bika_favorites WHERE owner=?", (owner,))
+            db.executemany("""INSERT INTO bika_favorites(owner,comic_id,favorited) VALUES (?,?,1)
+                ON CONFLICT(owner,comic_id) DO UPDATE SET favorited=1,updated_at=CURRENT_TIMESTAMP""",
+                ((owner, comic_id) for comic_id in ids))
+            if complete:
+                db.execute("""INSERT INTO bika_favorite_catalog(owner) VALUES (?)
+                    ON CONFLICT(owner) DO UPDATE SET updated_at=CURRENT_TIMESTAMP""", (owner,))
+
+    def set_bika_favorite(self, owner, comic_id, favorited):
+        if not owner:
+            return
+        if favorited is not None and not isinstance(favorited, bool):
+            raise ValueError("Invalid Bika favorite state")
+        comic_id = self._bika_comic_id(comic_id)
+        with self.connect() as db:
+            db.execute("""INSERT INTO bika_favorites(owner,comic_id,favorited) VALUES (?,?,?)
+                ON CONFLICT(owner,comic_id) DO UPDATE SET favorited=excluded.favorited,
+                updated_at=CURRENT_TIMESTAMP""", (owner, comic_id, favorited))
+
+    def bika_favorite_status(self, owner, comic_id):
+        comic_id = self._bika_comic_id(comic_id)
+        with self.connect() as db:
+            row = db.execute("""SELECT f.comic_id,f.favorited,c.owner AS complete
+                FROM (SELECT ? AS owner) wanted
+                LEFT JOIN bika_favorites f ON f.owner=wanted.owner AND f.comic_id=?
+                LEFT JOIN bika_favorite_catalog c ON c.owner=wanted.owner""", (owner, comic_id)).fetchone()
         if row["comic_id"] is not None:
             return None if row["favorited"] is None else bool(row["favorited"])
         return False if row["complete"] is not None else None
