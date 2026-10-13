@@ -4,6 +4,14 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def site_auth_environment(monkeypatch):
+    """Keep tests independent of deployment credentials and the local .env file."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_USERNAME", "")
+    monkeypatch.setenv("AUTH_PASSWORD", "")
+
+
+@pytest.fixture(autouse=True)
 def synthetic_source_dns(monkeypatch):
     """Existing fake sources must stay offline when image downloads validate DNS."""
     original = socket.getaddrinfo

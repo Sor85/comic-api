@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from src.auth import AuthSettings, BasicAuthMiddleware
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services.downloads import DownloadManager, pdf_password_for
@@ -83,6 +84,7 @@ class SyncInput(BaseModel):
 
 
 def create_app(store=None, sources=None):
+    auth = AuthSettings.from_env()
     store = store or Store()
     service = AggregatorService(store, sources)
     downloads = DownloadManager(store, service)
@@ -102,6 +104,8 @@ def create_app(store=None, sources=None):
             await downloads.stop()
 
     app = FastAPI(title="Comic · 图源与书库", version="2.0.0", lifespan=lifespan)
+    if auth.enabled:
+        app.add_middleware(BasicAuthMiddleware, settings=auth)
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
     app.state.jm_sync, app.state.library_sync = jm_sync, library_sync
     app.mount("/static", VersionedStaticFiles(directory=WEB_STATIC), name="static")
