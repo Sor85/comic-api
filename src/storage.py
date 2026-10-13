@@ -1,5 +1,6 @@
 """Single-instance SQLite storage. Reader progress deliberately does not live here."""
 import base64
+import hashlib
 import json
 import os
 import sqlite3
@@ -69,9 +70,18 @@ class Store:
                     size INTEGER NOT NULL, digest TEXT NOT NULL,
                     PRIMARY KEY(root, album_id, chapter_id, page), UNIQUE(root, path)
                 );
+                CREATE TABLE IF NOT EXISTS jm_favorites (
+                    owner TEXT NOT NULL, comic_id TEXT NOT NULL,
+                    favorited INTEGER CHECK(favorited IN (0,1)),
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(owner, comic_id)
+                );
+                CREATE TABLE IF NOT EXISTS jm_favorite_catalog (
+                    owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE INDEX IF NOT EXISTS jm_sync_files_path ON jm_sync_files(path);
                 CREATE INDEX IF NOT EXISTS jm_sync_local_files_path ON jm_sync_local_files(path);
-                PRAGMA user_version=3;
+                PRAGMA user_version=4;
             """)
 
     @contextmanager
@@ -121,6 +131,53 @@ class Store:
         secret = base64.b64encode(cipher.nonce + tag + data).decode()
         with self.connect() as db:
             db.execute("INSERT INTO accounts VALUES (?,?) ON CONFLICT(source) DO UPDATE SET secret=excluded.secret", (source, secret))
+
+    @staticmethod
+    def account_owner(account):
+        return hashlib.sha256(str(account).encode()).hexdigest() if account else None
+
+    @staticmethod
+    def _jm_comic_id(value):
+        value = str(value)
+        if not value.isascii() or not value.isdigit() or len(value) > 20 or int(value) < 1:
+            raise ValueError("Invalid JM comic ID")
+        return str(int(value))
+
+    def record_jm_favorites(self, owner, comic_ids, complete=False):
+        if not owner:
+            return
+        ids = list(dict.fromkeys(self._jm_comic_id(value) for value in comic_ids))
+        with self.connect() as db:
+            if complete:
+                db.execute("DELETE FROM jm_favorites WHERE owner=?", (owner,))
+            db.executemany("""INSERT INTO jm_favorites(owner,comic_id,favorited) VALUES (?,?,1)
+                ON CONFLICT(owner,comic_id) DO UPDATE SET favorited=1,updated_at=CURRENT_TIMESTAMP""",
+                ((owner, comic_id) for comic_id in ids))
+            if complete:
+                db.execute("""INSERT INTO jm_favorite_catalog(owner) VALUES (?)
+                    ON CONFLICT(owner) DO UPDATE SET updated_at=CURRENT_TIMESTAMP""", (owner,))
+
+    def set_jm_favorite(self, owner, comic_id, favorited):
+        if not owner:
+            return
+        if favorited is not None and not isinstance(favorited, bool):
+            raise ValueError("Invalid JM favorite state")
+        comic_id = self._jm_comic_id(comic_id)
+        with self.connect() as db:
+            db.execute("""INSERT INTO jm_favorites(owner,comic_id,favorited) VALUES (?,?,?)
+                ON CONFLICT(owner,comic_id) DO UPDATE SET favorited=excluded.favorited,
+                updated_at=CURRENT_TIMESTAMP""", (owner, comic_id, favorited))
+
+    def jm_favorite_status(self, owner, comic_id):
+        comic_id = self._jm_comic_id(comic_id)
+        with self.connect() as db:
+            row = db.execute("""SELECT f.comic_id,f.favorited,c.owner AS complete
+                FROM (SELECT ? AS owner) wanted
+                LEFT JOIN jm_favorites f ON f.owner=wanted.owner AND f.comic_id=?
+                LEFT JOIN jm_favorite_catalog c ON c.owner=wanted.owner""", (owner, comic_id)).fetchone()
+        if row["comic_id"] is not None:
+            return None if row["favorited"] is None else bool(row["favorited"])
+        return False if row["complete"] is not None else None
 
     def books(self):
         with self.connect() as db:

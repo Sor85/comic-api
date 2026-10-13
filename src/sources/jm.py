@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class JmPlugin(SourcePlugin):
     id = "jm"
     name = "禁漫天堂"
-    capabilities = ["search", "tag_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites"]
+    capabilities = ["search", "tag_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": v, "label": n} for v, n in
@@ -38,6 +38,12 @@ class JmPlugin(SourcePlugin):
 
     def favorites(self, page=1, folder_id="0", order="mr"):
         return self.client.favorites(page, folder_id, order)
+
+    def favorite_status(self, comic_id):
+        return self.client.favorite_status(comic_id)
+
+    def add_favorite(self, comic_id):
+        return self.client.add_favorite(comic_id)
 
     def chapter_detail(self, comic_id, chapter_id):
         return self.client.get_chapter_detail(comic_id, chapter_id)

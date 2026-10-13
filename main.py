@@ -172,6 +172,27 @@ def create_app(store=None, sources=None):
         jm_sync.require_account()
         return await service.call("jm", "favorites", page=page, folder_id=folder_id, order=order)
 
+    @app.get("/api/jm/favorites/{comic_id}")
+    async def jm_favorite_status(comic_id: str):
+        if not re.fullmatch(r"[0-9]{1,20}", comic_id) or int(comic_id) < 1:
+            raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
+        jm_sync.require_account()
+        owner = store.account_owner((store.account("jm") or {}).get("account"))
+        if not owner:
+            raise ComicApiError("禁漫收藏需要绑定账号", 401, "login_required", "jm")
+        comic_id = str(int(comic_id))
+        favorited = await asyncio.to_thread(store.jm_favorite_status, owner, comic_id)
+        return JSONResponse({"comic_id": comic_id, "favorited": favorited}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/jm/favorites/{comic_id}")
+    async def add_jm_favorite(comic_id: str):
+        if not re.fullmatch(r"[0-9]{1,20}", comic_id) or int(comic_id) < 1:
+            raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
+        plugin = jm_sync.require_account()
+        if "add_favorite" not in plugin.capabilities:
+            raise ComicApiError("当前禁漫插件不支持加入收藏", 400, "unsupported", "jm")
+        return await service.call("jm", "add_favorite", comic_id)
+
     @app.get("/api/jm/sync/settings")
     async def jm_sync_settings():
         return jm_sync.options()

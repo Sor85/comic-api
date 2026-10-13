@@ -27,6 +27,7 @@ class JmClient(BaseClient):
         self.host_resolved = False
         self._resolve_after = 0.0
         self._auth_lock = threading.RLock()
+        self._favorite_pages = {}
         from src.storage import Store
         self.store = store or Store()
         account = self.store.account("jm") or {}
@@ -42,6 +43,7 @@ class JmClient(BaseClient):
         return bool(self.jwt_token or self.avs)
 
     def clear_session(self) -> None:
+        self._favorite_pages.clear()
         self.jwt_token = self.avs = ""
         self.auth_cookies = {}
         self.session.cookies.clear()
@@ -88,6 +90,7 @@ class JmClient(BaseClient):
                         self.auth_cookies["AVS"] = self.avs
                     self._persist(account=account, password=password, token=self.jwt_token,
                                   avs=self.avs, cookies=self.auth_cookies, cookie_api=self.cookie_api, user=res)
+                    self._favorite_pages.clear()
                     return res
             except Exception:
                 self.cookie_api, self.jwt_token, self.avs, self.auth_cookies = previous
@@ -258,6 +261,7 @@ class JmClient(BaseClient):
         _auth_retry: bool = False,
         _force_no_auth: bool = False,
         _require_auth: bool = False,
+        _retry_safe: bool = True,
     ) -> Any:
         if _require_auth:
             self.ensure_authenticated()
@@ -277,7 +281,8 @@ class JmClient(BaseClient):
         with self._auth_lock:
             bases = list(self.api_bases) or [Config.JM_FALLBACK_API_BASE]
         last_error = None
-        for base_url in bases:
+        # A toggle may already have taken effect even when its response is lost.
+        for base_url in bases if _retry_safe else bases[:1]:
             ts = int(time.time())
             with self._auth_lock:
                 used_jwt = "" if _force_no_auth else self.jwt_token
@@ -289,6 +294,8 @@ class JmClient(BaseClient):
             url = f"{base_url}{path}"
 
             kwargs = {"headers": headers, "timeout": 10}
+            if not _retry_safe:
+                kwargs["allow_redirects"] = False
             if cookies:
                 kwargs["cookies"] = cookies
             if params:
@@ -316,12 +323,12 @@ class JmClient(BaseClient):
                 with self._auth_lock:
                     if (self.jwt_token, self.avs) == (used_jwt, used_avs):
                         self.clear_session()
-                    if _auth_retry or not self._credentials_available():
+                    if _auth_retry or not _retry_safe or not self._credentials_available():
                         raise ComicApiError("禁漫会话已失效，需要重新登录", 401, "login_required", "jm")
                     self.ensure_authenticated()
                 return self.jm_request(path, method, params, data, _auth_retry=True, _require_auth=True)
 
-            if res.status_code in (401, 403) and used_jwt and not _auth_retry:
+            if res.status_code in (401, 403) and used_jwt and not _auth_retry and _retry_safe:
                 retry_without_auth = False
                 with self._auth_lock:
                     if self.jwt_token == used_jwt:
@@ -379,6 +386,16 @@ class JmClient(BaseClient):
         raise ComicApiError("禁漫节点不可用", 502, "upstream_error", "jm")
 
     def favorites(self, page=1, folder_id="0", order="mr") -> dict:
+        with self._auth_lock:
+            try:
+                data = self._favorites(page, folder_id, order)
+            except Exception:
+                self._favorite_pages.pop(order, None)
+                raise
+            self._record_favorite_page(data, str(folder_id), order)
+            return data
+
+    def _favorites(self, page=1, folder_id="0", order="mr") -> dict:
         """jmcomic API: /favorite returns list/folder_list/total, fixed at 20 items per page."""
         if page < 1 or order not in ("mr", "mp") or not str(folder_id).isascii() or not str(folder_id).isdigit():
             raise ComicApiError("收藏查询参数无效", 422, "invalid_request", "jm")
@@ -411,6 +428,105 @@ class JmClient(BaseClient):
             raise ComicApiError("禁漫收藏分页为空但总数非零", 502, "invalid_response", "jm")
         return {"items": items, "folders": list(folders.values()), "total": total,
                 "page": page, "page_size": 20, "has_next": page * 20 < total}
+
+    def _favorite_owner(self):
+        return self.store.account_owner(self._account)
+
+    def _record_favorite_page(self, data, folder_id, order):
+        owner = self._favorite_owner()
+        if not owner:
+            return
+        try:
+            ids = [self._favorite_id(str(item["id"])) for item in data["items"]]
+        except ComicApiError as exc:
+            self._favorite_pages.pop(order, None)
+            raise ComicApiError("禁漫收藏编号无效，未登记到本地表", 502, "invalid_response", "jm") from exc
+        self.store.record_jm_favorites(owner, ids)
+        if folder_id != "0":
+            return
+        page, total = data["page"], data["total"]
+        if page == 1:
+            self._favorite_pages[order] = {"next": 1, "total": total, "ids": set()}
+        scan = self._favorite_pages.get(order)
+        if (not scan or page != scan["next"] or total != scan["total"]
+                or len(set(ids)) != len(ids) or scan["ids"].intersection(ids)):
+            self._favorite_pages.pop(order, None)
+            return
+        scan["ids"].update(ids)
+        scan["next"] += 1
+        if not data["has_next"]:
+            if len(scan["ids"]) == total:
+                self.store.record_jm_favorites(owner, scan["ids"], complete=True)
+            self._favorite_pages.pop(order, None)
+
+    def _favorite_ids(self) -> set[str]:
+        seen, total = set(), None
+        for page in range(1, 1001):
+            data = self.favorites(page=page)
+            if total is None:
+                total = data["total"]
+            elif data["total"] != total:
+                raise ComicApiError("收藏在检查期间发生变化，未执行添加", 409, "favorites_changed", "jm")
+            ids = []
+            for item in data["items"]:
+                value = str(item["id"])
+                if not value.isascii() or not value.isdigit() or len(value) > 20 or int(value) < 1:
+                    raise ComicApiError("禁漫收藏编号无效，未执行添加", 502, "invalid_response", "jm")
+                ids.append(str(int(value)))
+            if len(set(ids)) != len(ids) or seen.intersection(ids):
+                raise ComicApiError("收藏分页重复，未执行添加", 502, "invalid_response", "jm")
+            seen.update(ids)
+            if len(seen) > total or (not data["has_next"] and len(seen) != total):
+                raise ComicApiError("收藏分页数量不一致，未执行添加", 502, "invalid_response", "jm")
+            if not data["has_next"]:
+                self.store.record_jm_favorites(self._favorite_owner(), seen, complete=True)
+                return seen
+        raise ComicApiError("收藏超过 1000 页检查上限，未执行添加", 422, "favorites_too_large", "jm")
+
+    @staticmethod
+    def _favorite_id(comic_id: str) -> str:
+        if not comic_id.isascii() or not comic_id.isdigit() or len(comic_id) > 20 or int(comic_id) < 1:
+            raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
+        return str(int(comic_id))
+
+    def favorite_status(self, comic_id: str) -> dict:
+        comic_id = self._favorite_id(comic_id)
+        owner = self._favorite_owner()
+        if not owner or not (self.has_session() or self._credentials_available()):
+            raise ComicApiError("禁漫收藏需要绑定账号", 401, "login_required", "jm")
+        return {"comic_id": comic_id, "favorited": self.store.jm_favorite_status(owner, comic_id)}
+
+    def add_favorite(self, comic_id: str) -> dict:
+        comic_id = self._favorite_id(comic_id)
+        # Serialize preflight + toggle with login/logout and other additions.
+        with self._auth_lock:
+            self.ensure_authenticated()
+            # Local absence must never trigger the upstream toggle without preflight.
+            self._favorite_pages.clear()
+            ids = self._favorite_ids()
+            owner = self._favorite_owner()
+            already_favorited = comic_id in ids
+            if not already_favorited:
+                self.store.set_jm_favorite(owner, comic_id, None)
+                try:
+                    response = self.jm_request("/favorite", method="POST", data={"aid": comic_id},
+                                               _require_auth=True, _retry_safe=False)
+                except Exception as exc:
+                    if isinstance(exc, ComicApiError) and exc.code in ("login_required", "busy"):
+                        raise
+                    raise ComicApiError("禁漫收藏结果未确认，再次添加前将重新检查收藏状态", 502,
+                                        "favorite_unknown", "jm") from exc
+                data = response.get("data", response) if isinstance(response, dict) else response
+                if not isinstance(data, dict) or data.get("status") != "ok" or data.get("type") not in ("add", "remove"):
+                    raise ComicApiError("禁漫未确认加入收藏，再次添加前将重新检查收藏状态", 502,
+                                        "favorite_unknown", "jm")
+                if data["type"] == "remove":
+                    self.store.set_jm_favorite(owner, comic_id, False)
+                    raise ComicApiError("上游返回取消收藏结果，收藏状态存在并发冲突，需在 JM 核对", 409,
+                                        "favorite_conflict", "jm")
+            self.store.set_jm_favorite(owner, comic_id, True)
+            return {"success": True, "comic_id": comic_id, "favorited": True,
+                    "already_favorited": already_favorited}
 
     def search(self, keyword: str, page: int = 1) -> List[Dict[str, Any]]:
         """搜索漫画：GET /search；第 1 页输入纯数字或 jm 前缀 ID 时直接取详情"""

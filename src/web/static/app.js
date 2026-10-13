@@ -13,7 +13,7 @@ const BROWSE_ACTIONS = {latest: '最新更新', category: '分类浏览', leader
 const BROWSE_ORDER = ['latest', 'category', 'leaderboard', 'random'];
 const statuses = {queued:'排队中',running:'下载中',cancelling:'正在取消',cancelled:'已取消',failed:'失败',completed:'已完成',fetching:'获取章节',downloading:'下载图片',packaging:'打包 PDF',interrupted:'重启中断'};
 const TONES = {queued:'muted',running:'info',cancelling:'warn',cancelled:'muted',failed:'danger',interrupted:'danger',completed:'ok'};
-const CAP_LABELS = {search:'搜索',latest:'最新',category:'分类',leaderboard:'排行',random:'随机',login:'账号',favorites:'收藏夹'};
+const CAP_LABELS = {search:'搜索',latest:'最新',category:'分类',leaderboard:'排行',random:'随机',login:'账号',favorites:'收藏夹',add_favorite:'加入收藏'};
 
 const icons = {
   star:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
@@ -550,7 +550,7 @@ async function loadLibrary() {
 }
 function filterBooks(){
   const category=$('library-category').value,sort=$('library-sort').value,needle=($('library-filter').value||'').trim().toLowerCase(),box=$('books');
-  if(!state.books.length){box.replaceChildren(emptyState('书库还是空的','在漫画详情中点击「收藏」即可加入书库，方便追更和继续阅读。',labelBtn('compass','去发现漫画',()=>showTab('browse'),'primary'),'bookmark'));return;}
+  if(!state.books.length){box.replaceChildren(emptyState('书库为空','漫画详情中的「加入书库」用于收藏到本地书库，支持追更和继续阅读。',labelBtn('compass','发现漫画',()=>showTab('browse'),'primary'),'bookmark'));return;}
   const lastRead=new Map(readHistory().map(h=>[h.source+':'+h.id,h.updatedAt||0]));
   const items=state.books.filter(b=>(category==='*'||b.library_category===category)&&(!needle||(b.title||'').toLowerCase().includes(needle)||(b.author||'').toLowerCase().includes(needle)));
   if(sort==='read')items.sort((a,b)=>(lastRead.get(b.source+':'+b.id)||0)-(lastRead.get(a.source+':'+a.id)||0));
@@ -682,8 +682,9 @@ function renderDetail() {
   if(last&&detail.chapters.some(c=>String(c.id)===last.chapterId))controls.append(labelBtn('book-open',`继续阅读 · ${last.chapterName}`,()=>openReader(last.chapterId),'primary'));
   else if(detail.chapters.length)controls.append(labelBtn('play','开始阅读',()=>openReader(String(detail.chapters[0].id)),'primary'));
   const fav=button('',()=>toggleFavorite(detail).then(syncFav));
-  const syncFav=()=>{const saved=inLibrary(detail);fav.innerHTML=svgIcon(saved?'check':'star');fav.append(node('span',saved?'已收藏':'收藏'));fav.classList.toggle('on',saved);fav.title=saved?'移出书库':'加入书库';};
+  const syncFav=()=>{const saved=inLibrary(detail);fav.innerHTML=svgIcon(saved?'check':'star');fav.append(node('span',saved?'已在书库':'加入书库'));fav.classList.toggle('on',saved);fav.title=saved?'移出书库':'加入书库';};
   syncFav();controls.append(fav);
+  const jmFav=jmFavoriteButton(detail);if(jmFav)controls.append(jmFav);
   if(detail.chapters.length)controls.append(labelBtn('download','下载全部',()=>downloadAll(detail)));
   controls.append(iconBtn('search','在其他图源搜索同名漫画',()=>searchElsewhere(detail.title)));
   text.append(controls);
@@ -705,6 +706,37 @@ async function toggleFavorite(detail){
   await api(bookPath(detail),write('PUT',{category:''}));await loadLibrary();
   const book=state.books.find(b=>b.source===detail.source&&String(b.id)===String(detail.id));
   toast('已加入书库',{action:{label:'设置分类',run:()=>book&&run(()=>editCategory(book))}});
+}
+function jmFavoriteButton(detail){
+  const plugin=sourcePlugin('jm');
+  if(detail.source!=='jm'||!plugin?.capabilities.includes('add_favorite'))return null;
+  if(!(plugin.account?.authenticated||plugin.account?.configured)){const bind=bindButton('jm');bind.title='加入 JM 收藏需要绑定账号';return bind;}
+  let confirmed=null,loaded=false;
+  const path=`/api/jm/favorites/${enc(detail.id)}`;
+  const sync=busy=>{control.innerHTML=svgIcon(confirmed?'check':'star');control.append(node('span',busy?'读取 JM 收藏…':!loaded?'收藏状态未确认':confirmed?'已收藏':'加入 JM 收藏'));control.classList.toggle('on',confirmed===true);control.title=loaded&&confirmed===null?'本地收藏表尚无此漫画的状态，添加前实时检查远端；不提供取消收藏':'JM 账号收藏与本地书库独立；状态读取失败时点击重试，不提供取消收藏';};
+  const report=error=>toast(error.message,{tone:'error',...(error.code==='login_required'?{action:{label:'绑定 JM 账号',run:()=>bindButton('jm').onclick()}}:{})});
+  const control=button('',async()=>{
+    if(!loaded){await loadStatus();return;}
+    sync(true);
+    try{
+      const data=await api(path,{method:'POST'});
+      if(!data.success||data.favorited!==true)throw new Error('禁漫未确认加入收藏');
+      confirmed=true;loaded=true;
+      toast(data.already_favorited?'漫画已在 JM 收藏中':'已加入 JM 收藏');
+      if(state.tab==='jm-favorites')await loadJmFavorites().catch(report);
+    }catch(error){confirmed=null;loaded=false;report(error);}
+    finally{sync(false);}
+  });
+  const loadStatus=async()=>{
+    control.disabled=true;sync(true);
+    try{
+      const data=await api(path,{cache:'no-store'});
+      if(data.favorited!==null&&typeof data.favorited!=='boolean')throw new Error('本地收藏表未返回有效状态');
+      confirmed=data.favorited;loaded=true;
+    }catch(error){confirmed=null;loaded=false;report(error);}
+    finally{control.disabled=false;sync(false);}
+  };
+  loadStatus();return control;
 }
 function syncDetailHead(){const dlg=$('detail-dialog');dlg.querySelector('.dialog-head').classList.toggle('scrolled',dlg.scrollTop>150);}
 const taskPayload=(detail,chapter)=>write('POST',{source:detail.source,comic_id:String(detail.id),chapter_id:String(chapter.id),title:detail.title,chapter:chapter.name});
