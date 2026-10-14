@@ -46,6 +46,7 @@ const icons = {
   alert:'<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
   inbox:'<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
   bookmark:'<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  dots:'<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
   user:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
 };
 const svgIcon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`;
@@ -634,7 +635,7 @@ function showTab(tab,updateHistory=true,dismissSettings=true) {
   if(tab==='bika-favorites')run(loadBikaFavorites);
 }
 function card(item,{showSource=true,library=false,history=null}={}){
-  const el=node('article',undefined,'card'+(history?' card-history':''));
+  const el=node('article',undefined,'card'+(history?' card-history':'')+(library?' card-library':''));
   const open=button('',()=>openComic(item,{resume:!!history}),'card-open');open.title=item.title||'';
   const cover=coverBox(item);
   if(showSource&&item.source)cover.append(node('span',sourceName(item.source),'cover-source'));
@@ -649,9 +650,14 @@ function card(item,{showSource=true,library=false,history=null}={}){
   if(history)info.append(node('p',`${history.chapterName||''} · ${history.index+1}/${history.total} 页`,'card-sub accent'));
   open.append(cover,info);el.append(open);
   if(!history)el.append(renderComicAuthors(item));
-  if(library)el.append(node('p',`${bookCategories(item).join(' / ')||'未分类'} · ${item.chapters?.length||0} 章`,'card-sub'));
+  if(library){
+    // Library cards keep a fixed rhythm: two-line title, one author line, one meta line; actions live in a menu.
+    const meta=node('p',undefined,'card-meta'),categories=bookCategories(item).join(' / ')||'未分类';
+    const category=node('span',categories,'card-meta-category');category.title=categories;
+    meta.append(category,node('span',`${item.chapters?.length||0} 章`,'card-meta-count'));el.append(meta);
+  }
   if(item.variants?.length>1)el.append(renderComicVariants(item.variants));
-  if(library)el.append(libraryActions(item));
+  if(library)el.append(libraryActions(item,el));
   return el;
 }
 function renderComicVariants(variants){
@@ -668,13 +674,18 @@ function renderComicVariants(variants){
   }
   return root;
 }
-function libraryActions(item){
-  const controls=node('div',undefined,'card-actions');
-  controls.append(
-    iconBtn('refresh-cw','检查更新',async()=>{const result=await api(bookPath(item)+'/refresh',{method:'POST'});toast(result.new_chapters?`《${item.title}》新增 ${result.new_chapters} 章`:'暂无新章节');await loadLibrary();}),
-    iconBtn('tag','设置分类',()=>editCategory(item)),
-    iconBtn('trash-2','移出书库',async()=>{if(!await ask({title:'移出书库',message:`确定将《${item.title}》移出书库吗？阅读进度会保留。`,ok:'移出',danger:true}))return;await api(bookPath(item),{method:'DELETE'});toast('已移出书库');await loadLibrary();}));
-  return controls;
+function libraryActions(item,cardEl){
+  const more=node('button',undefined,'icon-btn card-more');more.type='button';more.title='更多操作';more.setAttribute('aria-label','更多操作');more.innerHTML=svgIcon('dots');more.onclick=()=>showMenu();more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');
+  const actions=[
+    {label:'检查更新',icon:svgIcon('refresh-cw'),run:async()=>{const result=await api(bookPath(item)+'/refresh',{method:'POST'});toast(result.new_chapters?`《${item.title}》新增 ${result.new_chapters} 章`:'暂无新章节');await loadLibrary();}},
+    {label:'设置分类',icon:svgIcon('tag'),run:()=>editCategory(item)},
+    {divider:true},
+    {label:'移出书库',icon:svgIcon('trash-2'),danger:true,run:async()=>{if(!await ask({title:'移出书库',message:`确定将《${item.title}》移出书库吗？阅读进度会保留。`,ok:'移出',danger:true}))return;await api(bookPath(item),{method:'DELETE'});toast('已移出书库');await loadLibrary();}},
+  ];
+  const showMenu=point=>dropdown.open({anchor:more,point,owner:more,items:actions,align:'end',label:`《${item.title||'未命名'}》操作`,onPick:action=>{more.classList.add('busy');run(action.run).finally(()=>more.classList.remove('busy'));}});
+  // Right-clicking anywhere on the card opens the same menu at the pointer.
+  cardEl?.addEventListener('contextmenu',event=>{if(event.target.closest?.('.author-link'))return;event.preventDefault();showMenu({x:event.clientX,y:event.clientY});});
+  return more;
 }
 async function editCategory(item){
   const category=await ask({title:'设置分类',message:`《${item.title}》 · 手动分类不影响收藏同步分类。`,input:true,value:item.library_category||'',placeholder:'留空清除手动分类',choices:state.categories});
@@ -1000,7 +1011,7 @@ function renderSourceSettings(){
       input.value=plugin.settings?.[field.name]??field.options[0]?.value??'';
       if(![...input.options].some(o=>o.value===input.value))input.selectedIndex=0;
     }else{input=node('input');input.name=field.name;input.type=field.type==='url'?'url':'text';input.value=plugin.settings?.[field.name]||'';input.placeholder='留空使用部署默认值';}
-    input.setAttribute('aria-label',field.label);label.append(input);
+    input.setAttribute('aria-label',field.label);label.append(input);if(input.tagName==='SELECT'&&typeof dropdown!=='undefined')dropdown.enhance(input);
     const submit=node('button','保存','primary');submit.type='submit';form.append(label,submit);form.onsubmit=event=>{event.preventDefault();run(async()=>{await api(`/api/sources/${enc(plugin.id)}/settings`,write('PUT',{...plugin.settings,[field.name]:input.value}));await loadSources();toast('设置已保存，后续请求立即生效');},submit);};box.append(form);}
   const links=node('div',undefined,'group');
   if(plugin.capabilities.includes('login'))links.append(linkRow('key','登录凭证',accountLabel(plugin),()=>{configureAccount();$('credentials-dialog').showModal();}));
@@ -1176,7 +1187,7 @@ function syncReaderProgress(){const r=state.reader,el=$('reader-progress');if(!r
 $('reader-pages').addEventListener('scroll',()=>{
   syncReaderProgress();
   const c=$('reader-pages'),dlg=$('reader-dialog'),y=c.scrollTop,dy=y-(state.lastReaderY??y);state.lastReaderY=y;
-  if(Date.now()<(state.readerQuietUntil||0)||$('reader-mode').value!=='scroll'||dlg.querySelector(':focus-within select,:focus-within input'))return;
+  if(Date.now()<(state.readerQuietUntil||0)||$('reader-mode').value!=='scroll'||dlg.querySelector(':focus-within select,:focus-within input,.dd-trigger[aria-expanded="true"]'))return;
   if(dy>24){dlg.classList.remove('ui-open','ui-pinned');}
   else if(dy<-36){dlg.classList.add('ui-open');}
 },{passive:true});
@@ -1236,7 +1247,7 @@ $('login-form').onsubmit=event=>{event.preventDefault();const source=state.setti
 $('reader-close').onclick=()=>closeReader();$('reader-dialog').addEventListener('cancel',event=>{event.preventDefault();closeReader();});
 $('reader-download').onclick=()=>{const r=state.reader,book=r?.book||state.detail;if(!book)return;const chapter=(book.chapters||[]).find(c=>String(c.id)===(r?r.chapterId:$('reader-chapter').value));if(chapter)queueDownload(book,chapter);};
 const toggleReaderUI=()=>{const dlg=$('reader-dialog');const on=!dlg.classList.contains('ui-open');dlg.classList.toggle('ui-open',on);dlg.classList.toggle('ui-pinned',on);};
-const syncReaderUI=event=>{if(event.pointerType!=='mouse')return;const y=event.clientY;const dlg=$('reader-dialog');if(y<=70||y>=innerHeight-110)dlg.classList.add('ui-open');else if(!dlg.classList.contains('ui-pinned'))dlg.classList.remove('ui-open');};
+const syncReaderUI=event=>{if(event.pointerType!=='mouse'||$('reader-dialog').querySelector('.dd-pop'))return;const y=event.clientY;const dlg=$('reader-dialog');if(y<=70||y>=innerHeight-110)dlg.classList.add('ui-open');else if(!dlg.classList.contains('ui-pinned'))dlg.classList.remove('ui-open');};
 $('reader-dialog').addEventListener('pointermove',syncReaderUI);$('reader-dialog').addEventListener('pointerleave',()=>{const dlg=$('reader-dialog');if(!dlg.classList.contains('ui-pinned'))dlg.classList.remove('ui-open');});
 // Tap zones: in paged mode left/right thirds turn pages, middle toggles UI; in scroll mode any tap toggles UI.
 $('reader-pages').addEventListener('click',event=>{if(pinch.suppress||event.target.closest('button,a,select,input'))return;const paged=$('reader-mode').value==='page';const third=event.clientX/innerWidth;if(!paged||third>0.33&&third<0.67){toggleReaderUI();return;}movePage(third<0.5?-1:1);});
@@ -1247,7 +1258,7 @@ $('page-slider').onchange=()=>gotoPage(Number($('page-slider').value)-1);
 $('reader-fullscreen').onclick=()=>{if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});else $('reader-dialog').requestFullscreen?.().catch(()=>toast('浏览器不支持全屏'));};
 $('page-prev').onclick=()=>movePage(-1);$('page-next').onclick=()=>movePage(1);$('chapter-prev').onclick=()=>moveChapter(-1);$('chapter-next').onclick=()=>moveChapter(1);
 window.addEventListener('keydown',event=>{
-  if(!$('reader-dialog').open||['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName)||$('ask-dialog').open)return;const r=state.reader;
+  if(!$('reader-dialog').open||['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName)||event.target.closest?.('.dd-select,.dd-pop')||$('ask-dialog').open)return;const r=state.reader;
   if(['ArrowRight','PageDown',' '].includes(event.key)){event.preventDefault();movePage(1);}
   else if(['ArrowLeft','PageUp'].includes(event.key)){event.preventDefault();movePage(-1);}
   else if(event.key==='Home'&&r){event.preventDefault();gotoPage(0);}
