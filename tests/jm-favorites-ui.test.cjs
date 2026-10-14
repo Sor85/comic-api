@@ -30,7 +30,7 @@ function harness() {
     api:async(path,options)=>{calls.push({path,options});return options?.method==='POST'?{success:true,favorited:true,already_favorited:false}:{comic_id:'123',favorited:false};},
     toast:(message,options)=>toasts.push({message,options}),loadJmFavorites:async()=>{refreshes++;},
     bindButton:id=>{const button=new Element('button');button.textContent='绑定 JM 账号';button.onclick=()=>bindings.push(id);return button;},
-    inLibrary:()=>false,readLocal:()=>null,lastKey:()=>'',renderComicLabels:()=>new Element('div'),
+    inLibrary:()=>false,readLocal:()=>null,readingLast:()=>null,renderComicLabels:()=>new Element('div'),
     syncChapterSort(){},syncChapterPreviews(){},drawChapters(){},requestAnimationFrame(){},
     detailHero:()=>{const hero=new Element('div'),text=new Element('div');hero.append(text);return {hero,text};},
   });

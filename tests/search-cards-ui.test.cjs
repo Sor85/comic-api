@@ -20,7 +20,7 @@ function harness(){
   const opened=[],searches=[];
   const roots={'reader-dialog':{open:false},'detail-dialog':{open:false}};
   const context=vm.createContext({document:{createElement:tag=>new Element(tag)},$:id=>roots[id],state:{detailRequest:0},
-    openComic:(...args)=>opened.push(args),sourceName:id=>id,readLocal:()=>null,lastKey:()=>'',
+    openComic:(...args)=>opened.push(args),sourceName:id=>id,readLocal:()=>null,readingLast:()=>null,
     coverBox:()=>new Element('span'),libraryActions:()=>new Element('div'),svgIcon:()=>'<svg></svg>',
     startSearch:(...args)=>searches.push(args),toast:message=>{throw new Error(message);},
   });

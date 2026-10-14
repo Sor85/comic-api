@@ -84,7 +84,7 @@ def test_dynamic_login_no_secret_in_responses(client):
     assert client.delete('/api/sources/demo/account').status_code==200
 
 
-def test_library_crud_and_no_server_read_progress(client):
+def test_library_crud_and_schema_tables(client):
     path='/api/library/demo/same-id'
     assert client.put(path,json={'category':'收藏'}).status_code==200
     assert client.put(path,json={'category':'收藏'}).status_code==200
@@ -94,7 +94,7 @@ def test_library_crud_and_no_server_read_progress(client):
     assert client.post(path+'/refresh').json()['new_chapters']==0
     with client.app.state.store.connect() as db:
         tables={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert tables=={'accounts','library','library_categories','library_category_members','downloads','source_settings','app_settings','jm_sync_runs','jm_sync_files','jm_sync_local_files','jm_favorites','jm_favorite_catalog','bika_favorites','bika_favorite_catalog'}
+    assert tables=={'accounts','library','library_categories','library_category_members','downloads','source_settings','app_settings','jm_sync_runs','jm_sync_files','jm_sync_local_files','jm_favorites','jm_favorite_catalog','bika_favorites','bika_favorite_catalog','reading_comics','reading_chapters'}
     assert client.delete(path).status_code==200
     assert client.get('/api/library').json()['items']==[]
 

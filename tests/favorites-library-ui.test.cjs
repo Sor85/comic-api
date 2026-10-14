@@ -24,7 +24,7 @@ function harness(source='jm'){
   const context=vm.createContext({state,document:{createElement:tag=>new Element(tag)},$:root,enc:encodeURIComponent,
     svgIcon:name=>`<svg>${name}</svg>`,toast:(message,options)=>toasts.push({message,options}),write:(method,data)=>({method,body:JSON.stringify(data)}),
     api:async(path,options={})=>{calls.push({path,options});if(options.method==='PUT')remote.settings=JSON.parse(options.body);return structuredClone(remote);},
-    loadLibrary:async()=>{reloads++;},readHistory:()=>[],options(){},
+    loadLibrary:async()=>{reloads++;},readingItems:()=>[],readingKey:b=>b.source+':'+b.id,options(){},
     emptyState:title=>{const el=new Element('p');el.textContent=title;return el;},
     card:book=>{const el=new Element('article');el.book=book;return el;},showTab(){},
   });

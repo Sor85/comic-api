@@ -1,9 +1,10 @@
-"""Single-instance SQLite storage. Reader progress deliberately does not live here."""
+"""Single-instance SQLite storage, including reading history and per-chapter reader progress."""
 import base64
 import hashlib
 import json
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -95,9 +96,24 @@ class Store:
                 CREATE TABLE IF NOT EXISTS bika_favorite_catalog (
                     owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS reading_comics (
+                    source TEXT NOT NULL, comic_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+                    chapter_id TEXT NOT NULL, chapter_name TEXT NOT NULL DEFAULT '',
+                    page INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0,
+                    in_history INTEGER NOT NULL DEFAULT 1 CHECK(in_history IN (0,1)),
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY(source, comic_id)
+                );
+                CREATE TABLE IF NOT EXISTS reading_chapters (
+                    source TEXT NOT NULL, comic_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                    page INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
+                    PRIMARY KEY(source, comic_id, chapter_id)
+                );
                 CREATE INDEX IF NOT EXISTS jm_sync_files_path ON jm_sync_files(path);
                 CREATE INDEX IF NOT EXISTS jm_sync_local_files_path ON jm_sync_local_files(path);
-                PRAGMA user_version=6;
+                CREATE INDEX IF NOT EXISTS reading_comics_updated ON reading_comics(updated_at);
+                PRAGMA user_version=7;
             """)
 
     @contextmanager
@@ -306,3 +322,72 @@ class Store:
         with self.connect() as db:
             db.execute("UPDATE downloads SET " + ",".join(f"{k}=?" for k in values) +
                        ",updated_at=CURRENT_TIMESTAMP WHERE id=?", (*values.values(), task_id))
+
+    # Reading history: one row per comic (last read position), one row per chapter (page index).
+    # updated_at is Unix milliseconds so merges from older clients compare against the same unit.
+    _READING_COLUMNS = ("source", "comic_id", "title", "cover", "author", "chapter_id",
+                        "chapter_name", "page", "total", "in_history", "updated_at")
+
+    @staticmethod
+    def _reading_row(row):
+        return {"source": row["source"], "id": row["comic_id"], "title": row["title"], "cover": row["cover"],
+                "author": row["author"], "chapter_id": row["chapter_id"], "chapter_name": row["chapter_name"],
+                "page": row["page"], "total": row["total"], "in_history": bool(row["in_history"]),
+                "updated_at": row["updated_at"]}
+
+    def reading_comics(self, limit=None):
+        sql = "SELECT * FROM reading_comics ORDER BY updated_at DESC, rowid DESC"
+        params = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (limit,)
+        with self.connect() as db:
+            return [self._reading_row(row) for row in db.execute(sql, params)]
+
+    def reading_comic(self, source, comic_id):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM reading_comics WHERE source=? AND comic_id=?",
+                             (source, comic_id)).fetchone()
+            chapters = db.execute("""SELECT chapter_id,page,updated_at FROM reading_chapters
+                WHERE source=? AND comic_id=?""", (source, comic_id)).fetchall()
+        return {"comic": self._reading_row(row) if row else None,
+                "chapters": {item["chapter_id"]: {"page": item["page"], "updated_at": item["updated_at"]}
+                             for item in chapters}}
+
+    def save_reading(self, source, comic_id, values, updated_at=None):
+        """Record the current reader position and put the comic back on the continue-reading list."""
+        now = int(updated_at if updated_at is not None else time.time() * 1000)
+        row = dict(values, source=source, comic_id=comic_id, in_history=1, updated_at=now)
+        with self.connect() as db:
+            db.execute(f"""INSERT INTO reading_comics({",".join(self._READING_COLUMNS)})
+                VALUES ({",".join("?" * len(self._READING_COLUMNS))})
+                ON CONFLICT(source,comic_id) DO UPDATE SET title=excluded.title, cover=excluded.cover,
+                author=excluded.author, chapter_id=excluded.chapter_id, chapter_name=excluded.chapter_name,
+                page=excluded.page, total=excluded.total, in_history=1, updated_at=excluded.updated_at""",
+                       tuple(row[name] for name in self._READING_COLUMNS))
+            db.execute("""INSERT INTO reading_chapters VALUES (?,?,?,?,?)
+                ON CONFLICT(source,comic_id,chapter_id) DO UPDATE SET page=excluded.page,
+                updated_at=excluded.updated_at""", (source, comic_id, values["chapter_id"], values["page"], now))
+        return now
+
+    def import_reading(self, comics, chapters):
+        """Merge records exported from older browser storage; newer server rows always win."""
+        with self.connect() as db:
+            db.executemany(f"""INSERT INTO reading_comics({",".join(self._READING_COLUMNS)})
+                VALUES ({",".join("?" * len(self._READING_COLUMNS))})
+                ON CONFLICT(source,comic_id) DO UPDATE SET title=excluded.title, cover=excluded.cover,
+                author=excluded.author, chapter_id=excluded.chapter_id, chapter_name=excluded.chapter_name,
+                page=excluded.page, total=excluded.total, in_history=excluded.in_history,
+                updated_at=excluded.updated_at WHERE excluded.updated_at > reading_comics.updated_at""",
+                           (tuple(int(item[name]) if name == "in_history" else item[name]
+                                  for name in self._READING_COLUMNS) for item in comics))
+            db.executemany("""INSERT INTO reading_chapters VALUES (?,?,?,?,?)
+                ON CONFLICT(source,comic_id,chapter_id) DO UPDATE SET page=excluded.page,
+                updated_at=excluded.updated_at WHERE excluded.updated_at > reading_chapters.updated_at""",
+                           ((item["source"], item["comic_id"], item["chapter_id"], item["page"], item["updated_at"])
+                            for item in chapters))
+
+    def clear_reading_history(self):
+        """Empty the continue-reading list while keeping every chapter's saved page."""
+        with self.connect() as db:
+            return db.execute("UPDATE reading_comics SET in_history=0 WHERE in_history=1").rowcount

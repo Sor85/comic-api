@@ -79,6 +79,36 @@ class TaskInput(BaseModel):
     chapter: str = Field(default="", max_length=500)
 
 
+class ReadingInput(BaseModel):
+    title: str = Field(default="", max_length=500)
+    cover: str = Field(default="", max_length=2048)
+    author: str = Field(default="", max_length=500)
+    chapter_id: str = Field(min_length=1, max_length=200)
+    chapter_name: str = Field(default="", max_length=500)
+    page: int = Field(ge=0, le=100000)
+    total: int = Field(default=0, ge=0, le=100000)
+
+
+class ReadingImportComic(ReadingInput):
+    source: str = Field(min_length=1, max_length=64)
+    comic_id: str = Field(min_length=1, max_length=200)
+    in_history: bool = True
+    updated_at: int = Field(ge=0, le=10**14)
+
+
+class ReadingImportChapter(BaseModel):
+    source: str = Field(min_length=1, max_length=64)
+    comic_id: str = Field(min_length=1, max_length=200)
+    chapter_id: str = Field(min_length=1, max_length=200)
+    page: int = Field(ge=0, le=100000)
+    updated_at: int = Field(ge=0, le=10**14)
+
+
+class ReadingImport(BaseModel):
+    comics: list[ReadingImportComic] = Field(default_factory=list, max_length=2000)
+    chapters: list[ReadingImportChapter] = Field(default_factory=list, max_length=20000)
+
+
 class SyncInput(BaseModel):
     album_ids: list[str] | None = Field(default=None, min_length=1, max_length=200)
 
@@ -332,6 +362,36 @@ def create_app(store=None, sources=None):
         except Exception as exc:
             raise ComicApiError("图源未返回有效图片", 502, "invalid_image", source) from exc
         return Response(data, media_type=media_type)
+
+    no_store = {"Cache-Control": "no-store"}
+
+    @app.get("/api/reading")
+    async def reading_list():
+        items = await asyncio.to_thread(store.reading_comics)
+        return JSONResponse({"items": items}, headers=no_store)
+
+    @app.delete("/api/reading/history")
+    async def clear_reading_history():
+        cleared = await asyncio.to_thread(store.clear_reading_history)
+        return {"success": True, "cleared": cleared}
+
+    @app.post("/api/reading/import")
+    async def import_reading(data: ReadingImport):
+        await asyncio.to_thread(store.import_reading, [item.model_dump() for item in data.comics],
+                                [item.model_dump() for item in data.chapters])
+        return {"success": True, "comics": len(data.comics), "chapters": len(data.chapters)}
+
+    @app.get("/api/reading/{source}/{comic_id}")
+    async def reading_detail(source: str, comic_id: str):
+        data = await asyncio.to_thread(store.reading_comic, source, comic_id)
+        return JSONResponse(data, headers=no_store)
+
+    @app.put("/api/reading/{source}/{comic_id}")
+    async def save_reading(source: str, comic_id: str, data: ReadingInput):
+        if len(source) > 64 or len(comic_id) > 200:
+            raise ComicApiError("请求参数无效", 422, "invalid_request")
+        updated_at = await asyncio.to_thread(store.save_reading, source, comic_id, data.model_dump())
+        return {"success": True, "updated_at": updated_at}
 
     @app.get("/api/library")
     async def library(category: str | None = None):

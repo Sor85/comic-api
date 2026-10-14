@@ -8,6 +8,7 @@ const state = {
   chapterPreviews: readLocal('comic:chapter-previews') === true,
   searchMode: 'keyword', searchDeduplicate: false, searchCategories: {}, searchCategoryRequests: {},
   browseRequest: 0, shelfRequest: 0, detailRequest: 0, readerRequest: 0, resultItems: [], resultShown: 0, activeTasks: 0,
+  reading: [], readingIndex: new Map(), readingLoaded: false,
 };
 const BROWSE_ACTIONS = {latest: '最新更新', category: '分类浏览', leaderboard: '排行榜', random: '随机推荐'};
 const BROWSE_ORDER = ['latest', 'category', 'leaderboard', 'random'];
@@ -77,9 +78,11 @@ const sourceName=id=>state.sources.find(s=>s.id===id)?.name||id;
 const bookPath=b=>`/api/library/${enc(b.source)}/${enc(b.id)}`;
 function options(select, values, selected) {select.replaceChildren(...values.map(v=>{const n=node('option',v.label);n.value=v.value;return n;}));if(values.some(v=>v.value===selected))select.value=selected;}
 function readLocal(key) {try{return JSON.parse(localStorage.getItem(key));}catch{return null;}}
-function saveLocal(key,value) {try{localStorage.setItem(key,JSON.stringify(value));}catch{if(!saveLocal.warned){toast('浏览器无法保存进度，请检查存储权限');saveLocal.warned=true;}}}
-function progressKey(b,chapter) {return 'comic:progress:'+JSON.stringify([b.source,String(b.id),chapter]);}
-function lastKey(b) {return 'comic:last:'+JSON.stringify([b.source,String(b.id)]);}
+function saveLocal(key,value) {try{localStorage.setItem(key,JSON.stringify(value));}catch{if(!saveLocal.warned){toast('浏览器无法保存偏好设置，请检查存储权限');saveLocal.warned=true;}}}
+// Reading progress lives in server SQLite; detail objects carry their own {comic, chapters} snapshot.
+const readingKey=b=>`${b.source}:${String(b.id)}`;
+function chapterProgress(b,chapter){const p=b?.reading?.chapters?.[chapter];return p?{index:Number(p.page)||0}:null;}
+function readingLast(b){const c=b?.reading?.comic||state.readingIndex?.get(readingKey(b));return c?{chapterId:String(c.chapter_id),chapterName:c.chapter_name||'',index:Number(c.page)||0}:null;}
 function safeImage(url) {try {const u=new URL(url,location.origin);return ['http:','https:'].includes(u.protocol)?u.href:'';}catch{return '';}}
 // Route upstream covers through the image proxy so no direct request leaks to the CDN.
 function coverFor(item) {if(sourcePlugin(item.source)?.enabled===false)return '';const url=safeImage(item.cover);if(!url)return '';if(url.startsWith(location.origin))return url;return `/api/image/proxy?${new URLSearchParams({source:item.source,url})}`;}
@@ -265,10 +268,76 @@ function renderRecent(){
   const list=readRecent();$('recent').hidden=!list.length;
   $('recent-list').replaceChildren(...list.map(item=>button((item.mode==='tag'?'标签 · ':'')+item.keyword,()=>startSearch(item.keyword,item.source,item),'recent-chip')));
 }
-function readHistory(){const list=readLocal('comic:history');return Array.isArray(list)?list.filter(h=>h&&h.source&&h.id):[];}
-function recordHistory(r){
-  const b=r.book,entry={source:b.source,id:String(b.id),title:b.title||'',cover:b.cover||'',author:b.author||'',chapterId:r.chapterId,chapterName:r.chapterName,index:r.index,total:r.images.length,updatedAt:Date.now()};
-  saveLocal('comic:history',[entry,...readHistory().filter(h=>!(h.source===entry.source&&String(h.id)===entry.id))].slice(0,40));
+function readHistory(){return readingItems().filter(h=>h.in_history).map(h=>({source:h.source,id:h.id,title:h.title,cover:h.cover,author:h.author,chapterId:h.chapter_id,chapterName:h.chapter_name,index:h.page,total:h.total,updatedAt:h.updated_at}));}
+function readingItems(){return state.reading||[];}
+function setReading(items){state.reading=items;state.readingIndex=new Map(items.map(h=>[readingKey(h),h]));}
+function upsertReading(entry){setReading([entry,...readingItems().filter(h=>readingKey(h)!==readingKey(entry))]);}
+async function loadReading(){
+  const data=await api('/api/reading'),local=new Map([...readingQueue.pending.values()].map(job=>[readingKey(job.entry),job.entry]));
+  setReading([...local.values(),...(data.items||[]).filter(h=>!local.has(readingKey(h)))]);
+  renderContinue();filterBooks();
+}
+async function fetchComicReading(item){
+  await flushReading();
+  try{return await api(`/api/reading/${enc(item.source)}/${enc(item.id)}`);}
+  catch{return {comic:state.readingIndex?.get(readingKey(item))||null,chapters:{}};}
+}
+// Writes are coalesced per chapter and sent in order, so a slow request never overwrites a newer position.
+const readingQueue={pending:new Map(),timer:0,warned:false,chain:Promise.resolve()};
+function recordReading(r){
+  const b=r.book,now=Date.now(),cover=String(b.cover||'');
+  const body={title:String(b.title||'').slice(0,500),cover:cover.length<=2048?cover:'',author:comicAuthors(b).join(' / ').slice(0,500),
+    chapter_id:r.chapterId,chapter_name:String(r.chapterName||'').slice(0,500),page:r.index,total:r.images.length};
+  const entry={source:b.source,id:String(b.id),...body,in_history:true,updated_at:now};
+  b.reading=b.reading||{comic:null,chapters:{}};b.reading.comic=entry;b.reading.chapters={...b.reading.chapters,[r.chapterId]:{page:r.index,updated_at:now}};
+  upsertReading(entry);
+  const key=`${readingKey(b)}:${r.chapterId}`;readingQueue.pending.delete(key);
+  readingQueue.pending.set(key,{path:`/api/reading/${enc(b.source)}/${enc(b.id)}`,body:JSON.stringify(body),entry});
+  clearTimeout(readingQueue.timer);readingQueue.timer=setTimeout(flushReading,800);
+}
+function flushReading(keepalive=false){
+  clearTimeout(readingQueue.timer);
+  const jobs=[...readingQueue.pending.entries()].filter(([,job])=>!job.sending);if(!jobs.length)return readingQueue.chain;
+  const send=([key,job])=>{
+    job.sending=true;
+    return fetch(job.path,{method:'PUT',headers:{'Content-Type':'application/json'},body:job.body,keepalive}).then(response=>{
+      if(!response.ok)throw new Error(String(response.status));
+      if(readingQueue.pending.get(key)===job)readingQueue.pending.delete(key);readingQueue.warned=false;
+    }).catch(()=>{
+      job.sending=false;
+      if(!readingQueue.warned){readingQueue.warned=true;toast('阅读进度未保存到服务器，稍后自动重试',{tone:'error'});}
+      clearTimeout(readingQueue.timer);readingQueue.timer=setTimeout(flushReading,5000);
+    });
+  };
+  if(keepalive){jobs.forEach(send);return readingQueue.chain;}
+  readingQueue.chain=readingQueue.chain.then(()=>jobs.reduce((done,job)=>done.then(()=>send(job)),Promise.resolve()));
+  return readingQueue.chain;
+}
+// One-time import of history and progress saved by earlier versions in this browser's localStorage.
+async function migrateLocalReading(){
+  let storage;try{storage=localStorage;}catch{return;}
+  const keys=[];for(let i=0;i<storage.length;i++){const key=storage.key(i);if(/^comic:(history$|progress:|last:)/.test(key))keys.push(key);}
+  if(!keys.length)return;
+  const text=(value,max)=>typeof value==='string'||typeof value==='number'?String(value).slice(0,max):'';
+  const int=(value,max)=>Math.max(0,Math.min(max,Math.floor(Number(value)||0)));
+  const parts=key=>{try{const value=JSON.parse(key);return Array.isArray(value)?value.map(v=>String(v??'')):null;}catch{return null;}};
+  const valid=(source,id,chapter)=>source&&source.length<=64&&id&&id.length<=200&&chapter&&chapter.length<=200;
+  const comics=new Map(),chapters=[];
+  const comic=(source,id,value,inHistory)=>{
+    const chapterId=text(value?.chapterId,200);if(!valid(source,id,chapterId))return;
+    const cover=text(value.cover,4096);
+    comics.set(`${source}:${id}`,{source,comic_id:id,title:text(value.title,500),cover:cover.length<=2048?cover:'',author:text(value.author,500),
+      chapter_id:chapterId,chapter_name:text(value.chapterName,500),page:int(value.index,100000),total:int(value.total,100000),in_history:inHistory,updated_at:int(value.updatedAt,1e14)});
+  };
+  for(const key of keys.filter(k=>k.startsWith('comic:last:'))){const id=parts(key.slice(11));if(id?.length===2)comic(id[0],id[1],readLocal(key),false);}
+  const history=readLocal('comic:history');
+  if(Array.isArray(history))for(const item of history)if(item&&typeof item==='object')comic(text(item.source,64),text(item.id,200),item,true);
+  for(const key of keys.filter(k=>k.startsWith('comic:progress:'))){
+    const id=parts(key.slice(15)),value=readLocal(key);
+    if(id?.length===3&&valid(...id)&&value&&typeof value==='object')chapters.push({source:id[0],comic_id:id[1],chapter_id:id[2],page:int(value.index,100000),updated_at:int(value.updatedAt,1e14)});
+  }
+  await api('/api/reading/import',write('POST',{comics:[...comics.values()].slice(0,2000),chapters:chapters.slice(0,20000)}));
+  for(const key of keys)try{storage.removeItem(key);}catch{}
 }
 function renderContinue(){
   const list=readHistory().filter(item=>sourcePlugin(item.source)?.enabled!==false).slice(0,24),row=$('continue-row');
@@ -573,7 +642,7 @@ function card(item,{showSource=true,library=false,history=null}={}){
     const bar=node('i',undefined,'cover-progress');bar.style.setProperty('--p',history.total?Math.min(1,(history.index+1)/history.total):0);
     const play=node('span',undefined,'cover-play');play.innerHTML=svgIcon('play');cover.append(bar,play);
   }else{
-    const last=readLocal(lastKey(item));if(last?.chapterName)cover.append(node('span',`读至 ${last.chapterName}`,'cover-tag'));
+    const last=readingLast(item);if(last?.chapterName)cover.append(node('span',`读至 ${last.chapterName}`,'cover-tag'));
   }
   const info=node('div',undefined,'card-info');
   info.append(node('h3',item.title||'未命名'));
@@ -624,7 +693,7 @@ async function loadLibrary() {
 function filterBooks(){
   const category=$('library-category').value,sort=$('library-sort').value,needle=($('library-filter').value||'').trim().toLowerCase(),box=$('books');
   if(!state.books.length){box.replaceChildren(emptyState('书库为空','漫画详情中的「加入书库」用于收藏到本地书库，支持追更和继续阅读。',labelBtn('compass','发现漫画',()=>showTab('browse'),'primary'),'bookmark'));return;}
-  const lastRead=new Map(readHistory().map(h=>[h.source+':'+h.id,h.updatedAt||0]));
+  const lastRead=new Map(readingItems().map(h=>[readingKey(h),h.updated_at||0]));
   const items=state.books.filter(b=>(category==='*'||(category?bookCategories(b).includes(category):!bookCategories(b).length))&&(!needle||(b.title||'').toLowerCase().includes(needle)||(b.author||'').toLowerCase().includes(needle)));
   if(sort==='read')items.sort((a,b)=>(lastRead.get(b.source+':'+b.id)||0)-(lastRead.get(a.source+':'+a.id)||0));
   else if(sort==='title')items.sort((a,b)=>String(a.title||'').localeCompare(String(b.title||''),'zh'));
@@ -653,9 +722,9 @@ async function openComic(item,opts={}) {
   $('detail-body').replaceChildren(detailHero(item,true).hero);
   if(!dlg.open)dlg.showModal();$('detail-scroll').scrollTop=0;syncDetailHead();
   try{
-    const detail=await api(`/api/comic/${enc(item.source)}/${enc(item.id)}`);if(request!==state.detailRequest)return;
-    state.detail={...detail,cover:detail.cover||item.cover,category:detail.category||item.category};renderDetail();
-    if(opts.resume){const last=readLocal(lastKey(state.detail));if(last&&state.detail.chapters.some(c=>String(c.id)===last.chapterId))openReader(last.chapterId);}
+    const [detail,reading]=await Promise.all([api(`/api/comic/${enc(item.source)}/${enc(item.id)}`),fetchComicReading(item)]);if(request!==state.detailRequest)return;
+    state.detail={...detail,cover:detail.cover||item.cover,category:detail.category||item.category,reading:{comic:reading.comic||null,chapters:reading.chapters||{}}};renderDetail();
+    if(opts.resume){const last=readingLast(state.detail);if(last&&state.detail.chapters.some(c=>String(c.id)===last.chapterId))openReader(last.chapterId);}
   }catch(e){
     if(request!==state.detailRequest)return;
     if(item.chapters){state.detail=item;renderDetail();$('detail-body').querySelector('.detail-hero')?.after(errorPanel('图源暂不可用，以下为书库缓存',e,item,true));}
@@ -711,7 +780,7 @@ function toggleChapterPreviews(){
   syncChapterPreviews();drawChapters(true,true);
 }
 function chapterRow(detail,chapter,lastId){
-  const id=String(chapter.id),progress=readLocal(progressKey(detail,id));
+  const id=String(chapter.id),progress=chapterProgress(detail,id);
   const row=node('div',undefined,'chapter'+(id===lastId?' current':progress?' read':''));row.tabIndex=0;row.setAttribute('role','button');
   if(state.chapterPreviews){
     const preview=node('span',undefined,'chapter-preview');preview.setAttribute('aria-hidden','true');preview.title='章节首图按需加载';preview.innerHTML=svgIcon('image');
@@ -733,7 +802,7 @@ function drawChapters(reset,keepShown=false){
     else chapterPreviews.stop();
     state.chapterView={shown:keepShown?state.chapterView?.shown||CHAPTER_PAGE:CHAPTER_PAGE,needle:($('chapter-filter')?.value||'').trim().toLowerCase()};list.replaceChildren();
   }
-  const view=state.chapterView,lastId=readLocal(lastKey(detail))?.chapterId;
+  const view=state.chapterView,lastId=readingLast(detail)?.chapterId;
   const matched=(detail.chapters||[]).filter(c=>!view.needle||(c.name||'').toLowerCase().includes(view.needle));
   if(state.chapterDesc)matched.reverse();
   list.querySelector('.more-row')?.remove();
@@ -753,7 +822,7 @@ function renderDetail() {
   text.append(renderComicLabels(detail));
   const desc=node('p',detail.description||'暂无简介','detail-desc');text.append(desc);
   const controls=node('div',undefined,'detail-actions');
-  const last=readLocal(lastKey(detail));
+  const last=readingLast(detail);
   if(last&&detail.chapters.some(c=>String(c.id)===last.chapterId))controls.append(labelBtn('book-open',`继续阅读 · ${last.chapterName}`,()=>openReader(last.chapterId),'primary'));
   else if(detail.chapters.length)controls.append(labelBtn('play','开始阅读',()=>openReader(String(detail.chapters[0].id)),'primary'));
   const fav=button('',()=>toggleFavorite(detail).then(syncFav));
@@ -996,7 +1065,7 @@ function configureAccount(){
 }
 
 /* ---------- reader ---------- */
-function saveProgress(){const r=state.reader;if(!r||!r.images.length)return;const value={chapterId:r.chapterId,chapterName:r.chapterName,index:r.index,updatedAt:Date.now()};saveLocal(progressKey(r.book,r.chapterId),value);saveLocal(lastKey(r.book),value);recordHistory(r);}
+function saveProgress(){const r=state.reader;if(!r||!r.images.length)return;recordReading(r);}
 function readerMessage(text,loading){const box=node('div',undefined,'reader-message');if(loading)box.append(node('span',undefined,'spinner'));box.append(node('p',text));return box;}
 function syncPageStatus(){
   const r=state.reader,slider=$('page-slider');if(!r)return;const n=r.images.length;
@@ -1019,7 +1088,7 @@ async function openReader(chapterId,startAt){
   $('reader-dialog').classList.add('ui-open','ui-pinned');
   if(!$('reader-dialog').open)$('reader-dialog').showModal();
   try{const data=await api(`/api/chapter/${enc(book.source)}/${enc(book.id)}/${enc(chapterId)}`,{signal:state.readerAbort.signal});if(request!==state.readerRequest)return;
-    const saved=readLocal(progressKey(book,chapterId));const resume=Math.max(0,Math.min(Number(saved?.index)||0,data.images.length-1));
+    const saved=chapterProgress(book,chapterId);const resume=Math.max(0,Math.min(Number(saved?.index)||0,data.images.length-1));
     state.reader={book,chapterId,chapterName:chapter.name,images:data.images,index:typeof startAt==='number'?(startAt<0?Math.max(0,data.images.length-1):0):resume};renderReader();
   }catch(e){
     if(request!==state.readerRequest||e.name==='AbortError')return;
@@ -1117,7 +1186,7 @@ function moveChapter(delta,turn){const r=state.reader,book=r?.book||state.detail
 function closeReader(silent){
   saveProgress();state.readerAbort?.abort();++state.readerRequest;state.observer?.disconnect();state.mounter?.disconnect();state.reader=null;
   if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
-  $('reader-dialog').close();$('reader-pages').replaceChildren();renderContinue();
+  $('reader-dialog').close();$('reader-pages').replaceChildren();flushReading();renderContinue();
   if(!silent&&state.detail&&$('detail-dialog').open){const scroller=$('detail-scroll'),top=scroller.scrollTop;renderDetail();scroller.scrollTop=top;}
 }
 
@@ -1142,7 +1211,7 @@ $('discover-again').onclick=()=>run(loadDiscover,$('discover-again'));
 $('results-more-btn').onclick=showMoreResults;
 new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)&&!$('results-more').hidden)showMoreResults();},{rootMargin:'800px 0px'}).observe($('results-more'));
 $('recent-clear').onclick=()=>{saveLocal('comic:recent',[]);renderRecent();};
-$('history-clear').onclick=()=>run(async()=>{if(!await ask({title:'清除阅读记录',message:'清空「继续阅读」列表？各章节的阅读进度会保留。',ok:'清除',danger:true}))return;saveLocal('comic:history',[]);renderContinue();});
+$('history-clear').onclick=()=>run(async()=>{if(!await ask({title:'清除阅读记录',message:'清空「继续阅读」列表？各章节的阅读进度会保留。',ok:'清除',danger:true}))return;await flushReading();await api('/api/reading/history',{method:'DELETE'});setReading(readingItems().map(h=>({...h,in_history:false})));renderContinue();});
 {const row=$('continue-row'),shelf=row.parentElement;shelf.append(state.continueScroller=scrollerFor(row));}
 window.addEventListener('resize',()=>document.querySelectorAll('.scroller').forEach(s=>s.syncArrows?.()),{passive:true});
 // Restore tabs as well as browse queries when navigating back or forward.
@@ -1192,7 +1261,9 @@ window.addEventListener('keydown',event=>{
   if(event.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
   event.preventDefault();if(state.tab!=='browse')showTab('browse');$('keyword').focus();$('keyword').select();
 });
-window.addEventListener('pagehide',saveProgress);
+window.addEventListener('pagehide',()=>{saveProgress();flushReading(true);});
+// Mobile browsers may never fire pagehide; flush on hide and pick up other devices' progress on return.
+document.addEventListener('visibilitychange',()=>{if(document.hidden){saveProgress();flushReading(true);}else if(state.readingLoaded)loadReading().catch(()=>{});});
 // Page-level scrollbar + floating back-to-top button.
 window.addEventListener('scroll',()=>{
   const h=document.documentElement,p=h.scrollTop/(h.scrollHeight-h.clientHeight||1);
@@ -1212,3 +1283,7 @@ if(matchMedia('(pointer:coarse)').matches&&document.activeElement===$('keyword')
 // All deferred feature scripts must be ready before restoring a deep-linked tab.
 const appReady=new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}))
   .then(()=>run(async()=>{await loadSources();await loadLibrary();refreshTaskDot();}));
+appReady.then(()=>run(async()=>{
+  try{await migrateLocalReading();}catch(e){toast(`旧阅读记录导入失败，下次打开页面时重试：${e.message}`,{tone:'error'});}
+  await loadReading();state.readingLoaded=true;
+}));

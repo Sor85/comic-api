@@ -40,7 +40,7 @@ function harness() {
   vm.runInContext(tags,context);
   vm.runInContext(readFileSync(join(__dirname, '../src/web/static/comic-authors.js'), 'utf8'),context);
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
-  vm.runInContext(app.slice(app.indexOf('function readLocal('),app.indexOf('function progressKey(')),context);
+  vm.runInContext(app.slice(app.indexOf('function readLocal('),app.indexOf('const readingKey=')),context);
   vm.runInContext(app.slice(app.indexOf('function sourcePlugin('),app.indexOf('function discoverActions(')),context);
   vm.runInContext(app.slice(app.indexOf('function chipGroup('),app.indexOf('// One pager')),context);
   vm.runInContext(app.slice(app.indexOf('async function loadSearch('),app.indexOf('function turnPage(')),context);

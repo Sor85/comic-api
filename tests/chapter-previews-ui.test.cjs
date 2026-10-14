@@ -174,10 +174,10 @@ function uiHarness(saved) {
     openReader: id => read.push(id), queueDownload: (...args) => downloads.push(args), sourcePlugin: () => ({enabled:true}),
   });
   vm.runInContext(script, context);
-  vm.runInContext(app.slice(app.indexOf('function readLocal('), app.indexOf('function progressKey(')), context);
+  vm.runInContext(app.slice(app.indexOf('function readLocal('), app.indexOf('const readingKey=')), context);
   vm.runInContext(app.slice(0, app.indexOf('const BROWSE_ACTIONS')), context);
   vm.runInContext(app.slice(app.indexOf('function node('), app.indexOf('// The toast')), context);
-  vm.runInContext(app.slice(app.indexOf('function progressKey('), app.indexOf('function skeletons(')), context);
+  vm.runInContext(app.slice(app.indexOf('const readingKey='), app.indexOf('function skeletons(')), context);
   vm.runInContext(app.slice(app.indexOf('const CHAPTER_PAGE'), app.indexOf('function renderDetail(')), context);
   const state = vm.runInContext('state', context), manager = vm.runInContext('chapterPreviews', context);
   state.detail = {source: 'jm', id: 'book', cover: 'https://cover.example/book.jpg', chapters: Array.from({length: 65}, (_, i) => ({id: String(i + 1), name: `章节 ${i + 1}`}))};
