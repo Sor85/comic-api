@@ -651,12 +651,13 @@ function showTab(tab,updateHistory=true,dismissSettings=true) {
 }
 function card(item,{showSource=true,library=false,history=null}={}){
   const el=node('article',undefined,'card'+(history?' card-history':'')+(library?' card-fixed card-library':''));
-  const open=button('',()=>openComic(item,{resume:!!history}),'card-open');open.title=item.title||'';
+  // Only the play control resumes reading; the rest of the card always opens the detail page.
+  const open=button('',()=>openComic(item),'card-open');open.title=item.title||'';
   const cover=coverBox(item);
   if(showSource&&item.source)cover.append(node('span',sourceName(item.source),'cover-source'));
   if(history){
     const bar=node('i',undefined,'cover-progress');bar.style.setProperty('--p',history.total?Math.min(1,(history.index+1)/history.total):0);
-    const play=node('span',undefined,'cover-play');play.innerHTML=svgIcon('play');cover.append(bar,play);
+    cover.append(bar);
   }else{
     const last=readingLast(item);if(last?.chapterName)cover.append(node('span',`读至 ${last.chapterName}`,'cover-tag'));
   }
@@ -664,6 +665,12 @@ function card(item,{showSource=true,library=false,history=null}={}){
   info.append(node('h3',item.title||'未命名'));
   if(history)info.append(node('p',`${history.chapterName||''} · ${history.index+1}/${history.total} 页`,'card-sub accent'));
   open.append(cover,info);el.append(open);
+  if(history){
+    // A sibling of the card button (buttons cannot nest), laid over the cover's centre.
+    const zone=node('div',undefined,'cover-play-zone'),play=button('',()=>resumeComic(item),'cover-play');
+    play.innerHTML=svgIcon('play');play.title='继续阅读';play.setAttribute('aria-label',`继续阅读《${item.title||'未命名'}》`);
+    zone.append(play);el.append(zone);
+  }
   if(!history)el.append(renderComicAuthors(item));
   if(library){
     // Library cards keep a fixed rhythm: two-line title, one author line, one meta line; actions live in a menu.
@@ -742,7 +749,7 @@ function detailHero(item,loading){
   if(loading)text.append(node('i',undefined,'line'),node('i',undefined,'line short'),node('i',undefined,'line'));
   return {hero,text};
 }
-async function openComic(item,opts={}) {
+async function openComic(item) {
   if(sourcePlugin(item.source)?.enabled===false){toast('图源已关闭，重新启用入口位于「设置 → 图源管理」');return;}
   chapterPreviews.stop();
   const request=++state.detailRequest,dlg=$('detail-dialog');state.detail=null;state.detailItem=item;
@@ -752,7 +759,6 @@ async function openComic(item,opts={}) {
   try{
     const [detail,reading]=await Promise.all([api(`/api/comic/${enc(item.source)}/${enc(item.id)}`),fetchComicReading(item)]);if(request!==state.detailRequest)return;
     state.detail={...detail,cover:detail.cover||item.cover,category:detail.category||item.category,reading:{comic:reading.comic||null,chapters:reading.chapters||{}}};renderDetail();
-    if(opts.resume){const last=readingLast(state.detail);if(last&&state.detail.chapters.some(c=>String(c.id)===last.chapterId))openReader(last.chapterId);}
   }catch(e){
     if(request!==state.detailRequest)return;
     if(item.chapters){state.detail=item;renderDetail();$('detail-body').querySelector('.detail-hero')?.after(errorPanel('图源暂不可用，以下为书库缓存',e,item,true));}
@@ -1105,6 +1111,35 @@ function fillChapterSelect(book,chapterId){
   if(state.readerSelectBook!==book){state.readerSelectBook=book;select.replaceChildren(...book.chapters.map(c=>{const o=node('option',c.name);o.value=String(c.id);return o;}));}
   select.value=chapterId;select.hidden=book.chapters.length<2;
 }
+// showModal() focuses the first toolbar button (back), which mobile browsers ring and which pins the toolbar open; hand focus to the pages instead.
+function showReaderDialog(){const dlg=$('reader-dialog');if(dlg.open)return;dlg.showModal();$('reader-pages').focus({preventScroll:true});}
+// Continue reading straight into the reader: load the comic behind the scenes without opening its detail page.
+async function resumeComic(item){
+  if(sourcePlugin(item.source)?.enabled===false){toast('图源已关闭，重新启用入口位于「设置 → 图源管理」');return;}
+  saveProgress();++state.detailRequest;chapterPreviews.stop();
+  const request=++state.readerRequest;state.readerAbort?.abort();state.readerAbort=new AbortController();state.reader=null;
+  state.observer?.disconnect();state.mounter?.disconnect();
+  $('reader-comic').textContent=item.title||'';$('reader-title').textContent='';$('reader-chapter').hidden=true;$('page-status').textContent='';
+  $('chapter-prev').disabled=$('chapter-next').disabled=true;
+  $('reader-pages').replaceChildren(readerMessage('正在获取漫画…',true));
+  $('reader-dialog').classList.add('ui-open','ui-pinned');showReaderDialog();
+  try{
+    const [detail,reading]=await Promise.all([api(`/api/comic/${enc(item.source)}/${enc(item.id)}`,{signal:state.readerAbort.signal}),fetchComicReading(item)]);
+    if(request!==state.readerRequest)return;
+    state.detailItem=item;
+    state.detail={...detail,cover:detail.cover||item.cover,category:detail.category||item.category,reading:{comic:reading.comic||null,chapters:reading.chapters||{}}};
+    const chapters=state.detail.chapters||[],last=readingLast(state.detail),target=chapters.find(c=>String(c.id)===last?.chapterId)||chapters[0];
+    if(!target){$('reader-pages').replaceChildren(readerMessage('该漫画暂无可阅读章节'));return;}
+    await openReader(String(target.id));
+  }catch(e){
+    if(request!==state.readerRequest||e.name==='AbortError')return;
+    const box=readerMessage(e.message),actions=node('div',undefined,'reader-actions');
+    actions.append(labelBtn('refresh-cw','重试',()=>resumeComic(item)));
+    if(e.code==='login_required'&&e.source)actions.append(bindButton(e.source));
+    actions.append(labelBtn('search','在其他图源搜索',()=>searchElsewhere(item.title)));
+    box.append(actions);$('reader-pages').replaceChildren(box);
+  }
+}
 async function openReader(chapterId,startAt){
   saveProgress();const book=state.detail;if(!book)return;book.chapters=book.chapters||[];const chapter=book.chapters.find(c=>String(c.id)===chapterId);if(!chapter)return;
   chapterPreviews.stop();
@@ -1114,7 +1149,7 @@ async function openReader(chapterId,startAt){
   $('reader-pages').replaceChildren(readerMessage('正在获取章节…',true));$('page-status').textContent='';
   const index=book.chapters.indexOf(chapter);$('chapter-prev').disabled=index<=0;$('chapter-next').disabled=index>=book.chapters.length-1;
   $('reader-dialog').classList.add('ui-open','ui-pinned');
-  if(!$('reader-dialog').open)$('reader-dialog').showModal();
+  showReaderDialog();
   try{const data=await api(`/api/chapter/${enc(book.source)}/${enc(book.id)}/${enc(chapterId)}`,{signal:state.readerAbort.signal});if(request!==state.readerRequest)return;
     const saved=chapterProgress(book,chapterId);const resume=Math.max(0,Math.min(Number(saved?.index)||0,data.images.length-1));
     state.reader={book,chapterId,chapterName:chapter.name,images:data.images,index:typeof startAt==='number'?(startAt<0?Math.max(0,data.images.length-1):0):resume};renderReader();

@@ -17,10 +17,10 @@ class Element {
   }
 }
 function harness(){
-  const opened=[],searches=[];
+  const opened=[],searches=[],resumed=[];
   const roots={'reader-dialog':{open:false},'detail-dialog':{open:false}};
   const context=vm.createContext({document:{createElement:tag=>new Element(tag)},$:id=>roots[id],state:{detailRequest:0},
-    openComic:(...args)=>opened.push(args),sourceName:id=>id,readLocal:()=>null,readingLast:()=>null,
+    openComic:(...args)=>opened.push(args),resumeComic:item=>resumed.push(item),sourceName:id=>id,readLocal:()=>null,readingLast:()=>null,
     coverBox:()=>new Element('span'),libraryActions:()=>new Element('div'),svgIcon:()=>'<svg></svg>',
     startSearch:(...args)=>searches.push(args),toast:message=>{throw new Error(message);},
   });
@@ -28,7 +28,7 @@ function harness(){
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
   vm.runInContext(app.slice(app.indexOf('function bookCategories('),app.indexOf('async function loadLibrary(')),context);
   vm.runInContext(app.slice(app.indexOf('function card('),app.indexOf('function libraryActions(')),context);
-  return {context,opened,searches};
+  return {context,opened,searches,resumed};
 }
 const book={id:'1',source:'jm',title:'春日书信',authors:['作者一','作者二']};
 
@@ -62,11 +62,15 @@ test('合并卡片为每个原始版本保留独立入口，同源版本不重�
   const single=h.context.card(book);assert.equal(single.querySelectorAll('.variant-link').length,0);
 });
 
-test('历史卡片仍显示阅读进度并从封面续读，不替换成作者入口',async()=>{
+test('历史卡片显示阅读进度，只有播放按钮直接进入阅读页，点击其他部分打开简介',async()=>{
   const h=harness(),history={chapterName:'第一章',index:3,total:20};
   const card=h.context.card(book,{history});
   assert.match(card.textContent,/第一章 · 4\/20 页/);assert.equal(card.querySelectorAll('.author-link').length,0);
-  await card.querySelectorAll('.card-open')[0].onclick();assert.equal(h.opened[0][1].resume,true);
+  await card.querySelectorAll('.card-open')[0].onclick();assert.equal(h.opened[0][1]?.resume,undefined);
+  const play=card.querySelectorAll('.cover-play');assert.equal(play.length,1);assert.equal(play[0].tagName,'button');
+  assert.equal(card.querySelectorAll('.card-open')[0].querySelectorAll('.cover-play').length,0);
+  await play[0].onclick();assert.equal(h.resumed[0].id,'1');assert.equal(h.opened.length,1);
+  assert.equal(h.context.card(book).querySelectorAll('.cover-play').length,0);
 });
 
 test('新增作者脚本在主脚本前加载，交互样式声明排版基线且不改鼠标样式',()=>{
