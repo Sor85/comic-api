@@ -214,28 +214,30 @@ function viewURL(){
   else{params.set('browse',state.discover.action);params.set('source',state.discover.source);}
   return '?'+params;
 }
-function syncHistory(push){
+// fromHome marks a results entry pushed directly on top of the browse home entry; only then can the
+// results back button pop history. Replacing an entry keeps its mark; any other push clears it.
+function syncHistory(push,fromHome=false){
   const snap={tab:state.tab,view:state.view,search:state.search&&{...state.search},discover:{...state.discover}};
+  if(state.tab==='browse'&&state.view==='results'&&(push?fromHome:history.state?.fromHome))snap.fromHome=true;
   try{history[push?'pushState':'replaceState'](snap,'',viewURL());}catch{}
   document.title=state.tab!=='browse'?`${TAB_LABELS[state.tab]} · Comic`:state.view==='results'?`${state.search?state.search.keyword:BROWSE_ACTIONS[state.discover.action]} · Comic`:'Comic · 聚合漫画';
 }
 function openResults(){
   const push=state.view!=='results';
   setView('results');
-  syncHistory(push);
-  if(push)state.pushedResults=true;
+  syncHistory(push,push);
   window.scrollTo({top:0});
   return run(state.search?loadSearch:loadDiscover);
 }
 function showHome(){
-  state.search=null;state.browseAbort?.abort();++state.browseRequest;state.pushedResults=false;
+  state.search=null;state.browseAbort?.abort();++state.browseRequest;
   $('keyword').value='';syncClear();
   setView('home');syncSearchMode();renderContinue();renderRecent();
   if(!state.shelvesLoaded||state.shelfBlocked||state.shelfFailed)run(loadShelves);
 }
 function goHome(){
   if(state.tab!=='browse'){showTab('browse',false);showHome();syncHistory(true);return;}
-  if(state.view==='results'&&state.pushedResults&&history.state?.view==='results'){history.back();return;}
+  if(state.view==='results'&&history.state?.fromHome){history.back();return;}
   showHome();syncHistory(false);
 }
 function initBrowse(){

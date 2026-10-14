@@ -255,7 +255,7 @@ function routeHarness(){
   const tabs=['browse','library','downloads','jm-favorites','bika-favorites'];
   const controls=tabs.map(tab=>{const el=new Element();el.dataset.tab=tab;return el;});
   const query=h.document.querySelectorAll;h.document.querySelectorAll=selector=>selector==='[data-tab]'?controls:query(selector);
-  const state={tab:'browse',browseReady:true,view:'home',search:null,discover:{action:'latest'},pushedResults:false};
+  const state={tab:'browse',browseReady:true,view:'home',search:null,discover:{action:'latest'}};
   const location={...context.location,pathname:'/',search:''};
   const history={state:null,pushState(snap,_title,url){this.state=plain(snap);this.url=url;pushes.push({snap:this.state,url});},replaceState(snap,_title,url){this.state=plain(snap);this.url=url;},back(){calls.push('back');}};
   Object.assign(context,{state,location,history,URLSearchParams,
@@ -268,7 +268,7 @@ function routeHarness(){
   });
   context.window.scrollY=320;context.window.scrollTo=({top})=>{context.window.scrollY=top;calls.push('scroll');};
   vm.runInContext(app.match(/^const TAB_LABELS = .*$/m)[0],context);
-  vm.runInContext(app.slice(app.indexOf('function viewURL('),app.indexOf('function openResults(')),context);
+  vm.runInContext(app.slice(app.indexOf('function viewURL('),app.indexOf('function showHome(')),context);
   vm.runInContext(app.slice(app.indexOf('function showTab('),app.indexOf('function card(')),context);
   vm.runInContext(app.slice(app.indexOf('function initBrowse('),app.indexOf('function renderQuick(')),context);
   vm.runInContext(app.slice(app.indexOf('function goHome('),app.indexOf('function initBrowse(')),context);
@@ -312,4 +312,21 @@ test('图源状态引起底层导航回退时保留设置窗口和未保存凭�
   h.context.showTab('browse',true,false);await flush();
   assert.equal(h.root('settings-dialog').open,true);assert.equal(h.root('site-auth-password').value,'draft');assert.equal(h.state.tab,'browse');
   assert.match(app,/if\(hidden&&state\.tab===tab\)showTab\('browse',true,false\)/);
+});
+
+test('从首页搜索后返回按钮回到首页历史记录',()=>{
+  const h=routeHarness();h.context.syncHistory(false);
+  h.state.search={keyword:'作者',source:''};h.context.openResults();
+  assert.equal(h.history.state.fromHome,true);
+  h.state.search.page=2;h.context.syncHistory(false);assert.equal(h.history.state.fromHome,true);
+  h.context.goHome();assert.equal(h.routeCalls.at(-1),'back');
+});
+
+test('搜索后切换到其他页面再返回发现页，返回按钮回到首页而不是上一个页面',()=>{
+  const h=routeHarness();h.context.syncHistory(false);
+  h.state.search={keyword:'作者',source:''};h.context.openResults();
+  h.context.showTab('downloads');h.context.showTab('browse');
+  assert.equal(h.history.state.view,'results');assert.equal(h.history.state.fromHome,undefined);
+  h.context.goHome();
+  assert.ok(!h.routeCalls.includes('back'));assert.equal(h.state.view,'home');assert.equal(h.history.url,'/');
 });
