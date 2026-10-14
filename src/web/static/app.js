@@ -176,7 +176,7 @@ function refreshSourceViews(){
     if($('detail-dialog').open)$('detail-dialog').close();state.detail=state.detailItem=null;
   }
   ++jm.request;jm.items=[];jm.hasNext=false;jm.loadedKey='';jm.selected.clear();syncJmSelection();
-  ++bikaFavorites.request;bikaFavorites.items=[];bikaFavorites.hasNext=false;
+  ++bikaFavorites.request;bikaFavorites.loadedKey='';bikaFavorites.items=[];bikaFavorites.hasNext=false;
   for(const source of ['jm','bika']){$(`${source}-favorites-books`).replaceChildren();$(`${source}-favorites-count`).textContent='';$(`${source}-favorites-pager`).hidden=true;}
   syncSourceNavigation();renderQuick();renderContinue();filterBooks();normalizeSearch();
   if(state.view==='results')run(state.search?loadSearch:loadDiscover);else run(loadShelves);

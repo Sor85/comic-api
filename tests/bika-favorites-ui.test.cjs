@@ -29,16 +29,23 @@ function harness(){
   const roots={},calls=[],toasts=[],bindings=[],tabs=[];
   const root=id=>roots[id]||(roots[id]=new Element('div'));
   const context=vm.createContext({state,document:{createElement:tag=>new Element(tag)},$:root,enc:encodeURIComponent,URLSearchParams,
-    location:{search:''},appReady:Promise.resolve(),sourcePlugin:id=>state.sources.find(source=>source.id===id),
+    location:{search:'',origin:'http://host'},URL,appReady:Promise.resolve(),sourcePlugin:id=>state.sources.find(source=>source.id===id),
     svgIcon:name=>`<svg>${name}</svg>`,run:async(action,control)=>{if(control)control.disabled=true;try{return await action();}finally{if(control)control.disabled=false;}},
     api:async(path,options)=>{calls.push({path,options});return options?.method==='POST'?{success:true,favorited:true,already_favorited:false}:{favorited:null};},
     toast:(message,options)=>toasts.push({message,options}),showTab:tab=>tabs.push(tab),
     bindButton:id=>{const button=new Element('button');button.textContent='绑定哔咔账号';button.onclick=()=>bindings.push(id);return button;},
-    card:item=>{const el=new Element('article');el.textContent=item.title;el.item=item;return el;},skeletons:()=>[new Element('i')],
+    card:item=>{const el=new Element('article');el.textContent=item.title;el.item=item;return el;},skeletons:()=>{const el=new Element('i');el.skeleton=true;return [el];},
+    coverFor:item=>item.cover||'',readingLast:()=>null,
+    renderKeyed:(box,items,keyOf,signatureOf,build)=>{
+      const previous=box.keyedCards||new Map(),next=new Map();
+      const nodes=items.map(item=>{const key=String(keyOf(item)),signature=JSON.stringify(signatureOf(item)),old=previous.get(key);
+        const entry=old&&old.signature===signature?old:{signature,el:build(item)};next.set(key,entry);return entry.el;});
+      box.keyedCards=next;box.replaceChildren(...nodes);return nodes;},
   });
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
   vm.runInContext(app.slice(app.indexOf('function emptyState('),app.indexOf('function timeAgo(')),context);
   vm.runInContext(app.slice(app.indexOf('function cloudFavoriteButton('),app.indexOf('function syncDetailHead(')),context);
+  vm.runInContext(app.slice(app.indexOf('function coverKey('),app.indexOf('// Reconcile a card list')),context);
   vm.runInContext(listing,context);
   return {context,state,roots,calls,toasts,bindings,tabs,view:vm.runInContext('bikaFavorites',context)};
 }
@@ -107,6 +114,19 @@ test('页内标题作者筛选不请求上游，筛选失败与空收藏分别�
   h.roots['bika-favorites-keyword'].value='unmatched';h.context.renderBikaFavorites();assert.match(h.roots['bika-favorites-books'].textContent,/本页没有匹配漫画/);
   h.context.api=async()=>page();await h.context.loadBikaFavorites();assert.match(h.roots['bika-favorites-books'].textContent,/收藏为空/);
   assert.equal(h.roots['bika-favorites-pager'].hidden,true);
+});
+
+test('再次进入同一页不显示骨架屏，未变化卡片原样保留',async()=>{
+  const h=harness(),items=[{...detail,cover:'/api/image/proxy?source=bika&url=https%3A%2F%2Fa.example%2F1.jpg'},{...detail,id:'b',title:'另一本'}];
+  let resolve;h.context.api=async()=>page(items);
+  await h.context.loadBikaFavorites();const [first,second]=h.roots['bika-favorites-books'].children;
+  h.context.api=()=>new Promise(done=>{resolve=done;});
+  const reload=h.context.loadBikaFavorites();
+  assert.ok(!h.roots['bika-favorites-books'].children.some(el=>el.skeleton));assert.equal(h.roots['bika-favorites-books'].children[0],first);
+  resolve(page([{...items[0],cover:'/api/image/proxy?source=bika&url=https%3A%2F%2Fb.example%2F1.jpg'},{...items[1],title:'改名'}]));await reload;
+  assert.equal(h.roots['bika-favorites-books'].children[0],first);assert.notEqual(h.roots['bika-favorites-books'].children[1],second);
+  h.roots['bika-favorites-sort'].value='vd';h.roots['bika-favorites-sort'].onchange();
+  assert.ok(h.roots['bika-favorites-books'].children[0].skeleton);
 });
 
 test('未登录列表无请求，登录失效和上游错误不伪装为空收藏',async()=>{
