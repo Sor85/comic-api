@@ -262,3 +262,12 @@ def test_jm_disabling_stops_active_task_and_blocks_manual_launch(setup):
             sync.launch()
         assert error.value.code == "source_disabled"
     asyncio.run(scenario())
+
+
+def test_image_proxy_lets_browser_reuse_covers_without_site_auth(setup):
+    from main import create_app
+    store, plugins = setup
+    with TestClient(create_app(store, plugins)) as client:
+        image = client.get("/api/image/proxy?source=demo&url=https://images.invalid/1.png")
+        assert image.status_code == 200
+        assert image.headers["cache-control"] == "private, max-age=604800"

@@ -7,8 +7,7 @@ const jmBytes = value => value<1024*1024 ? `${(value/1024).toFixed(1)} KiB` : `$
 
 async function loadJmFavoritesView(){
   if(sourcePlugin('jm')?.enabled===false){await loadJmFavorites();return;}
-  await Promise.all([loadJmSettings(),loadJmStatus()]);
-  await loadJmFavorites();
+  await Promise.all([loadJmSettings(),loadJmStatus(),loadJmFavorites()]);
 }
 async function loadJmSettings(){
   const data=await api('/api/jm/sync/settings');jm.settings=data.settings;jm.options=data;renderJmSchedule();return data;
@@ -23,19 +22,30 @@ function renderJmSchedule(){
   schedule.append(status,node('span',scope),node('span',s.download_dir,'jm-path'));
 }
 function jmCanRead(){const p=sourcePlugin('jm');return p?.enabled!==false&&p?.capabilities.includes('favorites')&&(p.account?.authenticated||p.account?.configured);}
+// Reloading the page already shown (tab re-entry, refresh) keeps its cards and only patches what changed remotely.
 async function loadJmFavorites(){
-  const request=++jm.request,box=$('jm-favorites-books');jm.selected.clear();jm.items=[];syncJmSelection();
-  $('jm-favorites-message').replaceChildren();$('jm-favorites-pager').hidden=true;$('jm-favorites-count').textContent='';
+  const request=++jm.request,box=$('jm-favorites-books'),key=`${jm.page}|${jm.folder}|${jm.order}`;
+  const keep=jm.loadedKey===key&&jm.items.length>0&&jmCanRead();
+  if(!keep){
+    jm.loadedKey='';box.keyedCards=null;jm.selected.clear();jm.items=[];syncJmSelection();
+    $('jm-favorites-message').replaceChildren();$('jm-favorites-pager').hidden=true;$('jm-favorites-count').textContent='';
+  }
   if(sourcePlugin('jm')?.enabled===false){box.replaceChildren(emptyState('JM 图源已关闭','账号、收藏和已完成文件保留；图源管理中可重新启用。',null,'bookmark'));return;}
   if(!jmCanRead()){
     box.replaceChildren(emptyState('禁漫收藏需要登录','账号凭证加密保存在当前服务器。',sourcePlugin('jm')?bindButton('jm'):null,'bookmark'));
     return;
   }
-  box.replaceChildren(...skeletons(8));
+  if(!keep)box.replaceChildren(...skeletons(8));
   try{
     const data=await api('/api/jm/favorites?'+new URLSearchParams({page:jm.page,folder_id:jm.folder,order:jm.order}));
     if(request!==jm.request)return;
-    jm.items=data.items;jm.folders=data.folders;jm.hasNext=data.has_next;
+    if(keep){
+      // Drop selections that vanished remotely; unchanged items keep their cards and loaded covers.
+      const ids=new Set(data.items.map(item=>String(item.id)));
+      for(const id of jm.selected)if(!ids.has(id))jm.selected.delete(id);
+      $('jm-favorites-message').replaceChildren();
+    }
+    jm.loadedKey=key;jm.items=data.items;jm.folders=data.folders;jm.hasNext=data.has_next;
     options($('jm-favorites-folder'),data.folders.map(f=>({value:f.id,label:f.name})),jm.folder);
     $('jm-favorites-count').textContent=`${data.total} 本`;
     $('jm-favorites-page').textContent=`第 ${data.page} / ${Math.max(1,Math.ceil(data.total/data.page_size))} 页`;
@@ -44,6 +54,7 @@ async function loadJmFavorites(){
     renderJmBooks();
   }catch(error){
     if(request!==jm.request)return;
+    jm.loadedKey='';jm.items=[];jm.selected.clear();syncJmSelection();box.keyedCards=null;
     box.replaceChildren(emptyState('收藏加载失败',error.message,button('重新加载',loadJmFavorites),'alert'));
     if(error.code==='login_required'||error.code==='login_failed')$('jm-favorites-message').append(bindButton('jm'));
     if(error.code==='folder_not_found')$('jm-favorites-message').append(button('返回全部收藏',()=>{jm.folder='0';jm.page=1;return loadJmFavorites();}));
@@ -53,29 +64,35 @@ function filteredJmBooks(){
   const keyword=$('jm-favorites-keyword').value.trim().toLocaleLowerCase();
   return jm.items.filter(item=>!keyword||`${item.title} ${item.author||''}`.toLocaleLowerCase().includes(keyword));
 }
+function jmCard(item){
+  const box=card(item,{showSource:false}),label=node('label',undefined,'jm-check select-mark'),check=node('input');
+  check.type='checkbox';check.setAttribute('aria-label',`选择 ${item.title}`);
+  const sync=()=>{box.classList.toggle('selected',check.checked);};
+  check.onchange=()=>{if(check.checked)jm.selected.add(String(item.id));else jm.selected.delete(String(item.id));sync();syncJmSelection();};
+  label.title='选择同步';label.append(check);
+  // Reused cards re-read the selection on every render.
+  box.syncSelection=()=>{check.checked=jm.selected.has(String(item.id));sync();};
+  box.classList.add('card-fixed');
+  // Sync floats on the cover's top-left corner (the select mark owns top-right), so the text block keeps a fixed height.
+  const syncOne=iconBtn('download','同步本书',()=>startJmSync([String(item.id)]),'card-sync');
+  syncOne.removeAttribute('title');syncOne.dataset.tipText='同步本书';syncOne.setAttribute('aria-label',`同步《${item.title||'未命名'}》`);
+  // Right-click offers the same actions as the cover controls.
+  box.addEventListener('contextmenu',event=>{
+    if(event.target.closest?.('.author-link'))return;event.preventDefault();
+    dropdown.open({point:{x:event.clientX,y:event.clientY},label:`《${item.title||'未命名'}》操作`,items:[
+      {label:'同步本书',icon:svgIcon('download'),act:()=>syncOne.click()},
+      {label:check.checked?'取消选择':'选择',icon:svgIcon('check'),act:()=>{check.checked=!check.checked;check.onchange();}},
+    ],onPick:entry=>entry.act()});
+  });
+  box.append(label,syncOne);return box;
+}
+function jmCardSignature(item){return [item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
 function renderJmBooks(){
-  const items=filteredJmBooks();
-  $('jm-favorites-books').replaceChildren(...items.map(item=>{
-    const box=card(item,{showSource:false}),label=node('label',undefined,'jm-check select-mark'),check=node('input');
-    check.type='checkbox';check.checked=jm.selected.has(String(item.id));check.setAttribute('aria-label',`选择 ${item.title}`);
-    const sync=()=>{box.classList.toggle('selected',check.checked);};
-    check.onchange=()=>{if(check.checked)jm.selected.add(String(item.id));else jm.selected.delete(String(item.id));sync();syncJmSelection();};
-    label.title='选择同步';label.append(check);sync();
-    box.classList.add('card-fixed');
-    // Sync floats on the cover's top-left corner (the select mark owns top-right), so the text block keeps a fixed height.
-    const syncOne=iconBtn('download','同步本书',()=>startJmSync([String(item.id)]),'card-sync');
-    syncOne.removeAttribute('title');syncOne.dataset.tipText='同步本书';syncOne.setAttribute('aria-label',`同步《${item.title||'未命名'}》`);
-    // Right-click offers the same actions as the cover controls.
-    box.addEventListener('contextmenu',event=>{
-      if(event.target.closest?.('.author-link'))return;event.preventDefault();
-      dropdown.open({point:{x:event.clientX,y:event.clientY},label:`《${item.title||'未命名'}》操作`,items:[
-        {label:'同步本书',icon:svgIcon('download'),act:()=>syncOne.click()},
-        {label:check.checked?'取消选择':'选择',icon:svgIcon('check'),act:()=>{check.checked=!check.checked;check.onchange();}},
-      ],onPick:entry=>entry.act()});
-    });
-    box.append(label,syncOne);return box;
-  }));
-  if(!items.length)$('jm-favorites-books').append(emptyState(jm.items.length?'本页没有匹配漫画':'收藏夹为空',jm.items.length?'筛选仅作用于当前页。':'远端账号在此收藏夹中暂无漫画。',null,'bookmark'));
+  const items=filteredJmBooks(),box=$('jm-favorites-books');
+  if(!items.length){
+    box.keyedCards=null;
+    box.replaceChildren(emptyState(jm.items.length?'本页没有匹配漫画':'收藏夹为空',jm.items.length?'筛选仅作用于当前页。':'远端账号在此收藏夹中暂无漫画。',null,'bookmark'));
+  }else for(const el of renderKeyed(box,items,item=>String(item.id),jmCardSignature,jmCard))el.syncSelection?.();
   syncJmSelection();
 }
 function syncJmSelection(){

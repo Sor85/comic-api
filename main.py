@@ -361,7 +361,9 @@ def create_app(store=None, sources=None):
                 media_type = Image.MIME.get(img.format, "image/jpeg")
         except Exception as exc:
             raise ComicApiError("图源未返回有效图片", 502, "invalid_image", source) from exc
-        return Response(data, media_type=media_type)
+        # One (source, url, chapter) always maps to the same bytes, so the browser may reuse it instead of
+        # re-requesting covers on every re-render. Site auth still overrides this with no-store.
+        return Response(data, media_type=media_type, headers={"Cache-Control": "private, max-age=604800"})
 
     no_store = {"Cache-Control": "no-store"}
 

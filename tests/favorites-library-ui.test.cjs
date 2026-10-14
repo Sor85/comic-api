@@ -27,6 +27,7 @@ function harness(source='jm'){
     loadLibrary:async()=>{reloads++;},readingItems:()=>[],readingKey:b=>b.source+':'+b.id,options(){},
     emptyState:title=>{const el=new Element('p');el.textContent=title;return el;},
     card:book=>{const el=new Element('article');el.book=book;return el;},showTab(){},
+    renderKeyed:(box,items,_key,_signature,build)=>{const nodes=items.map(build);box.replaceChildren(...nodes);return nodes;},
   });
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
   vm.runInContext(app.slice(app.indexOf('function favoriteLibrarySettings('),app.indexOf('function configureAccount(')),context);
@@ -124,4 +125,25 @@ test('兼容旧书库响应，手动分类编辑不提交自动分类关联',asy
   await h.context.editCategory(h.state.books[0]);
   assert.equal(prompts[0].value,'追更');assert.match(prompts[0].message,/手动分类不影响收藏同步分类/);
   assert.deepEqual(JSON.parse(patches[0].options.body),{category:''});assert.equal(h.toasts[0].message,'手动分类已清除');
+});
+
+test('列表按键复用未变化的卡片节点，只重建变化项并按新顺序排列',()=>{
+  class Box{
+    constructor(){this.children=[];}
+    insertBefore(el,ref){const i=this.children.indexOf(el);if(i>=0)this.children.splice(i,1);el.parent=this;const at=ref?this.children.indexOf(ref):-1;at<0?this.children.push(el):this.children.splice(at,0,el);}
+    replaceChildren(...nodes){this.children=[];for(const el of nodes)this.insertBefore(el,null);}
+  }
+  const card=id=>({id,remove(){this.parent.children.splice(this.parent.children.indexOf(this),1);}});
+  const context=vm.createContext({location:{origin:'http://host'},URL});
+  vm.runInContext(app.slice(app.indexOf('function coverKey('),app.indexOf('function skeletons(')),context);
+  const box=new Box();let builds=0;
+  const render=items=>context.renderKeyed(box,items,item=>item.id,item=>[item.title],item=>{builds++;return card(item.id);});
+  render([{id:'1',title:'甲'},{id:'2',title:'乙'},{id:'3',title:'丙'}]);
+  const [first,second]=box.children;assert.equal(builds,3);
+  render([{id:'2',title:'乙'},{id:'1',title:'甲'},{id:'3',title:'丙改'}]);
+  assert.equal(builds,4);assert.deepEqual(box.children.map(el=>el.id),['2','1','3']);
+  assert.equal(box.children[0],second);assert.equal(box.children[1],first);
+  render([{id:'1',title:'甲'}]);assert.deepEqual(box.children.map(el=>el.id),['1']);assert.equal(box.children[0],first);
+  assert.equal(context.coverKey('/api/image/proxy?source=jm&url=https%3A%2F%2Fcdn-a.example%2Fmedia%2Falbums%2F1_3x4.jpg'),
+    context.coverKey('/api/image/proxy?source=jm&url=https%3A%2F%2Fcdn-b.example%2Fmedia%2Falbums%2F1_3x4.jpg'));
 });

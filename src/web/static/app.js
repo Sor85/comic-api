@@ -90,6 +90,21 @@ function coverFor(item) {if(sourcePlugin(item.source)?.enabled===false)return ''
 function image(url, alt, className) {const n=node('img',undefined,className);n.alt=alt;n.loading='lazy';n.decoding='async';const safe=safeImage(url);if(safe)n.src=safe;else n.classList.add('broken');n.onerror=()=>{n.removeAttribute('src');n.classList.add('broken');};n.onload=()=>n.classList.add('ready');return n;}
 // Cover box keeps its 3:4 slot and shows the title's first glyph when the image is missing.
 function coverBox(item,className){const box=node('div',undefined,'cover'+(className?' '+className:''));box.dataset.initial=(item.title||'?').trim().slice(0,1)||'?';box.append(image(coverFor(item),item.title||''));return box;}
+// Same image on another CDN host is the same cover; compare by path so host failover does not reload it.
+function coverKey(url){try{const u=new URL(url,location.origin),inner=u.searchParams.get('url');return inner?coverKey(inner):u.pathname+u.search;}catch{return String(url||'');}}
+// Reconcile a card list by key: unchanged cards keep their DOM node (loaded cover, finished animation); only changed or moved cards are touched.
+function renderKeyed(box,items,keyOf,signatureOf,build){
+  const previous=box.keyedCards||new Map(),next=new Map();
+  const nodes=items.map(item=>{
+    const key=String(keyOf(item)),signature=JSON.stringify(signatureOf(item)),old=previous.get(key);
+    if(next.has(key))return build(item);
+    const entry=old&&old.signature===signature?old:{signature,el:build(item)};next.set(key,entry);return entry.el;
+  });
+  box.keyedCards=next;
+  const keep=new Set(nodes);for(const child of [...box.children])if(!keep.has(child))child.remove();
+  nodes.forEach((el,index)=>{if(box.children[index]!==el)box.insertBefore(el,box.children[index]||null);});
+  return nodes;
+}
 function skeletons(count){return Array.from({length:count},()=>{const n=node('div',undefined,'card skeleton');n.append(node('i'),node('b'),node('b'));return n;});}
 function emptyState(title,hint,action,icon='inbox'){
   const box=node('div',undefined,'empty-state');const art=node('div',undefined,'empty-icon');art.innerHTML=svgIcon(icon);
@@ -160,7 +175,7 @@ function refreshSourceViews(){
     ++state.detailRequest;chapterPreviews.stop();if($('reader-dialog').open)closeReader(true);
     if($('detail-dialog').open)$('detail-dialog').close();state.detail=state.detailItem=null;
   }
-  ++jm.request;jm.items=[];jm.hasNext=false;jm.selected.clear();syncJmSelection();
+  ++jm.request;jm.items=[];jm.hasNext=false;jm.loadedKey='';jm.selected.clear();syncJmSelection();
   ++bikaFavorites.request;bikaFavorites.items=[];bikaFavorites.hasNext=false;
   for(const source of ['jm','bika']){$(`${source}-favorites-books`).replaceChildren();$(`${source}-favorites-count`).textContent='';$(`${source}-favorites-pager`).hidden=true;}
   syncSourceNavigation();renderQuick();renderContinue();filterBooks();normalizeSearch();
@@ -701,15 +716,17 @@ async function loadLibrary() {
   $('library-count').textContent=state.books.length?String(state.books.length):'';
   filterBooks();
 }
+// Library cards keyed by book; unchanged cards stay mounted so covers and entrance animations do not replay.
+function bookSignature(b){return [b.title,coverKey(coverFor(b)),b.author,b.authors,b.library_category,bookCategories(b),b.chapters?.length||0,(b.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(b)?.chapterName||''];}
 function filterBooks(){
   const category=$('library-category').value,sort=$('library-sort').value,needle=($('library-filter').value||'').trim().toLowerCase(),box=$('books');
-  if(!state.books.length){box.replaceChildren(emptyState('书库为空','漫画详情中的「加入书库」用于收藏到本地书库，支持追更和继续阅读。',labelBtn('compass','发现漫画',()=>showTab('browse'),'primary'),'bookmark'));return;}
+  if(!state.books.length){box.keyedCards=null;box.replaceChildren(emptyState('书库为空','漫画详情中的「加入书库」用于收藏到本地书库，支持追更和继续阅读。',labelBtn('compass','发现漫画',()=>showTab('browse'),'primary'),'bookmark'));return;}
   const lastRead=new Map(readingItems().map(h=>[readingKey(h),h.updated_at||0]));
   const items=state.books.filter(b=>(category==='*'||(category?bookCategories(b).includes(category):!bookCategories(b).length))&&(!needle||(b.title||'').toLowerCase().includes(needle)||(b.author||'').toLowerCase().includes(needle)));
   if(sort==='read')items.sort((a,b)=>(lastRead.get(b.source+':'+b.id)||0)-(lastRead.get(a.source+':'+a.id)||0));
   else if(sort==='title')items.sort((a,b)=>String(a.title||'').localeCompare(String(b.title||''),'zh'));
-  if(!items.length){box.replaceChildren(emptyState('没有符合条件的漫画','试试其他分类或关键词',undefined,'search'));return;}
-  box.replaceChildren(...items.map(b=>card(b,{library:true})));
+  if(!items.length){box.keyedCards=null;box.replaceChildren(emptyState('没有符合条件的漫画','试试其他分类或关键词',undefined,'search'));return;}
+  renderKeyed(box,items,readingKey,bookSignature,b=>card(b,{library:true}));
 }
 const inLibrary=d=>state.books.some(b=>b.source===d.source&&String(b.id)===String(d.id));
 
