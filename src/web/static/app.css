@@ -286,6 +286,7 @@ body[data-modal-depth]:not([data-modal-depth="1"]) :is(header,main,.tabbar,#to-t
 /* library / downloads */
 .section-head,.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:15px}
 .section-head{margin-bottom:12px}
+.section-head>.icon-btn{border-radius:50%}
 .section-title{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;min-width:0}
 .section-title h1{margin:4px 0 6px}
 .section-title .muted{font-size:13px}
