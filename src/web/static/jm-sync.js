@@ -61,8 +61,19 @@ function renderJmBooks(){
     const sync=()=>{box.classList.toggle('selected',check.checked);};
     check.onchange=()=>{if(check.checked)jm.selected.add(String(item.id));else jm.selected.delete(String(item.id));sync();syncJmSelection();};
     label.title='选择同步';label.append(check);sync();
-    const actions=node('div',undefined,'card-actions');actions.append(labelBtn('download','同步本书',()=>startJmSync([String(item.id)]),'small ghost-pill'));
-    box.append(label,actions);return box;
+    box.classList.add('card-fixed');
+    // Sync floats on the cover's top-left corner (the select mark owns top-right), so the text block keeps a fixed height.
+    const syncOne=iconBtn('download','同步本书',()=>startJmSync([String(item.id)]),'card-sync');
+    syncOne.removeAttribute('title');syncOne.dataset.tipText='同步本书';syncOne.setAttribute('aria-label',`同步《${item.title||'未命名'}》`);
+    // Right-click offers the same actions as the cover controls.
+    box.addEventListener('contextmenu',event=>{
+      if(event.target.closest?.('.author-link'))return;event.preventDefault();
+      dropdown.open({point:{x:event.clientX,y:event.clientY},label:`《${item.title||'未命名'}》操作`,items:[
+        {label:'同步本书',icon:svgIcon('download'),act:()=>syncOne.click()},
+        {label:check.checked?'取消选择':'选择',icon:svgIcon('check'),act:()=>{check.checked=!check.checked;check.onchange();}},
+      ],onPick:entry=>entry.act()});
+    });
+    box.append(label,syncOne);return box;
   }));
   if(!items.length)$('jm-favorites-books').append(emptyState(jm.items.length?'本页没有匹配漫画':'收藏夹为空',jm.items.length?'筛选仅作用于当前页。':'远端账号在此收藏夹中暂无漫画。',null,'bookmark'));
   syncJmSelection();

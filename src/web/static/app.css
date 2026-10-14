@@ -248,24 +248,26 @@ body[data-modal-depth]:not([data-modal-depth="1"]) :is(header,main,.tabbar,#to-t
 .card.skeleton>b:last-child{width:50%}
 @keyframes shimmer{to{background-position:-200% 0}}
 
-/* library cards: fixed rhythm (two-line title, one author line, one meta line); actions sit in a cover menu */
-.card-library .card-info h3{min-height:calc(1.4em * 2)}
-.card-library>.comic-authors{flex-wrap:nowrap;gap:0 6px;overflow:hidden;white-space:nowrap}
-.card-library>.comic-authors>*{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card-library .author-link{display:block;padding:0;text-decoration:none}
-.card-library .author-link+.author-link::before{content:"/";margin-right:6px;color:var(--line)}
+/* fixed-rhythm cards (library, JM favorites): two-line title and one author line, so rows line up; library actions sit in a cover menu */
+.card-fixed .card-info h3{min-height:calc(1.4em * 2)}
+.card-fixed>.comic-authors{flex-wrap:nowrap;gap:0 6px;overflow:hidden;white-space:nowrap}
+.card-fixed>.comic-authors>*{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-fixed .author-link{display:block;padding:0;text-decoration:none}
+.card-fixed .author-link+.author-link::before{content:"/";margin-right:6px;color:var(--line)}
 .card-meta{display:flex;align-items:center;gap:8px;min-width:0;margin:6px 2px 0;font-size:12px;line-height:1.6;color:var(--muted)}
 .card-meta-category{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 7px;border-radius:6px;background:var(--soft);font-weight:500}
 .card-meta-count{flex:0 0 auto;font-variant-numeric:tabular-nums}
-.card-library:hover .cover{transform:translateY(-4px);box-shadow:0 3px 6px #00000022,0 16px 36px #00000040,0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
-.card-more{position:absolute;top:8px;right:8px;z-index:3;width:30px;height:30px;padding:0;border:0;border-radius:50%;color:#fff;background:#00000073;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:inset 0 0 0 1px #ffffff26;opacity:0;transform:scale(.88);transition:opacity .18s,transform .22s cubic-bezier(.32,.72,0,1),background-color .15s}
+.card-fixed:hover .cover{transform:translateY(-4px);box-shadow:0 3px 6px #00000022,0 16px 36px #00000040,0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
+.card-more,.card-sync{position:absolute;top:8px;right:8px;z-index:3;width:30px;height:30px;padding:0;border:0;border-radius:50%;color:#fff;background:#00000073;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:inset 0 0 0 1px #ffffff26;opacity:0;transform:scale(.88);transition:opacity .18s,transform .22s cubic-bezier(.32,.72,0,1),background-color .15s}
 .card-more svg{width:18px;height:18px}
 .card-more:hover{background:#000000a6}
 .card-library:hover .card-more{opacity:1;transform:translateY(-4px)}
+/* Corner controls follow the lifted cover so they stay pinned to it while hovering. */
+@media(hover:hover){.card-fixed:hover .select-mark{transform:translateY(-4px)}}
 .card-more:focus-visible,.card-more[aria-expanded="true"],.card-more.busy{opacity:1;transform:translateY(-4px)}
 .card-more[aria-expanded="true"]{background:var(--accent);box-shadow:none}
 .card-more.busy svg{animation:ph-pulse 1s ease-in-out infinite}
-@media(hover:none){.card-more{opacity:1;transform:none;width:28px;height:28px}}
+@media(hover:none){.card-more,.card-sync{opacity:1;transform:none;width:28px;height:28px}}
 
 /* empty states */
 .empty-state{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;text-align:center;padding:56px 20px;gap:4px}
@@ -713,9 +715,12 @@ button.danger-soft{color:var(--danger);border-color:color-mix(in srgb,var(--dang
 .card.selected .select-mark::after{opacity:1}
 .card.selected .cover{box-shadow:0 0 0 3px var(--accent),var(--shadow)}
 @media(hover:none){.card .select-mark{opacity:1;transform:none}}
-#jm-favorites-books .card-actions{margin:6px 0 0}
-.ghost-pill{border-radius:999px!important;background:var(--soft)!important;border-color:transparent!important;color:var(--muted);font-size:12px!important;padding:4px 10px!important}
-.ghost-pill:hover{color:var(--accent)}
+.card-sync{left:8px;right:auto}
+.card-sync svg{width:16px;height:16px}
+.card-sync:hover{background:var(--accent);box-shadow:none}
+.card-sync:disabled{opacity:1}
+.card-sync:disabled svg{animation:ph-pulse 1s ease-in-out infinite}
+.card:hover .card-sync,.card-sync:focus-visible,.card-sync:disabled{opacity:1;transform:translateY(-4px)}
 
 /* JM sync settings dialog */
 .jm-sync-dialog{font-size:15px;line-height:1.6}

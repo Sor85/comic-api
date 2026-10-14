@@ -635,7 +635,7 @@ function showTab(tab,updateHistory=true,dismissSettings=true) {
   if(tab==='bika-favorites')run(loadBikaFavorites);
 }
 function card(item,{showSource=true,library=false,history=null}={}){
-  const el=node('article',undefined,'card'+(history?' card-history':'')+(library?' card-library':''));
+  const el=node('article',undefined,'card'+(history?' card-history':'')+(library?' card-fixed card-library':''));
   const open=button('',()=>openComic(item,{resume:!!history}),'card-open');open.title=item.title||'';
   const cover=coverBox(item);
   if(showSource&&item.source)cover.append(node('span',sourceName(item.source),'cover-source'));
