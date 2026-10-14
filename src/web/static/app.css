@@ -499,19 +499,56 @@ body.site-settings-open{overflow:hidden}
 .pane-actions{display:flex;gap:6px}
 .pane-actions .small{border-radius:999px;background:var(--group);border-color:transparent;color:var(--muted)}
 .pane-actions .small:hover{color:var(--text)}
-.pane-notes p{margin:0;font-size:12.5px;line-height:1.6;color:var(--muted)}
-.pane-notes p+p{margin-top:6px}
 .health-legend{display:flex;align-items:center}
 .health-legend .health-dot{margin-right:8px}
-.site-auth-form{padding:16px}
-.site-auth-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;border:0;padding:0;margin:0;min-width:0}
-.site-auth-fields label:first-child{grid-column:1/-1}
-.site-auth-fields .field-hint{grid-column:1/-1;margin-top:-6px}
-.site-auth-fields input{background:var(--surface);border-color:transparent;box-shadow:inset 0 0 0 1px var(--hairline)}
-.site-auth-fields input:focus{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent)}
-.site-auth-form .form-actions{margin-top:14px}
-.site-auth-form .status{margin-top:12px}
-.site-settings-note p{font-size:13px;overflow-wrap:anywhere}
+.title-line{display:inline-flex;align-items:center;gap:6px;min-width:0}
+/* info icon that reveals a tooltip; the long copy lives in hidden .tip-sources nodes */
+.tip{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:20px;height:20px;border-radius:50%;color:var(--muted);opacity:.7;transition:opacity .15s,color .15s,background-color .15s}
+.tip svg{width:15px;height:15px}
+.tip:hover,.tip:focus-visible{opacity:1;color:var(--text);background:color-mix(in srgb,var(--text) 7%,transparent)}
+.tip:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:1px}
+.tip.warn{color:var(--warn);opacity:1}
+#tooltip{position:fixed;inset:auto;margin:0;z-index:10000;max-width:min(300px,calc(100vw - 24px));padding:10px 12px;border:0;border-radius:12px;background:color-mix(in srgb,var(--soft2) 92%,var(--text));color:var(--text);font-size:12.5px;line-height:1.6;overflow-wrap:anywhere;pointer-events:none;box-shadow:0 0 0 1px var(--hairline),0 12px 32px -10px #00000059,0 4px 12px -6px #00000033;animation:tip-in .16s cubic-bezier(.32,.72,0,1)}
+:root.light #tooltip{background:#1f1d1a;color:#f4f2ee;box-shadow:0 12px 32px -10px #1c1a1766,0 4px 12px -6px #1c1a1740}
+#tooltip[popover]:not(:popover-open){display:none}
+#tooltip p{margin:0}#tooltip p+p{margin-top:6px}
+#tooltip .health-dot{box-shadow:none}
+@keyframes tip-in{from{opacity:0;transform:translateY(3px)}}
+#tooltip[data-side="bottom"]{animation-name:tip-in-below}
+@keyframes tip-in-below{from{opacity:0;transform:translateY(-3px)}}
+/* auth hero */
+.auth-hero .group-row{padding:16px 18px;gap:14px}
+.auth-badge{flex:0 0 auto;display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:color-mix(in srgb,var(--text) 7%,transparent);color:var(--muted);transition:background-color .25s,color .25s}
+.auth-badge svg{width:21px;height:21px}
+.auth-hero.on .auth-badge{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+.auth-hero .row-text strong{font-size:15.5px}
+/* credentials card */
+.site-auth-form{padding:16px 18px 14px}
+.site-auth-form>*+*{box-shadow:none}
+.card-head{display:flex;align-items:center;gap:6px;margin-bottom:14px;font-size:14px}
+.card-head strong{font-weight:600}
+.chip{margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 8px;border-radius:999px;font-size:12px;font-weight:500;line-height:1.6;color:var(--muted);background:color-mix(in srgb,var(--text) 6%,transparent)}
+.chip svg{width:13px;height:13px}
+.chip.on{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.chip:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:1px}
+.site-auth-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;border:0;padding:0;margin:0;min-width:0}
+.site-auth-fields .field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.site-auth-fields .field-wide{grid-column:1/-1}
+.field-label{display:flex;align-items:center;gap:4px;min-height:20px}
+.field-label label{font-size:12.5px;font-weight:500}
+.input-wrap{position:relative;display:flex;align-items:center}
+.input-wrap svg{position:absolute;left:12px;width:16px;height:16px;color:var(--muted);opacity:.75;pointer-events:none;transition:color .15s,opacity .15s}
+.input-wrap input{width:100%;padding:10px 12px 10px 36px;border-radius:11px;background:var(--surface);border-color:transparent;box-shadow:inset 0 0 0 1px var(--hairline);transition:box-shadow .15s,border-color .15s}
+.input-wrap input:focus{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent)}
+.input-wrap:focus-within svg{color:var(--accent);opacity:1}
+.site-auth-fields:disabled .input-wrap{opacity:.6}
+.form-foot{display:flex;align-items:center;gap:8px;margin-top:16px;padding-top:14px;box-shadow:inset 0 1px 0 var(--hairline)}
+.form-foot .status{flex:1;min-width:0;margin:0;font-size:13px;line-height:1.5}
+.form-foot .status.error{color:var(--danger)}
+.form-foot .icon-btn{margin-left:auto;width:38px;height:38px;border-radius:50%;color:var(--muted)}
+.form-foot .icon-btn:hover{color:var(--text);background:color-mix(in srgb,var(--text) 7%,transparent)}
+.form-foot .status:not(:empty)+.icon-btn{margin-left:0}
+.form-foot .primary{border-radius:999px;padding:8px 20px}
 #site-auth-message:empty,#settings-sources-message:empty{display:none}
 [data-settings-open][aria-expanded="true"]{background:var(--soft);color:var(--accent)}
 

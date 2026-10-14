@@ -12,6 +12,7 @@
   <script src="/static/comic-tags.js?v=27" defer></script>
   <script src="/static/comic-authors.js?v=27" defer></script>
   <script src="/static/chapter-previews.js?v=27" defer></script>
+  <script src="/static/tooltip.js?v=27" defer></script>
   <script src="/static/site-settings.js?v=27" defer></script>
   <script src="/static/app.js?v=27" defer></script>
   <script src="/static/jm-sync.js?v=27" defer></script>
@@ -164,7 +165,7 @@
   </main>
   <dialog id="settings-dialog" class="modal site-settings-dialog" aria-labelledby="settings-title">
     <div class="modal-head">
-      <div class="modal-title"><h2 id="settings-title">设置</h2><p>站点访问与图源配置保存在服务器，对所有浏览器生效。</p></div>
+      <div class="modal-title"><h2 id="settings-title">设置</h2><p>站点访问与图源配置保存在服务器，对所有浏览器生效</p></div>
       <button class="icon-btn ghost" data-close="settings-dialog" type="button" title="关闭设置" aria-label="关闭设置" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="settings-tabs" role="tablist" aria-label="设置分类">
@@ -173,35 +174,52 @@
     </div>
     <div class="site-settings-body modal-body" data-scroll-area>
       <section id="settings-pane-auth" class="settings-pane" role="tabpanel" aria-labelledby="site-auth-title">
-        <div class="pane-intro"><h3 id="site-auth-title">站点鉴权</h3><p>独立于图源账号的访问凭据</p></div>
-        <div class="group">
+        <div id="site-auth-hero" class="group auth-hero">
           <div class="group-row">
-            <div class="row-text"><strong>启用鉴权</strong><span>默认关闭。开启后，页面、API、图片和下载均需要用户名与密码，健康检查保持公开。</span></div>
+            <span class="auth-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+            <div class="row-text">
+              <span class="title-line"><strong id="site-auth-title">站点鉴权</strong><span class="tip" role="button" tabindex="0" data-tip="tip-auth-scope" aria-label="站点鉴权说明" aria-describedby="tip-auth-scope"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></span>
+              <span>独立于图源账号的访问凭据</span>
+            </div>
             <button id="site-auth-toggle" class="source-toggle" type="button" role="switch" aria-checked="false" aria-label="站点鉴权" disabled>状态未读取</button>
           </div>
         </div>
-        <form id="site-auth-form" class="group settings-form site-auth-form">
-          <fieldset id="site-auth-fields" class="site-auth-fields" disabled>
-            <label for="site-auth-username">用户名<input id="site-auth-username" name="username" autocomplete="username" maxlength="128" spellcheck="false"></label>
-            <label for="site-auth-password">新密码<input id="site-auth-password" name="password" type="password" autocomplete="new-password" maxlength="1024" aria-describedby="site-auth-password-note"></label>
-            <label for="site-auth-confirm">确认新密码<input id="site-auth-confirm" name="password_confirmation" type="password" autocomplete="new-password" maxlength="1024"></label>
-            <p id="site-auth-password-note" class="field-hint">密码不会回显。留空时保留现有密码。</p>
-          </fieldset>
-          <div class="form-actions"><button id="site-auth-save" class="primary" type="submit" disabled>保存凭据</button><button id="site-auth-reload" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>重新读取</span></button></div>
-          <p id="site-auth-message" class="status" role="status" aria-live="polite"></p>
-        </form>
-        <div class="callout">
-          <span class="callout-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
-          <div class="site-settings-note">
-            <p id="site-auth-storage">鉴权配置正在读取。</p>
-            <p>开关与保存按钮均提交当前表单，立即生效；开启或修改凭据后需重新认证。关闭鉴权会开放实例访问，已保存凭据保留。</p>
-            <p>HTTP Basic 不加密传输，公网访问必须使用 HTTPS。所有通过认证的人均可操作实例中的账号、书库和下载。</p>
+        <form id="site-auth-form" class="group site-auth-form">
+          <div class="card-head">
+            <strong>访问凭据</strong>
+            <span class="tip" role="button" tabindex="0" data-tip="tip-auth-security" aria-label="凭据与安全说明" aria-describedby="tip-auth-security"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
+            <span id="site-auth-storage-chip" class="chip" role="button" tabindex="0" data-tip="site-auth-storage" aria-describedby="site-auth-storage"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg><span id="site-auth-storage-label">读取中</span></span>
           </div>
+          <fieldset id="site-auth-fields" class="site-auth-fields" disabled>
+            <div class="field field-wide">
+              <div class="field-label"><label for="site-auth-username">用户名</label></div>
+              <div class="input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/></svg><input id="site-auth-username" name="username" autocomplete="username" maxlength="128" spellcheck="false"></div>
+            </div>
+            <div class="field">
+              <div class="field-label"><label for="site-auth-password">新密码</label><span id="site-auth-password-tip" class="tip" role="button" tabindex="0" data-tip="site-auth-password-note" aria-label="密码说明" aria-describedby="site-auth-password-note"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></div>
+              <div class="input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 1 1 8 0v4"/></svg><input id="site-auth-password" name="password" type="password" autocomplete="new-password" maxlength="1024" aria-describedby="site-auth-password-note"></div>
+            </div>
+            <div class="field">
+              <div class="field-label"><label for="site-auth-confirm">确认新密码</label></div>
+              <div class="input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><input id="site-auth-confirm" name="password_confirmation" type="password" autocomplete="new-password" maxlength="1024"></div>
+            </div>
+          </fieldset>
+          <div class="form-foot">
+            <p id="site-auth-message" class="status" role="status" aria-live="polite"></p>
+            <button id="site-auth-reload" class="icon-btn ghost" type="button" aria-label="重新读取" data-tip-text="重新读取服务器上的鉴权设置"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+            <button id="site-auth-save" class="primary" type="submit" disabled>保存凭据</button>
+          </div>
+        </form>
+        <div class="tip-sources" hidden>
+          <div id="tip-auth-scope"><p>默认关闭。开启后，页面、API、图片和下载均需要用户名与密码，健康检查保持公开。</p><p>关闭鉴权会开放实例访问，已保存凭据保留。</p></div>
+          <div id="tip-auth-security"><p>开关与保存按钮均提交当前表单，立即生效；开启或修改凭据后需重新认证。</p><p>HTTP Basic 不加密传输，公网访问必须使用 HTTPS。所有通过认证的人均可操作实例中的账号、书库和下载。</p></div>
+          <p id="site-auth-storage">鉴权配置正在读取。</p>
+          <p id="site-auth-password-note">密码不会回显。留空时保留现有密码。</p>
         </div>
       </section>
       <section id="settings-pane-sources" class="settings-pane" role="tabpanel" aria-labelledby="settings-sources-title" hidden>
         <div class="pane-intro with-actions">
-          <div><h3 id="settings-sources-title">图源管理</h3><p>图源开关、登录凭据与独立设置</p></div>
+          <div><h3 class="title-line"><span id="settings-sources-title">图源管理</span><span class="tip" role="button" tabindex="0" data-tip="tip-sources" aria-label="图源管理说明" aria-describedby="tip-sources"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></h3><p>图源开关、登录凭据与独立设置</p></div>
           <div class="pane-actions">
             <button id="health-recheck" type="button" class="small" title="重新检测图源连通状态"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>重新检测</span></button>
             <button id="settings-sources-refresh" type="button" class="small">刷新图源</button>
@@ -209,9 +227,8 @@
         </div>
         <p id="settings-sources-message" class="status" role="status"></p>
         <div id="source-list" class="group source-list"></div>
-        <div class="pane-notes">
-          <p>每个图源独立请求，某个图源不可用时不影响其他图源。关闭图源后停止使用并取消该源下载，账号、书库和已完成文件保留。</p>
-          <p class="health-legend"><i class="health-dot ok"></i>圆点表示最近一次连通检测结果，关闭的图源不检测。</p>
+        <div class="tip-sources" hidden>
+          <div id="tip-sources"><p>每个图源独立请求，某个图源不可用时不影响其他图源。关闭图源后停止使用并取消该源下载，账号、书库和已完成文件保留。</p><p class="health-legend"><i class="health-dot ok"></i>圆点表示最近一次连通检测结果，关闭的图源不检测。</p></div>
         </div>
       </section>
     </div>

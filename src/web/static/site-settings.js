@@ -20,6 +20,10 @@ function syncSiteAuthControls(){
   toggle.innerHTML=svgIcon(auth?.enabled?'toggle-right':'toggle-left');
   toggle.append(node('span',auth?(auth.enabled?'已开启':'已关闭'):'状态未读取'));
   $('site-auth-form').setAttribute('aria-busy',String(busy));
+  $('site-auth-hero').classList.toggle('on',auth?.enabled===true);
+  const stored=auth?.storage==='database';
+  $('site-auth-storage-chip').classList.toggle('on',stored);
+  $('site-auth-storage-label').textContent=auth?(stored?'服务器配置':'部署默认'):'读取中';
 }
 function applySiteAuth(data){
   siteSettings.auth=data;siteSettings.stale=false;
@@ -28,6 +32,7 @@ function applySiteAuth(data){
   $('site-auth-password').placeholder=data.password_configured?'留空保留现有密码':'尚未设置密码';
   $('site-auth-password-note').textContent=data.password_configured?'密码已配置，不回显原密码。留空时保留现有密码。':'密码尚未配置，开启鉴权前需要设置用户名和密码。';
   $('site-auth-storage').textContent=data.storage==='database'?'当前使用服务器保存的配置，重启后保留，优先于环境变量。':'当前使用部署默认配置；保存后由服务器配置接管。';
+  $('site-auth-password-tip').classList.toggle('warn',!data.password_configured);
   syncSiteAuthControls();
 }
 function siteAuthDirty(){
