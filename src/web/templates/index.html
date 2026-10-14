@@ -117,25 +117,11 @@
       <div class="page-head">
         <div class="page-title"><h1>JM 收藏</h1><span id="jm-favorites-count" class="count"></span></div>
         <div class="page-actions">
-          <button id="jm-sync-settings-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>同步设置</span></button>
+          <button id="jm-sync-open" class="sync-trigger" data-state="idle" type="button" aria-haspopup="dialog" aria-controls="jm-sync-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg><span id="jm-sync-open-label">本地同步</span></button>
           <button id="jm-favorites-refresh" class="icon-btn" type="button" title="刷新收藏" aria-label="刷新收藏"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
         </div>
       </div>
       <p class="page-lead">漫画详情中的「加入 JM 收藏」写入已绑定账号，不指定收藏夹。收藏浏览、本地同步和本地书库操作不修改远端收藏；本地同步保存解码后的图片，不删除已有文件。</p>
-      <section class="jm-sync-panel" aria-labelledby="jm-sync-panel-title">
-        <div class="panel-head">
-          <span class="panel-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><line x1="7" y1="7.5" x2="7.01" y2="7.5"/><line x1="7" y1="16.5" x2="7.01" y2="16.5"/></svg></span>
-          <div class="panel-title"><h2 id="jm-sync-panel-title">本地同步</h2><p id="jm-sync-schedule"></p></div>
-          <div class="panel-actions">
-            <button id="jm-sync-check-local" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="m8 12 3 3 5-6"/></svg><span>检查本地漫画</span></button>
-            <button id="jm-sync-run" class="primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>同步收藏</span></button>
-            <button id="jm-sync-cancel" class="danger-soft" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>停止本次任务</span></button>
-          </div>
-        </div>
-        <div id="jm-sync-status" class="jm-sync-status" role="status"></div>
-        <details id="jm-sync-history" class="jm-history"><summary>同步记录</summary><div id="jm-sync-history-list"></div></details>
-        <p class="panel-note"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg><span>本地检查按同步范围核对已有漫画的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。</span></p>
-      </section>
       <form id="jm-favorites-filter" class="fav-toolbar">
         <select id="jm-favorites-folder" aria-label="收藏夹"><option value="0">全部收藏</option></select>
         <select id="jm-favorites-order" aria-label="收藏排序"><option value="mr">收藏时间</option><option value="mp">更新时间</option></select>
@@ -242,10 +228,45 @@
       <button data-tab="bika-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="m9 10 2 2 4-4"/></svg><span>哔咔收藏</span></button>
     <button data-settings-open aria-haspopup="dialog" aria-controls="settings-dialog" aria-expanded="false" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>设置</span></button>
   </nav>
+  <dialog id="jm-sync-dialog" class="modal modal-wide sync-dialog" data-state="idle" aria-labelledby="jm-sync-panel-title">
+    <div class="modal-head">
+      <span class="sync-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg></span>
+      <div class="modal-title">
+        <div class="sync-title-row">
+          <h2 id="jm-sync-panel-title">本地同步</h2>
+          <span class="tip" role="button" tabindex="0" data-tip="tip-jm-local-check" aria-label="本地检查说明" aria-describedby="tip-jm-local-check"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
+          <span id="jm-sync-chip" class="sync-chip" hidden><i aria-hidden="true"></i><span></span></span>
+        </div>
+        <p id="jm-sync-schedule"></p>
+      </div>
+      <button class="icon-btn ghost" type="button" data-close="jm-sync-dialog" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="modal-body" data-scroll-area>
+      <div class="sync-config">
+        <dl id="jm-sync-config">
+          <div><dt>同步范围</dt><dd id="jm-sync-scope">—</dd></div>
+          <div class="sync-config-path"><dt>保存目录</dt><dd id="jm-sync-dir" class="jm-path">—</dd></div>
+        </dl>
+        <button id="jm-sync-settings-open" class="small" type="button" aria-haspopup="dialog" aria-controls="jm-sync-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>同步设置</span></button>
+      </div>
+      <section class="sync-section" aria-labelledby="jm-sync-latest-title">
+        <h3 id="jm-sync-latest-title">最近任务</h3>
+        <div id="jm-sync-status" class="jm-sync-status" role="status"></div>
+      </section>
+      <details id="jm-sync-history" class="jm-history" hidden><summary><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg><span>更早的同步记录</span><span id="jm-sync-history-count" class="history-count"></span><svg class="history-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></summary><div id="jm-sync-history-list"></div></details>
+      <div class="tip-sources" hidden><p id="tip-jm-local-check">本地检查按同步范围核对已有漫画的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。</p></div>
+    </div>
+    <div class="modal-foot sync-foot">
+      <p class="sync-foot-note">不修改远端收藏，不删除本地文件</p>
+      <button id="jm-sync-check-local" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="m8 12 3 3 5-6"/></svg><span>检查本地漫画</span></button>
+      <button id="jm-sync-run" class="primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>同步收藏</span></button>
+      <button id="jm-sync-cancel" class="danger-soft" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>停止本次任务</span></button>
+    </div>
+  </dialog>
   <dialog id="jm-sync-settings" class="modal modal-wide jm-sync-dialog" aria-labelledby="jm-sync-settings-title">
     <div class="modal-head">
+      <button class="icon-btn ghost back-btn" type="button" data-close="jm-sync-settings" title="返回本地同步" aria-label="返回本地同步"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
       <div class="modal-title"><h2 id="jm-sync-settings-title">JM 收藏同步设置</h2><p>更换或解除账号绑定后，定时同步自动关闭。</p></div>
-      <button class="icon-btn ghost" type="button" data-close="jm-sync-settings" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <form id="jm-sync-form" class="modal-form settings-form">
       <div class="modal-body" data-scroll-area>

@@ -14,12 +14,13 @@ async function loadJmSettings(){
 }
 function renderJmSchedule(){
   if(!jm.settings)return;
-  const s=jm.settings,scope=s.folder_ids.length?`${s.folder_ids.length} 个指定收藏夹`:'全部收藏';
-  const next=jm.nextRun?` · 下次：${jmDate(jm.nextRun)}`:'';
-  if(jm.paused||sourcePlugin('jm')?.enabled===false){$('jm-sync-schedule').textContent='JM 图源已关闭，定时同步暂停；重新启用后按原计划恢复。';return;}
-  const schedule=$('jm-sync-schedule');schedule.replaceChildren();
-  const status=node('span',s.enabled?`定时同步 · 每 ${s.interval_minutes} 分钟${next}`:'定时同步关闭','schedule-state'+(s.enabled?' on':''));
-  schedule.append(status,node('span',scope),node('span',s.download_dir,'jm-path'));
+  const s=jm.settings,schedule=$('jm-sync-schedule');
+  $('jm-sync-scope').textContent=s.folder_ids.length?`${s.folder_ids.length} 个指定收藏夹`:'全部收藏';
+  $('jm-sync-dir').textContent=s.download_dir||'—';
+  if(jm.paused||sourcePlugin('jm')?.enabled===false){schedule.replaceChildren(node('span','JM 图源已关闭，定时同步暂停；重新启用后按原计划恢复。','schedule-state paused'));return;}
+  const parts=[node('span',s.enabled?`定时同步 · 每 ${s.interval_minutes} 分钟`:'定时同步关闭','schedule-state'+(s.enabled?' on':''))];
+  if(s.enabled&&jm.nextRun)parts.push(node('span',`下次 ${jmDate(jm.nextRun)}`));
+  schedule.replaceChildren(...parts);
 }
 function jmCanRead(){const p=sourcePlugin('jm');return p?.enabled!==false&&p?.capabilities.includes('favorites')&&(p.account?.authenticated||p.account?.configured);}
 // Reloading the page already shown (tab re-entry, refresh) keeps its cards and only patches what changed remotely.
@@ -114,32 +115,51 @@ async function checkJmLocal(){
   toast('本地漫画检查已启动');await loadJmStatus();
 }
 function jmRunCard(item){
-  const checking=item.mode==='check_local';
+  const checking=item.mode==='check_local',live=item.status==='running'||item.status==='cancelling';
   const detailFailure=checking&&item.status==='failed'?item.errors?.find(error=>error.stage==='matching'):null;
   const otherErrors=(item.errors||[]).filter(error=>error!==detailFailure);
-  const box=node('article',undefined,'jm-run'),head=node('div',undefined,'jm-run-heading');
-  const tone=item.status==='completed'?'ok':['failed','partial'].includes(item.status)?'danger':item.status==='running'?'info':'muted';
-  head.append(node('strong',checking?'本地漫画检查':item.automatic?'定时同步':'手动同步'),node('span',checking&&item.status==='running'?'检查中':JM_SYNC_LABELS[item.status]||item.status,`status-pill ${tone}`));
-  box.append(head,node('p',`${jmDate(item.started_at)}${item.finished_at?' → '+jmDate(item.finished_at):''}`,'muted'));
+  const tone=item.status==='completed'?'ok':['failed','partial'].includes(item.status)?'danger':live?'info':'muted';
+  const box=node('article',undefined,'jm-run'),head=node('div',undefined,'jm-run-heading'),kind=node('div',undefined,'run-kind');
+  kind.append(node('strong',checking?'本地漫画检查':item.automatic?'定时同步':'手动同步'),node('span',checking&&item.status==='running'?'检查中':JM_SYNC_LABELS[item.status]||item.status,`status-pill ${tone}`));
+  head.append(kind,node('span',`${jmDate(item.started_at)}${item.finished_at?' → '+jmDate(item.finished_at):''}`,'run-time'));
+  box.setAttribute('data-tone',tone);box.append(head);
+  if(live){
+    const progress=node('div',undefined,'run-progress'),label=node('div',undefined,'run-progress-label');
+    label.append(node('span',item.stage==='scanning'?'正在扫描收藏分页…':item.stage==='matching'?`正在读取漫画详情并核对重名目录：${item.title||''}`:`${item.title||''} / ${item.chapter||''}${item.pages?` · 本章第 ${item.page} / ${item.pages} 张`:''}`,'run-current'));
+    if(item.albums_total)label.append(node('span',`${Math.min(100,Math.round(item.albums_done/item.albums_total*100))}%`,'run-percent'));
+    progress.append(label);
+    if(item.albums_total){const bar=node('div',undefined,'bar'),fill=node('i');fill.style.width=`${Math.min(100,Math.round(item.albums_done/item.albums_total*100))}%`;bar.append(fill);progress.append(bar);}
+    box.append(progress);
+  }
+  const stats=node('div',undefined,'run-stats');
   if(checking){
-    box.append(node('p',`漫画已检查 ${item.albums_done} / ${item.albums_total} · 已下载 ${item.local_albums} 本（${item.local_images} 张） · 未匹配 ${item.local_missing} 本 · 异常 ${item.failed} 本`));
-    if(item.local_results?.length){
-      const details=node('details');details.append(node('summary',`已下载漫画（保留前 ${item.local_results.length} 本）`));
-      for(const book of item.local_results)details.append(node('p',`${book.title} [${book.id}] · ${book.images} 张 · ${book.path}`,'jm-path'));
-      box.append(details);
-    }
+    stats.append(
+      jmStat(`${item.albums_done} / ${item.albums_total}`,'漫画已检查'),
+      jmStat(`${item.local_albums} 本`,`已下载 · ${item.local_images} 张`,item.local_albums?'ok':''),
+      jmStat(`${item.local_missing} 本`,'未匹配'),
+      jmStat(`${item.failed} 本`,'异常',item.failed?'danger':''),
+    );
   }else{
-    box.append(node('p',`漫画已处理 ${item.albums_done} / ${item.albums_total} · 新下载 ${item.downloaded} 张 · 校验跳过 ${item.skipped} 张 · 失败 ${item.failed} 项`));
+    stats.append(
+      jmStat(`${item.albums_done} / ${item.albums_total}`,'漫画已处理'),
+      jmStat(`${item.downloaded} 张`,'新下载',item.downloaded?'ok':''),
+      jmStat(`${item.skipped} 张`,'校验跳过'),
+      jmStat(`${item.failed} 项`,'失败',item.failed?'danger':''),
+    );
+  }
+  box.append(stats);
+  const meta=node('div',undefined,'run-meta');
+  if(!checking){
     const elapsed=Math.max(1,(item.finished_at||Date.now()/1000)-item.started_at);
-    box.append(node('p',`累计接收 ${jmBytes(item.received_bytes)} · 本次平均 ${(item.received_bytes/1024/elapsed).toFixed(1)} KiB/s`,'muted'));
+    meta.append(node('span',`累计接收 ${jmBytes(item.received_bytes)}`),node('span',`本次平均 ${(item.received_bytes/1024/elapsed).toFixed(1)} KiB/s`));
   }
-  if(item.albums_total&&(item.status==='running'||item.status==='cancelling')){
-    const bar=node('div',undefined,'bar'),fill=node('i');fill.style.width=`${Math.min(100,Math.round(item.albums_done/item.albums_total*100))}%`;bar.append(fill);box.append(bar);
+  if(item.settings?.download_dir)meta.append(node('span',`保存目录：${item.settings.download_dir}`,'jm-path'));
+  if(meta.children.length)box.append(meta);
+  if(checking&&item.local_results?.length){
+    const details=node('details');details.append(node('summary',`已下载漫画（保留前 ${item.local_results.length} 本）`));
+    for(const book of item.local_results)details.append(node('p',`${book.title} [${book.id}] · ${book.images} 张 · ${book.path}`,'jm-path'));
+    box.append(details);
   }
-  if(item.status==='running'||item.status==='cancelling'){
-    box.append(node('p',item.stage==='scanning'?'正在扫描收藏分页…':item.stage==='matching'?`正在读取漫画详情并核对重名目录：${item.title||''}`:`${item.title||''} / ${item.chapter||''}${item.pages?` · 本章第 ${item.page} / ${item.pages} 张`:''}`));
-  }
-  if(item.settings?.download_dir)box.append(node('p',`保存目录：${item.settings.download_dir}`,'jm-path'));
   if(detailFailure){
     const notice=node('div',undefined,'jm-detail-failure');notice.setAttribute('role','note');
     notice.setAttribute('aria-label','漫画详情预读取失败说明');
@@ -150,13 +170,20 @@ function jmRunCard(item){
     notice.append(node('p','对应收藏恢复访问后可重新检查，或在“同步设置 → 同步范围”中选择不包含该漫画的收藏夹后重试。'));
     notice.append(node('p','调整同步范围前，定时同步需关闭并保存，避免保存范围时立即触发下载。','muted'));
     box.append(notice);
-  }else if(item.error)box.append(node('p',item.error,'error'));
+  }else if(item.error)box.append(node('p',item.error,'error run-error'));
   if(otherErrors.length){
-    const details=node('details');details.append(node('summary',`失败明细（保留前 ${otherErrors.length} 项）`));
+    const details=node('details','','run-errors');details.append(node('summary',`失败明细（保留前 ${otherErrors.length} 项）`));
     for(const error of otherErrors)details.append(node('p',`${error.title}：${error.message}`,'error'));
     box.append(details);
   }
   return box;
+}
+function jmStat(value,label,tone){
+  const box=node('div',undefined,'run-stat'+(tone?` ${tone}`:''));box.append(node('strong',String(value)),node('span',label));return box;
+}
+function jmSyncEmpty(){
+  const box=node('div',undefined,'sync-empty');box.innerHTML=svgIcon('inbox');
+  const text=node('div');text.append(node('strong','尚无同步记录'),node('span','同步文件保存在服务器目录。'));box.append(text);return box;
 }
 async function loadJmStatus(){
   const data=await api('/api/jm/sync');jm.active=data.active;jm.nextRun=data.next_run_at;jm.paused=data.paused;
@@ -164,12 +191,23 @@ async function loadJmStatus(){
   const signature=JSON.stringify(latest||null);
   if(signature!==jm.statusSignature){
     jm.statusSignature=signature;
-    $('jm-sync-status').replaceChildren(latest?jmRunCard(latest):node('p','尚无同步记录。同步文件保存在服务器目录。','muted'));
+    $('jm-sync-status').replaceChildren(latest?jmRunCard(latest):jmSyncEmpty());
   }
   const history=data.history.filter(item=>item.id!==latest?.id),historySignature=JSON.stringify(history);
   if(historySignature!==jm.historySignature){jm.historySignature=historySignature;$('jm-sync-history-list').replaceChildren(...history.map(jmRunCard));}
-  $('jm-sync-history').hidden=!history.length;
-  $('jm-sync-run').disabled=data.active||data.paused;$('jm-sync-check-local').disabled=data.active||data.paused;$('jm-sync-cancel').hidden=!data.active;$('jm-sync-cancel').disabled=data.current?.status==='cancelling';
+  $('jm-sync-history').hidden=!history.length;$('jm-sync-history-count').textContent=history.length||'';
+  // While a task runs, its stop control replaces the start controls.
+  $('jm-sync-run').hidden=$('jm-sync-check-local').hidden=data.active;
+  $('jm-sync-run').disabled=$('jm-sync-check-local').disabled=data.active||data.paused;
+  $('jm-sync-cancel').hidden=!data.active;$('jm-sync-cancel').disabled=data.current?.status==='cancelling';
+  const chip=$('jm-sync-chip'),checking=data.current?.mode==='check_local';
+  chip.hidden=!data.active;chip.lastElementChild.textContent=data.current?.status==='cancelling'?'停止中':checking?'检查中':'同步中';
+  const mode=data.active?'running':data.paused?'paused':'idle',current=data.current,trigger=$('jm-sync-open');
+  $('jm-sync-dialog').dataset.state=trigger.dataset.state=mode;
+  // The page-header trigger mirrors the running task so progress stays visible with the dialog closed.
+  const percent=data.active&&current?.albums_total?` ${Math.min(100,Math.round(current.albums_done/current.albums_total*100))}%`:'';
+  $('jm-sync-open-label').textContent=data.active?`${chip.lastElementChild.textContent}${percent}`:'本地同步';
+  trigger.setAttribute('aria-label',data.active?`本地同步：${chip.lastElementChild.textContent}${percent}`:'本地同步');
   $('jm-sync-save').disabled=data.active;
   syncJmSelection();renderJmSchedule();
 }
@@ -231,6 +269,10 @@ $('jm-sync-selected').onclick=()=>run(()=>startJmSync([...jm.selected]),$('jm-sy
 $('jm-sync-run').onclick=()=>run(()=>startJmSync(),$('jm-sync-run'));
 $('jm-sync-check-local').onclick=()=>run(checkJmLocal,$('jm-sync-check-local'));
 $('jm-sync-cancel').onclick=()=>run(async()=>{await api('/api/jm/sync/cancel',{method:'POST'});await loadJmStatus();},$('jm-sync-cancel'));
+$('jm-sync-open').onclick=()=>{
+  $('jm-sync-dialog').showModal();
+  run(()=>Promise.all([loadJmSettings(),loadJmStatus()]));
+};
 $('jm-sync-settings-open').onclick=()=>run(openJmSettings,$('jm-sync-settings-open'));
 $('jm-sync-form').onsubmit=event=>{
   event.preventDefault();

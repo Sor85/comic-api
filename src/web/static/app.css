@@ -668,38 +668,91 @@ body.site-settings-open{overflow:hidden}
 .page-actions button{border-radius:999px}
 .page-actions .icon-btn{border-radius:50%}
 .page-lead{max-width:760px;margin:0 0 22px;font-size:13.5px;line-height:1.7;color:var(--muted)}
-.jm-sync-panel{position:relative;margin:0 0 26px;padding:20px 22px;border-radius:20px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 7%,var(--panel)),var(--panel) 55%);box-shadow:0 0 0 1px var(--hairline),var(--shadow)}
-.panel-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.panel-icon{flex:0 0 auto;display:grid;place-items:center;width:44px;height:44px;border-radius:14px;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent)}
-.panel-icon svg{width:22px;height:22px}
-.panel-title{flex:1;min-width:220px}
-.panel-title h2{margin:0;font-size:18px;line-height:1.4}
-#jm-sync-schedule{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:2px 0 0;font-size:13px;color:var(--muted)}
-#jm-sync-schedule>span+span::before{content:"·";margin-right:10px;color:var(--line)}
-#jm-sync-schedule .jm-path{flex-basis:100%;font-size:12px;overflow-wrap:anywhere}
-#jm-sync-schedule>.jm-path::before{display:none}
+/* JM 本地同步：页头触发按钮 + 模态窗口（标题与定时状态 / 当前配置 / 最近任务 / 历史记录 / 底部主操作） */
+.sync-trigger{--sync-tone:var(--accent);position:relative;padding-left:12px}
+.sync-trigger svg{color:var(--sync-tone)}
+.sync-trigger[data-state="running"]{--sync-tone:var(--info);color:var(--info);border-color:color-mix(in srgb,var(--info) 40%,transparent);background:color-mix(in srgb,var(--info) 9%,var(--panel));font-variant-numeric:tabular-nums}
+.sync-trigger[data-state="running"] svg,.sync-dialog[data-state="running"] .sync-glyph svg{animation:sync-spin 2.4s linear infinite}
+.sync-trigger[data-state="paused"]{--sync-tone:var(--muted)}
+@keyframes sync-spin{to{transform:rotate(360deg)}}
+.sync-dialog{--sync-tone:var(--accent);font-size:14px;line-height:1.6}
+.sync-dialog[data-state="running"]{--sync-tone:var(--info)}
+.sync-dialog[data-state="paused"]{--sync-tone:var(--muted)}
+.sync-dialog .modal-head{align-items:center;gap:14px;padding-top:22px;background:radial-gradient(90% 160% at 0 0,color-mix(in srgb,var(--sync-tone) 10%,transparent),transparent 60%)}
+.sync-dialog .modal-head>.icon-btn{align-self:flex-start}
+.sync-dialog .modal-body{display:flex;flex-direction:column;gap:18px;padding-top:6px}
+.sync-glyph{flex:0 0 auto;display:grid;place-items:center;width:46px;height:46px;border-radius:15px;color:var(--sync-tone);background:color-mix(in srgb,var(--sync-tone) 13%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--sync-tone) 18%,transparent);transition:color .3s,background-color .3s}
+.sync-glyph svg{width:22px;height:22px}
+.sync-title-row{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px}
+.sync-title-row h2{margin:0;font-size:19px;line-height:1.4;letter-spacing:-.2px}
+.sync-chip{display:inline-flex;align-items:center;gap:6px;margin-left:2px;padding:1px 10px 1px 8px;border-radius:999px;font-size:12px;font-weight:600;line-height:1.7;color:var(--info);background:color-mix(in srgb,var(--info) 13%,transparent)}
+.sync-chip>i{width:6px;height:6px;border-radius:50%;background:currentColor;animation:sync-pulse 1.6s ease-in-out infinite}
+@keyframes sync-pulse{50%{opacity:.3;transform:scale(.7)}}
+#jm-sync-schedule{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;margin:2px 0 0;font-size:13px;color:var(--muted)}
+#jm-sync-schedule>span+span::before{content:"·";margin-right:10px;color:var(--muted);opacity:.6}
+.schedule-state{display:inline-flex;align-items:center;gap:7px}
+.schedule-state::before{content:"";width:7px;height:7px;border-radius:50%;background:color-mix(in srgb,var(--muted) 55%,transparent)}
 .schedule-state.on{color:var(--ok);font-weight:600}
-.panel-actions{display:flex;flex-wrap:wrap;gap:8px}
-.panel-actions button{border-radius:999px}
+.schedule-state.on::before{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 18%,transparent)}
+.schedule-state.paused{color:var(--warn)}
+.schedule-state.paused::before{background:var(--warn)}
+.sync-section{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sync-section>h3{margin:0;padding-left:4px;font-size:13px;font-weight:600;letter-spacing:.3px;color:var(--muted)}
+.sync-foot{flex-wrap:wrap}
+.sync-foot-note{margin:0 auto 0 0;font-size:12.5px;color:var(--muted)}
+.sync-foot button{border-radius:999px;padding:9px 18px}
+.sync-foot button.primary{box-shadow:0 6px 16px -8px color-mix(in srgb,var(--accent) 80%,transparent)}
 button.danger-soft{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,transparent);background:color-mix(in srgb,var(--danger) 8%,var(--panel))}
-.jm-sync-status{margin-top:16px}
+button.danger-soft:hover{border-color:var(--danger)}
+.sync-config{display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:14px;background:color-mix(in srgb,var(--group) 75%,transparent);box-shadow:inset 0 0 0 1px var(--hairline)}
+#jm-sync-config{display:flex;flex:1;min-width:0;gap:8px 28px;margin:0;flex-wrap:wrap}
+#jm-sync-config>div{display:flex;flex-direction:column;min-width:0}
+#jm-sync-config>.sync-config-path{flex:1 1 260px}
+#jm-sync-config dt{font-size:11.5px;letter-spacing:.3px;color:var(--muted)}
+#jm-sync-config dd{margin:0;font-size:13.5px;font-weight:500;color:var(--text);overflow-wrap:anywhere}
+#jm-sync-config dd.jm-path{font-size:12.5px;font-weight:400;line-height:1.6;color:var(--text)}
+.sync-config>button{flex:0 0 auto;border-radius:999px;background:var(--surface)}
 .jm-sync-status:empty{display:none}
-.jm-sync-status>p{margin:0;font-size:13px;color:var(--muted)}
-.jm-run{padding:14px 16px;border-radius:14px;background:color-mix(in srgb,var(--bg) 55%,var(--panel));font-size:13px}
+.sync-empty{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;border:1px dashed var(--line);color:var(--muted);font-size:13px}
+.sync-empty>svg{flex:0 0 auto;width:20px;height:20px;opacity:.75}
+.sync-empty strong{display:block;font-size:13.5px;font-weight:600;color:var(--text)}
+.jm-run{--tone:var(--muted);position:relative;padding:14px 16px 14px 18px;border-radius:14px;font-size:13px;background:color-mix(in srgb,var(--bg) 45%,var(--panel));box-shadow:inset 0 0 0 1px var(--hairline);overflow:hidden}
+.jm-run[data-tone="ok"]{--tone:var(--ok)}.jm-run[data-tone="info"]{--tone:var(--info)}.jm-run[data-tone="danger"]{--tone:var(--danger)}
+.jm-run::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:var(--tone);opacity:.85}
 .jm-run p{margin:6px 0 0;overflow-wrap:anywhere}
-.jm-run .bar{margin-top:10px}
-.jm-run details{margin-top:8px}
-.jm-run details summary{color:var(--muted)}
-.jm-run-heading{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
-.jm-run-heading strong{font-size:14px}
-.jm-history{margin-top:12px;font-size:13px}
-.jm-history>summary{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;color:var(--muted);background:color-mix(in srgb,var(--bg) 55%,var(--panel));list-style:none}
+.jm-run-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px}
+.run-kind{display:flex;align-items:center;gap:10px}
+.run-kind strong{font-size:14px}
+.run-time{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.run-progress{margin-top:12px}
+.run-progress-label{display:flex;align-items:baseline;gap:12px;margin-bottom:7px;font-size:12.5px}
+.run-current{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.run-percent{flex:0 0 auto;font-weight:600;color:var(--info);font-variant-numeric:tabular-nums}
+.run-progress .bar{height:6px}
+.run-progress .bar>i{background:linear-gradient(90deg,var(--info),color-mix(in srgb,var(--info) 55%,var(--accent)))}
+.run-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+.run-stat{display:flex;flex-direction:column;min-width:0;padding:9px 12px;border-radius:11px;background:var(--panel);box-shadow:inset 0 0 0 1px var(--hairline)}
+.run-stat strong{font-size:16px;line-height:1.35;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.run-stat span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.run-stat.ok strong{color:var(--ok)}
+.run-stat.danger strong{color:var(--danger)}
+.run-meta{display:flex;flex-wrap:wrap;gap:2px 16px;margin-top:10px;font-size:12px;color:var(--muted)}
+.run-meta .jm-path{flex-basis:100%;font-size:11.5px}
+.jm-run .run-error{margin-top:10px}
+.jm-run details{margin-top:10px}
+.jm-run details summary{color:var(--muted);font-size:12.5px}
+.jm-run details summary:hover{color:var(--text)}
+.jm-history{margin-top:-6px;font-size:13px}
+.jm-history>summary{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;color:var(--muted);list-style:none;transition:color .15s,background-color .15s}
+.jm-history>summary:hover{color:var(--text);background:color-mix(in srgb,var(--text) 6%,transparent)}
 .jm-history>summary::-webkit-details-marker{display:none}
-.jm-history>summary::after{content:"";width:6px;height:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);transition:transform .2s}
-.jm-history[open]>summary::after{transform:translateY(1px) rotate(-135deg)}
-#jm-sync-history-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
-.panel-note{display:flex;gap:8px;margin:16px 0 0;padding-top:14px;border-top:1px solid var(--hairline);font-size:12.5px;line-height:1.6;color:var(--muted)}
-.panel-note svg{flex:0 0 auto;width:15px;height:15px;margin-top:2px}
+.jm-history>summary svg{width:15px;height:15px}
+.history-count{min-width:20px;padding:0 6px;border-radius:999px;font-size:11.5px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums;background:color-mix(in srgb,var(--text) 8%,transparent)}
+.history-count:empty{display:none}
+.jm-history .history-chevron{transition:transform .2s}
+.jm-history[open] .history-chevron{transform:rotate(180deg)}
+#jm-sync-history-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+#jm-sync-history-list .jm-run{background:transparent}
 .jm-detail-failure{font-size:13px;line-height:1.6;margin-top:12px;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--danger) 8%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--danger) 30%,transparent);overflow-wrap:anywhere}
 .jm-detail-failure>strong{color:var(--danger)}
 .jm-detail-failure p{margin:8px 0 0}
@@ -786,9 +839,13 @@ button.danger-soft{color:var(--danger);border-color:color-mix(in srgb,var(--dang
 @media(max-width:700px){
   .jm-settings-grid,.site-auth-fields{grid-template-columns:1fr}
   .page-title h1{font-size:24px}
-  .jm-sync-panel{padding:16px}
-  .panel-actions{width:100%}
-  .panel-actions button{flex:1}
+  .sync-glyph{width:40px;height:40px;border-radius:13px}
+  .sync-trigger{padding:9px 12px}
+  .sync-foot-note{flex-basis:100%;margin:0 0 2px}
+  .sync-foot button{flex:1}
+  .sync-config{flex-direction:column;align-items:stretch}
+  .sync-config>button{align-self:flex-start}
+  .run-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .toolbar-end{margin-left:0}
   .fav-toolbar .input-icon{flex-basis:100%;max-width:none}
 }
