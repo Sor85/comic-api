@@ -35,6 +35,7 @@ async function loadBikaFavorites(){
     $('bika-favorites-prev').disabled=view.page<=1;$('bika-favorites-next').disabled=!data.has_next;
     $('bika-favorites-pager').hidden=!data.total;
     renderBikaFavorites();
+    loadLocalStatus('bika',data.items.map(item=>String(item.id))).then(changed=>{if(changed&&request===view.request)renderBikaFavorites();});
   }catch(error){
     if(request!==view.request)return;
     view.loadedKey='';view.items=[];view.hasNext=false;box.keyedCards=null;view.selected.clear();syncBikaSelection();
@@ -48,7 +49,7 @@ function refreshBikaAccountViews(){
   if(state.detail?.source==='bika'&&$('detail-dialog').open)renderDetail();
   if(state.tab==='bika-favorites')run(loadBikaFavoritesView);
 }
-function bikaCardSignature(item){return [item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
+function bikaCardSignature(item){return [localStatusSignature('bika',String(item.id)),item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
 function filteredBikaFavorites(){
   const keyword=$('bika-favorites-keyword').value.trim().toLocaleLowerCase();
   return bikaFavorites.items.filter(item=>!keyword||`${item.title} ${item.author||''}`.toLocaleLowerCase().includes(keyword));
@@ -70,3 +71,4 @@ $('bika-favorites-prev').onclick=()=>{if(bikaFavorites.page>1){bikaFavorites.pag
 $('bika-favorites-next').onclick=()=>{if(bikaFavorites.hasNext){bikaFavorites.page++;run(loadBikaFavorites);}};
 $('bika-select-page').onclick=()=>toggleSyncPage(bikaFavorites,filteredBikaFavorites().map(item=>String(item.id)),renderBikaFavorites);
 $('bika-sync-selected').onclick=()=>run(()=>startFavSync('bika',[...bikaFavorites.selected]),$('bika-sync-selected'));
+FAV_SYNC.bika.onLocalChange=async()=>{if(bikaFavorites.items.length&&await loadLocalStatus('bika',bikaFavorites.items.map(item=>String(item.id))))renderBikaFavorites();};

@@ -854,6 +854,7 @@ function renderDetail() {
   meta.append(node('span',sourceName(detail.source),'badge accent'));
   const a=node('span',undefined,'meta-item');a.innerHTML=svgIcon('user');a.append(renderComicAuthors(detail));meta.append(a);
   const n=node('span',undefined,'meta-item');n.innerHTML=svgIcon('list');n.append(node('span',`共 ${detail.chapters.length} 章`));meta.append(n);
+  localStatusMeta(detail,meta);
   text.append(meta);
   text.append(renderComicLabels(detail));
   const desc=node('p',detail.description||'暂无简介','detail-desc');text.append(desc);
@@ -877,6 +878,24 @@ function renderDetail() {
   body.append(hero,section);syncChapterSort();syncChapterPreviews();drawChapters(true);
   // Long synopses collapse to a few lines with an explicit toggle.
   requestAnimationFrame(()=>{if(desc.scrollHeight>desc.clientHeight+2){const more=node('button','展开简介','link-btn');more.type='button';more.onclick=()=>{const open=desc.classList.toggle('open');more.textContent=open?'收起简介':'展开简介';};desc.after(more);}});
+}
+// Favorites-sync sources show the last local check or sync result for the configured save directory.
+async function localStatusMeta(detail,meta){
+  if(!['jm','bika'].includes(detail.source))return;
+  let data;
+  try{data=await api(`/api/${enc(detail.source)}/sync/local-status?`+new URLSearchParams({ids:String(detail.id)}),{cache:'no-store'});}catch{return;}
+  const local=data.items?.[String(detail.id)];
+  if(!local||state.detail!==detail)return;
+  const labels={downloaded:['check','已下载到本地','ok'],error:['alert','本地文件异常','danger'],missing:['download','本地未下载','']}[local.status];
+  if(!labels)return;
+  const item=node('span',undefined,`meta-item local-state ${labels[2]}`);item.innerHTML=svgIcon(labels[0]);
+  item.append(node('span',local.status==='downloaded'?`${labels[1]} · ${local.images} 张`:labels[1]));
+  item.dataset.tipText=local.status==='error'?`${local.message||'原因未记录'}\n目录：${local.path||data.root}`:local.status==='downloaded'?`目录：${local.path}`:`保存目录：${data.root}`;
+  meta.append(item);
+  if(local.status==='error'&&local.path&&typeof repairFavLocal==='function'){
+    const fix=button('修复',()=>repairFavLocal(detail.source,[String(detail.id)]),'link-btn local-repair');
+    fix.setAttribute('aria-label',`修复《${detail.title}》的本地文件`);meta.append(fix);
+  }
 }
 async function toggleFavorite(detail){
   if(inLibrary(detail)){

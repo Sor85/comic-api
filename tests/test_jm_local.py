@@ -401,7 +401,7 @@ def test_existing_database_migration_keeps_download_checkpoints(tmp_path):
         db.execute("PRAGMA user_version=2")
     migrated = Store(tmp_path)
     with migrated.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 8
         assert db.execute("SELECT digest FROM jm_sync_files").fetchone()[0] == "digest"
         assert not db.execute("SELECT * FROM jm_sync_local_files").fetchall()
 
@@ -420,3 +420,142 @@ def test_local_check_api(tmp_path):
         assert wait_for_run(client)["skipped"] == 4 and not plugin.requests
         assert client.delete("/api/sources/jm/account").status_code == 200
         assert client.post("/api/jm/sync/check-local").status_code == 401
+
+
+def local_rows(sync):
+    with sync.store.connect() as db:
+        return {row["album_id"]: dict(row) for row in db.execute("SELECT * FROM jm_local_status")}
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "missing_page", "extra_page", "missing_chapter"])
+def test_check_records_status_and_repair_keeps_valid_pages(tmp_path, damage):
+    async def scenario():
+        sync, plugin = make_sync(tmp_path)
+        directory = existing_album(sync, plugin)
+        chapter = directory / "第 2 章"
+        kept = (chapter / "00001.png").read_bytes(), (chapter / "00001.png").stat().st_mtime_ns
+        if damage == "corrupt":
+            (chapter / "00002.png").write_bytes(b"not an image")
+        elif damage == "missing_page":
+            (chapter / "00002.png").unlink()
+        elif damage == "extra_page":
+            (chapter / "00003.png").write_bytes(plugin.picture)
+        else:
+            for path in chapter.iterdir():
+                path.unlink()
+            chapter.rmdir()
+        sync.launch(check_local=True)
+        await sync.task
+        rows = local_rows(sync)
+        assert rows["101"]["status"] == "error" and rows["101"]["path"] == str(directory)
+        assert rows["102"]["status"] == "missing"
+        assert sync.current["errors"][0]["album_id"] == "101"
+        assert sync.local_status(["101", "102", "103"])["counts"] == {"downloaded": 0, "missing": 1, "error": 1, "repairable": 1}
+        sync.launch(repair=True)
+        await sync.task
+        state = sync.current
+        assert state["mode"] == "repair" and state["status"] == "completed", state
+        assert state["repaired_albums"] == 1 and state["downloaded"] == (2 if damage == "missing_chapter" else 0 if damage == "extra_page" else 1)
+        assert state["moved_images"] == (1 if damage in ("corrupt", "extra_page") else 0)
+        backup = Path(state["backup_dir"])
+        if state["moved_images"]:
+            assert backup.is_relative_to(Path(sync.settings()["download_dir"])) and any(backup.rglob("*.png"))
+        if damage != "missing_chapter":
+            assert ((chapter / "00001.png").read_bytes(), (chapter / "00001.png").stat().st_mtime_ns) == kept
+        if damage == "missing_chapter":
+            # A missing chapter directory is created with the configured naming rule.
+            chapter = next(p for p in directory.iterdir() if p.name != "第 1 章")
+        assert sorted(p.name for p in chapter.iterdir()) == ["00001.png", "00002.png"]
+        assert local_rows(sync)["101"]["status"] == "downloaded" and len(imported(sync)) == 4
+        # A follow-up check confirms the repaired album without touching the network.
+        before = len(plugin.requests)
+        sync.launch(check_local=True)
+        await sync.task
+        assert sync.current["local_albums"] == 1 and not sync.current["failed"] and len(plugin.requests) == before
+    asyncio.run(scenario())
+
+
+def test_repair_requires_a_checked_error_and_never_targets_missing_albums(tmp_path):
+    async def scenario():
+        sync, plugin = make_sync(tmp_path)
+        with pytest.raises(ComicApiError) as error:
+            sync.launch(repair=True)
+        assert error.value.code == "nothing_to_repair"
+        existing_album(sync, plugin)
+        sync.launch(check_local=True)
+        await sync.task
+        assert local_rows(sync)["101"]["status"] == "downloaded"
+        with pytest.raises(ComicApiError) as error:
+            sync.launch(["101"], repair=True)
+        assert error.value.code == "not_repairable"
+        with pytest.raises(ComicApiError) as error:
+            sync.launch(["102"], repair=True)
+        assert error.value.code == "not_repairable" and not plugin.requests
+    asyncio.run(scenario())
+
+
+def test_full_sync_records_downloaded_status_and_api_exposes_it(tmp_path):
+    async def scenario():
+        sync, plugin = make_sync(tmp_path)
+        sync.launch(["101"])
+        await sync.task
+        assert local_rows(sync)["101"]["status"] == "downloaded"
+        assert local_rows(sync)["101"]["images"] == 4
+        return sync
+    sync = asyncio.run(scenario())
+    data = sync.local_status(["101", "102"])
+    assert set(data["items"]) == {"101"} and data["items"]["101"]["status"] == "downloaded"
+    assert data["root"] == sync.settings()["download_dir"]
+
+
+def test_repair_rebaselines_changed_valid_image_and_moves_duplicates(tmp_path):
+    async def scenario():
+        sync, plugin = make_sync(tmp_path)
+        directory = existing_album(sync, plugin)
+        sync.launch(check_local=True)
+        await sync.task
+        chapter = directory / "第 2 章"
+        # A replaced but decodable page conflicts with the previous baseline; a duplicate page is extra.
+        changed = io.BytesIO()
+        Image.new("RGB", (3, 3), "red").save(changed, "PNG")
+        (chapter / "00002.png").write_bytes(changed.getvalue())
+        (chapter / "2.png").write_bytes(plugin.picture)
+        sync.launch(check_local=True)
+        await sync.task
+        assert local_rows(sync)["101"]["status"] == "error"
+        before = len(plugin.requests)
+        sync.launch(["101"], repair=True)
+        await sync.task
+        state = sync.current
+        assert state["status"] == "completed", state
+        assert state["moved_images"] == 1 and not state["downloaded"] and len(plugin.requests) == before
+        assert (chapter / "00002.png").read_bytes() == changed.getvalue()
+        assert sorted(p.name for p in chapter.iterdir()) == ["00001.png", "00002.png"]
+        assert local_rows(sync)["101"]["status"] == "downloaded"
+    asyncio.run(scenario())
+
+
+def test_ambiguous_and_upstream_failures_are_not_repairable(tmp_path, monkeypatch):
+    async def scenario():
+        sync, plugin = make_sync(tmp_path)
+        album = existing_album(sync, plugin, layout="title")
+        (album.parent / "别名 [101]").mkdir()
+        sync.launch(check_local=True)
+        await sync.task
+        row = local_rows(sync)["101"]
+        assert row["status"] == "error" and row["path"] == "" and "多个" in row["message"]
+        assert sync.local_status()["counts"]["repairable"] == 0
+        with pytest.raises(ComicApiError) as error:
+            sync.launch(repair=True)
+        assert error.value.code == "nothing_to_repair"
+        # An upstream failure during a later check keeps the last known local state.
+        sync.save_local_status(sync.paths.resolve(sync.settings()["download_dir"]), "102", "downloaded", "漫画 102", "/x", 4)
+
+        async def broken(*args, **kwargs):
+            raise ComicApiError("上游超时", 502, "upstream_error", "jm")
+        monkeypatch.setattr(sync, "_chapter_data", broken)
+        existing_album(sync, plugin, "102")
+        sync.launch(check_local=True)
+        await sync.task
+        assert local_rows(sync)["102"]["status"] == "downloaded"
+    asyncio.run(scenario())

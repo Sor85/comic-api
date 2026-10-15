@@ -13,6 +13,7 @@ from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_name
 from src.services.local_images import MAX_IMAGE_BYTES, file_digest, numeric_id, plain_chapter_name, safe_name
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"}
+COVER_STEMS = {"cover", "folder", "thumb", "poster"}
 
 
 def name_keys(value):
@@ -51,13 +52,17 @@ class LocalLibrary:
         self.jm_names = config["directory_rule"] == JM_DIRECTORY_RULE
         if not self.root.is_dir():
             raise ComicApiError("本地检查目录不存在或不是目录", 422, "directory_unavailable", self.source)
-        self.directories = {}
-        self.books = {str(book["id"]): book for book in favorites}
+        self.directories, self.inspected = {}, {}
+        self.books = {}
         self.titles = defaultdict(set)
-        for album_id, book in self.books.items():
-            keys = {album_name(book)} if self.jm_names else name_keys(book.get("title"))
-            for key in keys:
-                self.titles[key].add(album_id)
+        for book in favorites:
+            self.add_book(book)
+
+    def add_book(self, book):
+        album_id = str(book["id"])
+        self.books[album_id] = book
+        for key in {album_name(book)} if self.jm_names else name_keys(book.get("title")):
+            self.titles[key].add(album_id)
 
     def check(self):
         if self.signal.is_set():
@@ -102,13 +107,20 @@ class LocalLibrary:
         return self.unique(named, "漫画标题")
 
     def chapter(self, album, chapter, index):
+        found = self.find_chapter(album, chapter, index)
+        if found:
+            return found
+        if self.jm_names:
+            raise ComicApiError(f"缺少 Pindextitle 章节目录：{chapter_name(chapter)}", 409, "local_incomplete", self.source)
+        chapter_id = numeric_id(chapter["id"], self.source)
+        raise ComicApiError(f"缺少可匹配的章节目录：{chapter.get('name') or chapter_id}", 409, "local_incomplete", self.source)
+
+    def find_chapter(self, album, chapter, index):
+        """The matched chapter directory, or None when no candidate exists; ambiguity still raises."""
         candidates = self.children(album)
         if self.jm_names:
             expected = chapter_name(chapter)
-            found = self.unique([path for path in candidates if path.name == expected], "Pindextitle")
-            if not found:
-                raise ComicApiError(f"缺少 Pindextitle 章节目录：{expected}", 409, "local_incomplete", self.source)
-            return found
+            return self.unique([path for path in candidates if path.name == expected], "Pindextitle")
         chapter_id = numeric_id(chapter["id"], self.source)
         identified = [p for p in candidates if directory_id(p.name) == chapter_id]
         keys = name_keys(chapter.get("name")) | name_keys(plain_chapter_name(chapter, index))
@@ -124,17 +136,24 @@ class LocalLibrary:
                 named.append(directory)
         if identified and not (self.plain_names and named):
             return self.unique(identified, "章节 ID")
-        found = self.unique(named, "章节标题")
-        if not found:
-            raise ComicApiError(f"缺少可匹配的章节目录：{chapter.get('name') or chapter_id}", 409, "local_incomplete", self.source)
-        return found
+        return self.unique(named, "章节标题")
+
+    @staticmethod
+    def episode_title(name):
+        """The title part of a '第N話 title' directory name, or None for other names."""
+        match = re.fullmatch(r"第\s*([0-9]+)\s*[話话]\s*(.*)", name, re.DOTALL)
+        return match[2].strip() if match else None
+
+    @staticmethod
+    def image_files(directory):
+        # Only named cover assets are excluded; extra numbered pages are a mismatch.
+        return [p for p in directory.iterdir() if not p.name.startswith(".") and p.suffix.lower() in IMAGE_EXTENSIONS
+                and p.stem.casefold() not in COVER_STEMS]
 
     def images(self, directory, urls):
         self.check()
         directory = self.paths.resolve(directory)
-        files = [p for p in directory.iterdir() if not p.name.startswith(".") and p.suffix.lower() in IMAGE_EXTENSIONS]
-        # Only named cover assets are excluded; extra numbered pages are a mismatch.
-        files = [p for p in files if p.stem.casefold() not in {"cover", "folder", "thumb", "poster"}]
+        files = self.image_files(directory)
         if len(files) != len(urls):
             raise ComicApiError(f"章节图片数量不符：本地 {len(files)} 张，远端 {len(urls)} 张", 409, "local_incomplete", self.source)
         numbers = {int(p.stem): p for p in files if re.fullmatch(r"[0-9]{1,20}", p.stem)}
@@ -151,6 +170,10 @@ class LocalLibrary:
         path = self.paths.resolve(path)
         try:
             before = path.stat()
+            # A repair validates pages before re-checking the album; unchanged files are decoded once per run.
+            cached = self.inspected.get(str(path))
+            if cached and cached["stamp"] == (before.st_ino, before.st_size, before.st_mtime_ns):
+                return dict(cached)
             if not path.is_file() or not 0 < before.st_size <= MAX_IMAGE_BYTES:
                 raise ValueError("invalid file size")
             with warnings.catch_warnings():
@@ -166,8 +189,10 @@ class LocalLibrary:
             after = self.paths.resolve(path).stat()
             if (before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns):
                 raise ValueError("file changed during validation")
-            return {"path": str(path), "size": after.st_size, "digest": digest,
-                    "stamp": (after.st_ino, after.st_size, after.st_mtime_ns)}
+            result = {"path": str(path), "size": after.st_size, "digest": digest,
+                      "stamp": (after.st_ino, after.st_size, after.st_mtime_ns)}
+            self.inspected[str(path)] = result
+            return dict(result)
         except (OSError, ValueError, EOFError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
             raise ComicApiError(f"图片损坏、不可读、过大或检查期间发生变化：{path.name}", 409, "local_invalid_image", self.source) from exc
 

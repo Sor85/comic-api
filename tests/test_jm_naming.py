@@ -263,3 +263,60 @@ def test_exact_compatibility_option_is_exposed_and_saved(jm_client):
     assert jm_client.get("/api/jm/sync/settings").json()["settings"]["directory_rule"] == JM_DIRECTORY_RULE
     assert f'value="{JM_DIRECTORY_RULE}">【作者】原标题 / 第N話 章节标题</option>' in jm_client.get("/").text
     assert "【作者】原标题/第1話 章节标题" in jm_client.get("/static/favorite-sync.js").text
+
+
+def chapter_listing(plugin, chapters):
+    original = plugin.detail
+    plugin.detail = lambda cid: dict(original(cid), chapters=[{"id": value, "name": name} for value, name in chapters])
+
+
+@pytest.mark.parametrize("rule", [JM_DIRECTORY_RULE, "title_plain"])
+def test_repair_renames_shifted_episode_directory_instead_of_downloading_again(tmp_path, rule):
+    async def scenario():
+        sync, plugin = make_sync(tmp_path)
+        sync.save_settings(SyncSettings(**dict(sync.settings(), directory_rule=rule)))
+        chapter_listing(plugin, [("1011", "第 1 章"), ("1012", "第 2 章")])
+        sync.launch(["101"])
+        await sync.task
+        album = sync.paths.album(sync.settings(), plugin.detail("101"))
+        before = {p.relative_to(album / "第2話 第 2 章"): p.read_bytes() for p in (album / "第2話 第 2 章").iterdir()}
+        # Upstream inserts a notice before the second episode, so every later episode number shifts.
+        chapter_listing(plugin, [("1011", "第 1 章"), ("1019", "休刊公告"), ("1012", "第 2 章")])
+        sync.launch(check_local=True)
+        await sync.task
+        assert sync.local_status(["101"])["items"]["101"]["status"] == "error"
+        downloads = len(plugin.requests)
+        sync.launch(["101"], repair=True)
+        await sync.task
+        state = sync.current
+        assert state["status"] == "completed", state
+        assert state["renamed_chapters"] == 1 and state["renames"][0]["to"] == "第3話 第 2 章"
+        assert state["downloaded"] == 2 and len(plugin.requests) - downloads == 2
+        assert sorted(p.name for p in album.iterdir()) == ["第1話 第 1 章", "第2話 休刊公告", "第3話 第 2 章"]
+        assert {p.relative_to(album / "第3話 第 2 章"): p.read_bytes() for p in (album / "第3話 第 2 章").iterdir()} == before
+        assert sync.local_status(["101"])["items"]["101"]["status"] == "downloaded"
+        with sync.store.connect() as db:
+            paths = [row[0] for row in db.execute("SELECT path FROM jm_sync_files WHERE chapter_id='1012'")]
+        assert paths and all("第3話 第 2 章" in path for path in paths)
+    asyncio.run(scenario())
+
+
+def test_repair_does_not_rename_directory_recorded_for_another_chapter(tmp_path):
+    async def scenario():
+        sync, plugin = make_sync(tmp_path)
+        sync.save_settings(SyncSettings(**dict(sync.settings(), directory_rule=JM_DIRECTORY_RULE)))
+        chapter_listing(plugin, [("1011", "第 1 章"), ("1018", "休刊公告")])
+        sync.launch(["101"])
+        await sync.task
+        # The old notice was removed upstream and a different notice was added later.
+        chapter_listing(plugin, [("1011", "第 1 章"), ("1012", "第 2 章"), ("1019", "休刊公告")])
+        sync.launch(check_local=True)
+        await sync.task
+        sync.launch(["101"], repair=True)
+        await sync.task
+        state = sync.current
+        assert state["status"] == "completed", state
+        assert state["renamed_chapters"] == 0 and state["downloaded"] == 4
+        album = sync.paths.album(sync.settings(), plugin.detail("101"))
+        assert sorted(p.name for p in album.iterdir()) == ["第1話 第 1 章", "第2話 休刊公告", "第2話 第 2 章", "第3話 休刊公告"]
+    asyncio.run(scenario())

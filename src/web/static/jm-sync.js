@@ -35,6 +35,7 @@ async function loadJmFavorites(){
     $('jm-favorites-prev').disabled=jm.page<=1;$('jm-favorites-next').disabled=!data.has_next;
     $('jm-favorites-pager').hidden=!data.total;
     renderJmBooks();
+    loadLocalStatus('jm',data.items.map(item=>String(item.id))).then(changed=>{if(changed&&request===jm.request)renderJmBooks();});
   }catch(error){
     if(request!==jm.request)return;
     jm.loadedKey='';jm.items=[];jm.selected.clear();syncJmSelection();box.keyedCards=null;
@@ -48,7 +49,7 @@ function filteredJmBooks(){
   return jm.items.filter(item=>!keyword||`${item.title} ${item.author||''}`.toLocaleLowerCase().includes(keyword));
 }
 function jmCard(item){return syncableCard(item,'jm',jm,syncJmSelection);}
-function jmCardSignature(item){return [item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
+function jmCardSignature(item){return [localStatusSignature('jm',String(item.id)),item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
 function renderJmBooks(){
   const items=filteredJmBooks(),box=$('jm-favorites-books');
   if(!items.length){
@@ -59,6 +60,7 @@ function renderJmBooks(){
 }
 function syncJmSelection(){syncSelectionBar('jm',jm);}
 FAV_SYNC.jm.onStatus=syncJmSelection;
+FAV_SYNC.jm.onLocalChange=async()=>{if(jm.items.length&&await loadLocalStatus('jm',jm.items.map(item=>String(item.id))))renderJmBooks();};
 $('jm-favorites-refresh').onclick=()=>run(loadJmFavoritesView,$('jm-favorites-refresh'));
 $('jm-favorites-filter').onsubmit=event=>{event.preventDefault();renderJmBooks();};
 $('jm-favorites-keyword').oninput=renderJmBooks;

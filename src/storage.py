@@ -125,12 +125,28 @@ class Store:
                     page INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
                     PRIMARY KEY(source, comic_id, chapter_id)
                 );
+                CREATE TABLE IF NOT EXISTS jm_local_status (
+                    root TEXT NOT NULL, album_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('downloaded','missing','error')),
+                    title TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '',
+                    images INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
+                    checked_at REAL NOT NULL,
+                    PRIMARY KEY(root, album_id)
+                );
+                CREATE TABLE IF NOT EXISTS bika_local_status (
+                    root TEXT NOT NULL, album_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('downloaded','missing','error')),
+                    title TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '',
+                    images INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
+                    checked_at REAL NOT NULL,
+                    PRIMARY KEY(root, album_id)
+                );
                 CREATE INDEX IF NOT EXISTS jm_sync_files_path ON jm_sync_files(path);
                 CREATE INDEX IF NOT EXISTS jm_sync_local_files_path ON jm_sync_local_files(path);
                 CREATE INDEX IF NOT EXISTS bika_sync_files_path ON bika_sync_files(path);
                 CREATE INDEX IF NOT EXISTS bika_sync_local_files_path ON bika_sync_local_files(path);
                 CREATE INDEX IF NOT EXISTS reading_comics_updated ON reading_comics(updated_at);
-                PRAGMA user_version=7;
+                PRAGMA user_version=8;
             """)
 
     @contextmanager

@@ -340,6 +340,19 @@ def create_app(store=None, sources=None):
         async def check_local():
             return sync.launch(check_local=True)
 
+        @app.post(f"{prefix}/repair", status_code=202, name=f"repair_{sync.source}_local")
+        async def repair_local(values: SyncInput):
+            album_ids = [sync.normalize_id(value) for value in values.album_ids] if values.album_ids else None
+            return sync.launch(album_ids, repair=True)
+
+        @app.get(f"{prefix}/local-status", name=f"{sync.source}_local_status")
+        async def local_status(ids: str = Query("", max_length=8000)):
+            album_ids = list(dict.fromkeys(sync.normalize_id(value) for value in ids.split(",") if value))
+            if len(album_ids) > 200:
+                raise ComicApiError("单次最多查询 200 本漫画", 422, "invalid_request", sync.source)
+            data = await asyncio.to_thread(sync.local_status, album_ids)
+            return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
         @app.post(f"{prefix}/cancel", name=f"cancel_{sync.source}_sync")
         async def cancel_sync():
             return sync.cancel()

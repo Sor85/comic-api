@@ -226,3 +226,27 @@ def test_jm_sync_keeps_folder_scopes(tmp_path):
     assert sync.scopes({"folder_ids": []}) == [{"folder_id": "0", "order": "mr"}]
     assert sync.scopes({"folder_ids": ["7", "9"]})[1] == {"folder_id": "9", "order": "mr"}
     assert SyncSettings(folder_ids=["7", "7"]).folder_ids == ["7"]
+
+
+def test_repair_keeps_source_named_pages_and_downloads_gaps_with_source_names(tmp_path):
+    asyncio.run(_repair_source_names(tmp_path))
+
+
+async def _repair_source_names(tmp_path):
+    sync, plugin = make_bika_sync(tmp_path, add_to_library=False)
+    plugin.pages = lambda comic_id, chapter_id: [f"https://storage.invalid/static/{comic_id}/{name}-{chapter_id}.png" for name in ("first", "second")]
+    root = Path(sync.settings()["download_dir"])
+    book = plugin.detail(A)
+    for index, chapter in enumerate(book["chapters"], 1):
+        target = root / f"{safe_name(book['title'])} [{A}]" / f"{index:03d} - {chapter['name']} [{chapter['id']}]"
+        target.mkdir(parents=True)
+        for name in ("first", "second"):
+            (target / f"{name}-{chapter['id']}.png").write_bytes(plugin.picture)
+    gap = target / "second-2.png"
+    gap.unlink()
+    state = await finish(sync, check_local=True)
+    assert state["failed"] == 1, state
+    state = await finish(sync, repair=True)
+    assert state["status"] == "completed" and state["downloaded"] == 1 and not state["moved_images"], state
+    assert gap.is_file() and sorted(p.name for p in target.iterdir()) == ["first-2.png", "second-2.png"]
+    assert sync.local_status([A])["items"][A]["status"] == "downloaded"

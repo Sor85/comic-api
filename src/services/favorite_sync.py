@@ -13,17 +13,22 @@ import re
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.errors import ComicApiError, DownloadCancelled
 from src.services.jm_local import LocalLibrary, local_file_valid
-from src.services.jm_naming import JM_DIRECTORY_RULE
+from src.services.jm_naming import JM_DIRECTORY_RULE, chapter_name, validate_name
 from src.services.local_images import (
     DIRECTORY_RULES, FORMATS, DownloadPaths, file_digest, numeric_id, receive_image, write_atomic,
 )
+
+# Failures that describe the local copy; upstream and session errors leave the recorded local state unchanged.
+LOCAL_FAILURES = {"local_incomplete", "local_ambiguous", "local_invalid_image", "local_conflict", "local_changed",
+                  "local_unmatched", "directory_unavailable", "invalid_directory", "file_conflict"}
 
 
 class BaseSyncSettings(BaseModel):
@@ -54,6 +59,7 @@ class FavoriteSync:
         self.runs_table = f"{self.source}_sync_runs"
         self.files_table = f"{self.source}_sync_files"
         self.local_table = f"{self.source}_sync_local_files"
+        self.status_table = f"{self.source}_local_status"
         self.settings_key, self.clock_key = f"{self.source}_sync", f"{self.source}_sync_clock"
         self.log = logging.getLogger(f"comic.{self.source}_sync")
         self.paths = DownloadPaths(store, self.source, self.roots_env, self.default_root, self.comic_id)
@@ -150,7 +156,11 @@ class FavoriteSync:
 
     def status(self):
         paused = not self.service.is_enabled(self.source)
-        return {"active": self.active, "current": self.current, "history": self.history(), "paused": paused,
+        try:
+            counts = self.local_status()["counts"]
+        except ComicApiError:
+            counts = {"downloaded": 0, "missing": 0, "error": 0, "repairable": 0}
+        return {"active": self.active, "current": self.current, "history": self.history(), "paused": paused, "local_counts": counts,
                 "next_run_at": self.next_run_at if self.settings()["enabled"] and not self.active and not paused else None}
 
     def source_changed(self):
@@ -198,15 +208,16 @@ class FavoriteSync:
         self.store.save_settings(self.clock_key, {"next_run_at": self.next_run_at})
 
     @staticmethod
-    def _new_state(automatic, check_local=False):
-        return {"id": uuid.uuid4().hex, "automatic": automatic, "mode": "check_local" if check_local else "sync",
+    def _new_state(automatic, check_local=False, mode=None):
+        return {"id": uuid.uuid4().hex, "automatic": automatic, "mode": mode or ("check_local" if check_local else "sync"),
                 "status": "running", "stage": "scanning",
                 "started_at": time.time(), "finished_at": None, "albums_total": 0, "albums_done": 0,
                 "downloaded": 0, "skipped": 0, "failed": 0, "received_bytes": 0,
                 "local_albums": 0, "local_images": 0, "local_missing": 0, "local_results": [],
+                "repaired_albums": 0, "moved_images": 0, "renamed_chapters": 0, "renames": [], "backup_dir": "",
                 "title": "", "chapter": "", "page": 0, "pages": 0, "errors": [], "error": ""}
 
-    def launch(self, album_ids=None, automatic=False, check_local=False):
+    def launch(self, album_ids=None, automatic=False, check_local=False, repair=False):
         if self.active:
             raise ComicApiError("已有收藏同步任务正在运行", 409, "sync_active", self.source)
         self.require_account()
@@ -214,9 +225,16 @@ class FavoriteSync:
             self.account_changed()
             raise ComicApiError(f"{self.label}账号已变更，自动同步已关闭，需重新保存设置", 409, "account_changed", self.source)
         config = self.settings()
-        self.paths.resolve(config["download_dir"])
+        root = self.paths.resolve(config["download_dir"])
+        if repair:
+            broken = self.local_errors(root)
+            album_ids = [value for value in dict.fromkeys(album_ids)] if album_ids else broken
+            if not album_ids:
+                raise ComicApiError("当前保存目录没有待修复的异常漫画，需先检查本地漫画", 409, "nothing_to_repair", self.source)
+            if set(album_ids) - set(broken):
+                raise ComicApiError("只能修复本地检查标记为异常的漫画，需先重新检查本地漫画", 409, "not_repairable", self.source)
         self.signal = threading.Event()
-        self.current = self._new_state(automatic, check_local)
+        self.current = self._new_state(automatic, check_local, "repair" if repair else None)
         self.current["settings"] = config
         self._persist(self.current)
         self.task = asyncio.create_task(self._run(config, album_ids, self.identity()))
@@ -236,11 +254,14 @@ class FavoriteSync:
         if identity != self.identity():
             raise ComicApiError(f"同步期间{self.label}账号发生变更", 409, "account_changed", self.source)
 
-    def _error(self, exc, title=""):
+    def _error(self, exc, title="", album_id=None):
         self.current["failed"] += 1
         message = str(exc) if isinstance(exc, ComicApiError) else "本地写入或图源请求失败"
         if len(self.current["errors"]) < 100:
-            self.current["errors"].append({"title": title, "message": message})
+            entry = {"title": title, "message": message}
+            if album_id:
+                entry["album_id"] = album_id
+            self.current["errors"].append(entry)
         self.log.warning("%s sync item failed: %s", self.source, message, exc_info=not isinstance(exc, ComicApiError))
         if isinstance(exc, ComicApiError) and (exc.status_code in (401, 403) or exc.code == "account_changed"):
             raise exc
@@ -280,11 +301,11 @@ class FavoriteSync:
 
     async def _run(self, config, album_ids, identity):
         state = self.current
-        checking = state["mode"] == "check_local"
+        checking, repairing = state["mode"] == "check_local", state["mode"] == "repair"
         try:
             if not checking:
                 await asyncio.to_thread(self.paths.prepare, config["download_dir"])
-            favorites = await self._collect(config, identity) if checking or not album_ids else {}
+            favorites = await self._collect(config, identity) if checking or not (album_ids or repairing) else {}
             ids = list(favorites) if checking or not album_ids else list(dict.fromkeys(album_ids))
             state["albums_total"] = len(ids)
             local = None
@@ -315,21 +336,26 @@ class FavoriteSync:
                                                 "local_check_detail_failed", self.source) from exc
                     favorites = details
                 local = await asyncio.to_thread(LocalLibrary, self.store, self.paths, config, favorites.values(), self.signal, self)
-            state["stage"] = "checking" if checking else "downloading"
+            elif repairing:
+                local = await asyncio.to_thread(LocalLibrary, self.store, self.paths, config, [], self.signal, self)
+                state["backup_dir"] = str(local.root / ".comic-api-repair" / state["id"])
+            state["stage"] = "checking" if checking else "repairing" if repairing else "downloading"
             for album_id in ids:
                 self._check(identity)
                 try:
                     if checking:
                         await self._check_local_album(self.comic_id(album_id), config, identity, local)
+                    elif repairing:
+                        await self._repair_album(self.comic_id(album_id), config, identity, local)
                     else:
                         await self._album(self.comic_id(album_id), config, identity)
                 except DownloadCancelled:
                     raise
                 except Exception as exc:
                     label = state["title"] or album_id
-                    if checking and state["chapter"]:
+                    if (checking or repairing) and state["chapter"]:
                         label += f" / {state['chapter']}"
-                    self._error(exc, label)
+                    self._error(exc, label, album_id)
                 state["albums_done"] += 1
                 self._persist(state)
             self._check(identity)
@@ -345,7 +371,7 @@ class FavoriteSync:
         finally:
             state.update(finished_at=time.time(), stage="finished")
             self._persist(state)
-            if not checking:
+            if not (checking or repairing):
                 self._schedule_next()
             self.wake.set()
 
@@ -363,10 +389,24 @@ class FavoriteSync:
         state.update(title=album_id, chapter="", page=0, pages=0)
         book = local.books[album_id] if config["directory_rule"] == JM_DIRECTORY_RULE else await self.service.get_comic_detail(self.source, album_id)
         state["title"] = book["title"]
-        directory = await asyncio.to_thread(local.album, book)
-        if not directory:
-            state["local_missing"] += 1
-            return
+        directory = None
+        try:
+            directory = await asyncio.to_thread(local.album, book)
+            if not directory:
+                state["local_missing"] += 1
+                self.save_local_status(local.root, album_id, "missing", book["title"])
+                return
+            await self._verify_local_album(album_id, config, identity, local, book, directory)
+        except DownloadCancelled:
+            raise
+        except Exception as exc:
+            if self._local_failure(exc):
+                self.save_local_status(local.root, album_id, "error", book["title"], directory or "", message=self._message(exc))
+            raise
+
+    async def _verify_local_album(self, album_id, config, identity, local, book, directory, prepared=None):
+        """Validate every chapter of a matched directory, then register it as downloaded."""
+        state = self.current
         chapters = book.get("chapters", [])
         if not chapters:
             raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", self.source)
@@ -375,7 +415,7 @@ class FavoriteSync:
             self._check(identity)
             state.update(chapter=chapter.get("name", ""), page=0, pages=0)
             chapter_id = numeric_id(chapter["id"], self.source)
-            urls, chapter = await self._chapter_data(config, album_id, chapter)
+            urls, chapter = prepared[index - 1] if prepared else await self._chapter_data(config, album_id, chapter)
             if not urls:
                 raise ComicApiError("章节未返回图片", 502, "invalid_response", self.source)
             state["chapter"] = chapter.get("name", "")
@@ -389,12 +429,52 @@ class FavoriteSync:
             state["page"] = len(urls)
         self._check(identity)
         await asyncio.to_thread(local.remember, album_id, records)
+        self.save_local_status(local.root, album_id, "downloaded", book["title"], directory, len(records))
         state["local_albums"] += 1
         state["local_images"] += len(records)
         if len(state["local_results"]) < 100:
             state["local_results"].append({"id": album_id, "title": book["title"], "path": str(directory), "images": len(records)})
         if config["add_to_library"]:
             self._save_book(album_id, book)
+        return records
+
+    @staticmethod
+    def _message(exc):
+        return str(exc) if isinstance(exc, ComicApiError) else "本地读取或图源请求失败"
+
+    @staticmethod
+    def _local_failure(exc):
+        return isinstance(exc, OSError) or isinstance(exc, ComicApiError) and exc.code in LOCAL_FAILURES
+
+    def save_local_status(self, root, album_id, status, title="", path="", images=0, message=""):
+        with self.store.connect() as db:
+            db.execute(f"""INSERT INTO {self.status_table} VALUES (?,?,?,?,?,?,?,?)
+                ON CONFLICT(root, album_id) DO UPDATE SET status=excluded.status, title=excluded.title, path=excluded.path,
+                images=excluded.images, message=excluded.message, checked_at=excluded.checked_at""",
+                       (str(root), album_id, status, title or "", str(path or ""), images, message[:500], time.time()))
+
+    def local_errors(self, root):
+        """Repairable albums: marked broken by a check or sync with a uniquely matched directory."""
+        with self.store.connect() as db:
+            return [row[0] for row in db.execute(
+                f"SELECT album_id FROM {self.status_table} WHERE root=? AND status='error' AND path<>'' ORDER BY checked_at",
+                (str(root),))]
+
+    def local_status(self, album_ids=None):
+        """Per-comic local state for the configured save directory, plus totals for the whole directory."""
+        root = str(self.paths.resolve(self.settings()["download_dir"]))
+        with self.store.connect() as db:
+            counts = {row[0]: row[1] for row in db.execute(
+                f"SELECT status, COUNT(*) FROM {self.status_table} WHERE root=? GROUP BY status", (root,))}
+            counts["repairable"] = db.execute(
+                f"SELECT COUNT(*) FROM {self.status_table} WHERE root=? AND status='error' AND path<>''", (root,)).fetchone()[0]
+            items = {}
+            for album_id in album_ids or []:
+                row = db.execute(f"SELECT * FROM {self.status_table} WHERE root=? AND album_id=?", (root, album_id)).fetchone()
+                if row:
+                    items[album_id] = {key: row[key] for key in ("status", "title", "path", "images", "message", "checked_at")}
+        return {"root": root, "counts": {key: counts.get(key, 0) for key in ("downloaded", "missing", "error", "repairable")},
+                "items": items}
 
     def _guard_plain_directory(self, album_id, directory):
         prefix = str(directory) + os.sep
@@ -417,6 +497,7 @@ class FavoriteSync:
             raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", self.source)
         if config["directory_rule"] in ("title_plain", JM_DIRECTORY_RULE):
             self._guard_plain_directory(album_id, self.paths.album(config, book))
+        failed, errors, images = state["failed"], len(state["errors"]), 0
         for index, chapter in enumerate(chapters, 1):
             self._check(identity)
             state.update(chapter=chapter.get("name", ""), page=0, pages=0)
@@ -435,6 +516,7 @@ class FavoriteSync:
                         skipped, received = await asyncio.to_thread(self._image, config, album_id, chapter_id, page, url, directory)
                         state["skipped" if skipped else "downloaded"] += 1
                         state["received_bytes"] += received
+                        images += 1
                     except DownloadCancelled:
                         raise
                     except Exception as exc:
@@ -443,6 +525,13 @@ class FavoriteSync:
                 raise
             except Exception as exc:
                 self._error(exc, f"{book['title']} / {state['chapter']}")
+        root = self.paths.resolve(config["download_dir"])
+        if state["failed"] == failed:
+            self.save_local_status(root, album_id, "downloaded", book["title"], self.paths.album(config, book), images)
+        else:
+            message = state["errors"][errors]["message"] if len(state["errors"]) > errors else "部分图片同步失败"
+            self.save_local_status(root, album_id, "error", book["title"], self.paths.album(config, book),
+                                   message=f"同步未完成：{message}")
 
     def _image(self, config, album_id, chapter_id, page, url, directory):
         scope = hashlib.sha256(json.dumps([config[key] for key in ("download_dir", "directory_rule", "image_format", "quality")]).encode()).hexdigest()
@@ -480,3 +569,185 @@ class FavoriteSync:
             db.execute(f"UPDATE {files} SET size=?, digest=? WHERE scope=? AND album_id=? AND chapter_id=? AND page=?",
                        (len(data), hashlib.sha256(data).hexdigest(), scope, album_id, chapter_id, page))
         return False, received
+
+    async def _repair_album(self, album_id, config, identity, local):
+        """Keep decodable pages, move unusable files into the run's backup folder, download only the gaps."""
+        state = self.current
+        state.update(title=album_id, chapter="", page=0, pages=0)
+        with self.store.connect() as db:
+            row = db.execute(f"SELECT * FROM {self.status_table} WHERE root=? AND album_id=?", (str(local.root), album_id)).fetchone()
+        book = await self.service.get_comic_detail(self.source, album_id)
+        state["title"] = book["title"]
+        directory = None
+        try:
+            directory = await asyncio.to_thread(self._repair_directory, local, row["path"] if row else "")
+            chapters = book.get("chapters", [])
+            if not chapters:
+                raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", self.source)
+            prepared = []
+            for chapter in chapters:
+                self._check(identity)
+                state.update(chapter=chapter.get("name", ""), page=0, pages=0)
+                urls, chapter = await self._chapter_data(config, album_id, chapter)
+                if not urls:
+                    raise ComicApiError("章节未返回图片", 502, "invalid_response", self.source)
+                prepared.append((urls, chapter))
+            targets = await asyncio.to_thread(self._repair_chapter_directories, local, config, book, prepared, directory)
+            for (urls, chapter), target in zip(prepared, targets):
+                self._check(identity)
+                state.update(chapter=chapter.get("name", ""), page=0, pages=len(urls))
+                self._persist(state)
+                chapter_id = numeric_id(chapter["id"], self.source)
+                await asyncio.to_thread(self._repair_pages, local, config, album_id, chapter_id, target, urls, identity)
+            state.update(chapter="", page=0, pages=0)
+            await self._verify_local_album(album_id, config, identity, local, book, directory, prepared)
+            state["repaired_albums"] += 1
+        except DownloadCancelled:
+            raise
+        except Exception as exc:
+            if self._local_failure(exc):
+                self.save_local_status(local.root, album_id, "error", book["title"], directory or (row["path"] if row else ""),
+                                       message=self._message(exc))
+            raise
+
+    def _repair_directory(self, local, saved):
+        # Only a directory the check uniquely matched is repaired; ambiguous matches need manual cleanup.
+        try:
+            path = self.paths.resolve(saved) if saved else None
+        except ComicApiError:
+            path = None
+        if not path or not path.is_dir() or path == local.root or not path.is_relative_to(local.root):
+            raise ComicApiError("本地漫画目录未唯一匹配或已不存在，需整理目录后重新检查", 409, "local_unmatched", self.source)
+        return path
+
+    def _repair_chapter_directories(self, local, config, book, prepared, album):
+        """Resolve every chapter's directory: exact match, then a unique same-title directory whose
+        episode number shifted (renamed in place), else a new directory for a full download."""
+        found = [local.find_chapter(album, chapter, index) for index, (_, chapter) in enumerate(prepared, 1)]
+        matched = [path for path in found if path]
+        if len(set(matched)) != len(matched):
+            raise ComicApiError("多个章节匹配到同一目录，未自动修复", 409, "local_ambiguous", self.source)
+        names = [self._chapter_dir_name(config, book, chapter, index) for index, (_, chapter) in enumerate(prepared, 1)]
+        used, spare = set(matched), {}
+        for path in local.children(album):
+            title = local.episode_title(path.name)
+            if path not in used and path.name not in names and title is not None:
+                spare.setdefault(title, []).append(path)
+        wanted = {}
+        for index, (path, name) in enumerate(zip(found, names)):
+            if not path and local.episode_title(name) is not None:
+                wanted.setdefault(local.episode_title(name), []).append(index)
+        targets = list(found)
+        for title, indexes in wanted.items():
+            candidates = spare.get(title, [])
+            if len(indexes) == 1 and len(candidates) == 1:
+                index, source = indexes[0], candidates[0]
+                target = self.paths.resolve(album / names[index])
+                chapter_id = numeric_id(prepared[index][1]["id"], self.source)
+                if target.exists() or self._recorded_elsewhere(source, book["id"], chapter_id):
+                    continue
+                os.rename(source, target)
+                self._move_records(source, target)
+                self.current["renamed_chapters"] += 1
+                if len(self.current["renames"]) < 100:
+                    self.current["renames"].append({"title": book["title"], "from": source.name, "to": target.name})
+                targets[index] = target
+        for index, path in enumerate(targets):
+            if path:
+                continue
+            target = self.paths.resolve(album / names[index])
+            if target.exists() and not target.is_dir():
+                raise ComicApiError(f"章节目录名称被文件占用：{names[index]}", 409, "file_conflict", self.source)
+            target.mkdir(exist_ok=True)
+            targets[index] = target
+        local.directories.pop(self.paths.resolve(album), None)
+        return targets
+
+    def _chapter_dir_name(self, config, book, chapter, index):
+        if config["directory_rule"] == JM_DIRECTORY_RULE:
+            return validate_name(chapter_name(chapter))
+        return self.paths.chapter(config, book, chapter, index).name
+
+    def _recorded_elsewhere(self, directory, album_id, chapter_id):
+        """Sync or check records proving the directory holds another chapter veto a title-based rename."""
+        prefix = str(directory) + os.sep
+        with self.store.connect() as db:
+            return any(db.execute(f"""SELECT 1 FROM {table} WHERE substr(path, 1, ?)=? AND (album_id<>? OR chapter_id<>?)
+                LIMIT 1""", (len(prefix), prefix, self.comic_id(album_id), chapter_id)).fetchone()
+                       for table in (self.files_table, self.local_table))
+
+    def _move_records(self, source, target):
+        """Checkpoints follow a renamed chapter directory so its files keep their verified baseline."""
+        prefix, moved = str(source) + os.sep, str(target) + os.sep
+        with self.store.connect() as db:
+            for table in (self.files_table, self.local_table):
+                # Rows for the previously absent target directory are stale.
+                db.execute(f"DELETE FROM {table} WHERE substr(path, 1, ?)=?", (len(moved), moved))
+                db.execute(f"UPDATE {table} SET path=? || substr(path, ?) WHERE substr(path, 1, ?)=?",
+                           (moved, len(prefix) + 1, len(prefix), prefix))
+
+    def _repair_pages(self, local, config, album_id, chapter_id, directory, urls, identity):
+        state = self.current
+        files = local.image_files(directory)
+        expected = {Path(unquote(urlparse(url).path)).stem: page for page, url in enumerate(urls, 1)}
+        numeric = [p for p in files if re.fullmatch(r"[0-9]{1,20}", p.stem) and 1 <= int(p.stem) <= len(urls)]
+        named = [p for p in files if p.stem in expected]
+        # Pages are numbered 1..N or named after the source files, whichever explains more existing files.
+        by_stem = len(named) > len(numeric)
+        slots, extras = {}, []
+        for path in sorted(files, key=lambda p: p.name):
+            if path in (named if by_stem else numeric):
+                slots.setdefault(expected[path.stem] if by_stem else int(path.stem), []).append(path)
+            else:
+                extras.append(path)
+        padded = [p.stem for p in numeric if p.stem.startswith("0")]
+        width = max(map(len, padded)) if padded else 0 if numeric else 5
+        for page, url in enumerate(urls, 1):
+            self._check(identity)
+            state["page"] = page
+            kept = None
+            for path in slots.get(page, []):
+                if kept is None:
+                    try:
+                        record = local.inspect(path)
+                    except ComicApiError:
+                        pass
+                    else:
+                        kept = path
+                        self._forget_stale(album_id, chapter_id, page, url, record)
+                        continue
+                self._move_to_backup(local, path)
+            if kept is not None:
+                continue
+            data, extension, received = receive_image(self.service.source(self.source), url, chapter_id, config, self.signal, self.source)
+            self._check(identity)
+            stem = Path(unquote(urlparse(url).path)).stem if by_stem else str(page).zfill(width)
+            path = self.paths.resolve(directory / f"{stem}.{extension}")
+            if path.exists():
+                self._move_to_backup(local, path)
+            write_atomic(path, data)
+            state["downloaded"] += 1
+            state["received_bytes"] += received
+            if page % 10 == 0:
+                self._persist(state)
+        for path in extras:
+            self._move_to_backup(local, path)
+
+    def _forget_stale(self, album_id, chapter_id, page, url, record):
+        """A kept, decodable file becomes the new baseline; this album's outdated records for it are dropped."""
+        with self.store.connect() as db:
+            for table in (self.files_table, self.local_table):
+                db.execute(f"""DELETE FROM {table} WHERE path=? AND album_id=? AND NOT (chapter_id=? AND page=?
+                    AND image_key=? AND size=? AND digest=?)""",
+                           (record["path"], album_id, chapter_id, page, urlparse(url).path, record["size"], record["digest"]))
+
+    def _move_to_backup(self, local, path):
+        target = self.paths.resolve(self.current["backup_dir"]) / path.relative_to(local.root)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            raise ComicApiError(f"备份位置已存在同名文件，未移动：{path.name}", 409, "file_conflict", self.source)
+        os.rename(path, target)
+        with self.store.connect() as db:
+            for table in (self.files_table, self.local_table):
+                db.execute(f"DELETE FROM {table} WHERE path=?", (str(path),))
+        self.current["moved_images"] += 1

@@ -7,7 +7,8 @@ const FAV_SYNC = {
   jm:{label:'JM',tab:'jm-favorites',folders:true,ids:['123456','123457']},
   bika:{label:'哔咔',tab:'bika-favorites',folders:false,ids:['5e7f2a9c1b3d4e6f8a0b2c4d','1']},
 };
-const favSync = {source:'jm',view:{},jm:{active:false,settings:null},bika:{active:false,settings:null}};
+const favSync = {source:'jm',view:{},jm:{active:false,settings:null,local:{}},bika:{active:false,settings:null,local:{}}};
+const LOCAL_STATUS = {downloaded:{label:'已下载',tone:'ok',icon:'check'},error:{label:'本地异常',tone:'danger',icon:'alert'},missing:{label:'未下载',tone:'muted',icon:'download'}};
 const JM_SYNC_LABELS = {running:'同步中',cancelling:'停止中',cancelled:'已停止',interrupted:'重启中断',completed:'已完成',partial:'部分失败',failed:'失败'};
 const syncField = name => $('fav-sync-form').elements.namedItem(name);
 const jmDate = value => value ? new Date(value*1000).toLocaleString() : '尚未运行';
@@ -49,8 +50,26 @@ function syncableCard(item,source,view,onSelect){
       {label:check.checked?'取消选择':'选择',icon:svgIcon('check'),act:()=>{check.checked=!check.checked;check.onchange();}},
     ],onPick:entry=>entry.act()});
   });
+  const local=favSync[source]?.local?.[id];
+  if(local&&local.status!=='missing'){
+    const meta=LOCAL_STATUS[local.status],badge=node('span',undefined,`cover-local ${meta.tone}`);
+    badge.innerHTML=svgIcon(meta.icon);badge.append(node('span',meta.label));
+    badge.dataset.tipText=local.status==='error'?`本地检查异常：${local.message||'原因未记录'}`:`本地 ${local.images} 张 · ${local.path}`;
+    box.querySelector?.('.cover')?.prepend(badge);
+  }
   box.append(label,syncOne);return box;
 }
+// Local state for the cards on the current page; failures leave cards without badges.
+async function loadLocalStatus(source,ids){
+  if(!ids.length)return false;
+  try{
+    const data=await api(`/api/${source}/sync/local-status?`+new URLSearchParams({ids:ids.join(',')}),{cache:'no-store'});
+    const next={...favSync[source].local};for(const id of ids)delete next[id];Object.assign(next,data.items);
+    const changed=JSON.stringify(ids.map(id=>favSync[source].local[id]||null))!==JSON.stringify(ids.map(id=>next[id]||null));
+    favSync[source].local=next;return changed;
+  }catch{return false;}
+}
+function localStatusSignature(source,id){const local=favSync[source]?.local?.[id];return local?[local.status,local.images,local.message,local.path]:null;}
 function syncSelectionBar(source,view){
   const selected=$(`${source}-sync-selected`);selected.hidden=!view.selected.size;selected.textContent=`同步所选（${view.selected.size}）`;selected.disabled=favSync[source].active;
   $(`${source}-favorites-books`).classList?.toggle('selecting',view.selected.size>0);
@@ -67,6 +86,13 @@ async function startFavSync(source,albumIds){
   await api(`/api/${source}/sync/run`,write('POST',albumIds?{album_ids:albumIds}:{}));
   toast(`${FAV_SYNC[source].label} 收藏同步已启动`);await loadSyncStatus(source);
 }
+async function repairFavLocal(source=favSync.source,albumIds){
+  const s=(await loadSyncSettings(source)).settings,count=albumIds?.length||favSync[source].counts?.repairable||0;
+  const backup=`${s.download_dir.replace(/[\\/]$/,'')}/.comic-api-repair/`;
+  if(!await ask({title:'修复异常漫画',message:`范围：本地检查标记为异常的 ${count} 本漫画。\n目录：${s.download_dir}\n标题相同、仅「第N話」序号与当前章节顺序不同的已有章节目录唯一时改名对上；逐页核对已有图片：可正常解码的图片保留不动，缺失页从图源补下载；损坏、重复或多余的图片移入 ${backup} 备份目录，不删除任何文件。修复完成后重新校验并登记为已下载。`,ok:'开始修复'}))return;
+  await api(`/api/${source}/sync/repair`,write('POST',albumIds?{album_ids:albumIds}:{}));
+  toast('异常漫画修复已启动');await loadSyncStatus(source);
+}
 async function checkFavLocal(source=favSync.source){
   const s=(await loadSyncSettings(source)).settings;
   const naming=s.directory_rule==='Bd_Aauthoroname_Pindextitle'?'按“【作者】原标题 / 第N話 章节标题”规则匹配':'按漫画 ID 或完整标题匹配';
@@ -75,12 +101,12 @@ async function checkFavLocal(source=favSync.source){
   toast('本地漫画检查已启动');await loadSyncStatus(source);
 }
 function jmRunCard(item){
-  const checking=item.mode==='check_local',live=item.status==='running'||item.status==='cancelling';
+  const checking=item.mode==='check_local',repairing=item.mode==='repair',live=item.status==='running'||item.status==='cancelling';
   const detailFailure=checking&&item.status==='failed'?item.errors?.find(error=>error.stage==='matching'):null;
   const otherErrors=(item.errors||[]).filter(error=>error!==detailFailure);
   const tone=item.status==='completed'?'ok':['failed','partial'].includes(item.status)?'danger':live?'info':'muted';
   const box=node('article',undefined,'jm-run'),head=node('div',undefined,'jm-run-heading'),kind=node('div',undefined,'run-kind');
-  kind.append(node('strong',checking?'本地漫画检查':item.automatic?'定时同步':'手动同步'),node('span',checking&&item.status==='running'?'检查中':JM_SYNC_LABELS[item.status]||item.status,`status-pill ${tone}`));
+  kind.append(node('strong',checking?'本地漫画检查':repairing?'异常漫画修复':item.automatic?'定时同步':'手动同步'),node('span',checking&&item.status==='running'?'检查中':repairing&&item.status==='running'?'修复中':JM_SYNC_LABELS[item.status]||item.status,`status-pill ${tone}`));
   head.append(kind,node('span',`${jmDate(item.started_at)}${item.finished_at?' → '+jmDate(item.finished_at):''}`,'run-time'));
   box.setAttribute('data-tone',tone);box.append(head);
   if(live){
@@ -99,6 +125,13 @@ function jmRunCard(item){
       jmStat(`${item.local_missing} 本`,'未匹配'),
       jmStat(`${item.failed} 本`,'异常',item.failed?'danger':''),
     );
+  }else if(repairing){
+    stats.append(
+      jmStat(`${item.albums_done} / ${item.albums_total}`,'漫画已处理'),
+      jmStat(`${item.repaired_albums||0} 本`,'已修复',item.repaired_albums?'ok':''),
+      jmStat(`${item.downloaded} 张`,`补下载 · 移入备份 ${item.moved_images||0} 张`),
+      jmStat(`${item.failed} 本`,'仍异常',item.failed?'danger':''),
+    );
   }else{
     stats.append(
       jmStat(`${item.albums_done} / ${item.albums_total}`,'漫画已处理'),
@@ -114,10 +147,17 @@ function jmRunCard(item){
     meta.append(node('span',`累计接收 ${jmBytes(item.received_bytes)}`),node('span',`本次平均 ${(item.received_bytes/1024/elapsed).toFixed(1)} KiB/s`));
   }
   if(item.settings?.download_dir)meta.append(node('span',`保存目录：${item.settings.download_dir}`,'jm-path'));
+  if(repairing&&item.renamed_chapters)meta.append(node('span',`章节目录改名 ${item.renamed_chapters} 个`));
+  if(repairing&&item.moved_images)meta.append(node('span',`备份目录：${item.backup_dir}`,'jm-path'));
   if(meta.children.length)box.append(meta);
   if(checking&&item.local_results?.length){
     const details=node('details');details.append(node('summary',`已下载漫画（保留前 ${item.local_results.length} 本）`));
     for(const book of item.local_results)details.append(node('p',`${book.title} [${book.id}] · ${book.images} 张 · ${book.path}`,'jm-path'));
+    box.append(details);
+  }
+  if(repairing&&item.renames?.length){
+    const details=node('details');details.append(node('summary',`章节目录改名（保留前 ${item.renames.length} 项）`));
+    for(const entry of item.renames)details.append(node('p',`${entry.title}：${entry.from} → ${entry.to}`,'jm-path'));
     box.append(details);
   }
   if(detailFailure){
@@ -147,13 +187,15 @@ function jmSyncEmpty(){
 }
 function syncProgressLabel(data){
   const current=data.current,checking=current?.mode==='check_local';
-  const status=current?.status==='cancelling'?'停止中':checking?'检查中':'同步中';
+  const status=current?.status==='cancelling'?'停止中':checking?'检查中':current?.mode==='repair'?'修复中':'同步中';
   const percent=data.active&&current?.albums_total?` ${Math.min(100,Math.round(current.albums_done/current.albums_total*100))}%`:'';
   return {status,percent};
 }
 async function loadSyncStatus(source=favSync.source){
-  const data=await api(`/api/${source}/sync`),s=favSync[source];
-  s.active=data.active;s.nextRun=data.next_run_at;s.paused=data.paused;
+  const data=await api(`/api/${source}/sync`),s=favSync[source],finished=s.active&&!data.active;
+  s.active=data.active;s.nextRun=data.next_run_at;s.paused=data.paused;s.counts=data.local_counts||{};
+  // A finished check, repair or sync changes per-comic local state; refresh the visible cards once.
+  if(finished)FAV_SYNC[source].onLocalChange?.();
   const {status,percent}=syncProgressLabel(data),mode=data.active?'running':data.paused?'paused':'idle';
   // The page-header trigger mirrors the running task so progress stays visible with the dialog closed.
   const trigger=$(`${source}-sync-open`);trigger.dataset.state=mode;
@@ -173,6 +215,9 @@ function renderSyncDialog(data,status,mode){
   // While a task runs, its stop control replaces the start controls.
   $('fav-sync-run').hidden=$('fav-sync-check-local').hidden=data.active;
   $('fav-sync-run').disabled=$('fav-sync-check-local').disabled=data.active||data.paused;
+  const broken=data.local_counts?.repairable||0,repair=$('fav-sync-repair');
+  repair.hidden=data.active||!broken;repair.disabled=data.active||data.paused;
+  repair.lastElementChild.textContent=`修复异常漫画（${broken}）`;
   $('fav-sync-cancel').hidden=!data.active;$('fav-sync-cancel').disabled=data.current?.status==='cancelling';
   const chip=$('fav-sync-chip');chip.hidden=!data.active;chip.lastElementChild.textContent=status;
   $('fav-sync-dialog').dataset.state=mode;
@@ -247,6 +292,7 @@ async function browseSyncDirectory(path=''){
 for(const source of Object.keys(FAV_SYNC))$(`${source}-sync-open`).onclick=()=>openFavSync(source);
 $('fav-sync-run').onclick=()=>run(()=>startFavSync(favSync.source),$('fav-sync-run'));
 $('fav-sync-check-local').onclick=()=>run(()=>checkFavLocal(favSync.source),$('fav-sync-check-local'));
+$('fav-sync-repair').onclick=()=>run(()=>repairFavLocal(favSync.source),$('fav-sync-repair'));
 $('fav-sync-cancel').onclick=()=>run(async()=>{const source=favSync.source;await api(`/api/${source}/sync/cancel`,{method:'POST'});await loadSyncStatus(source);},$('fav-sync-cancel'));
 $('fav-sync-settings-open').onclick=()=>run(openSyncSettings,$('fav-sync-settings-open'));
 $('fav-sync-form').onsubmit=event=>{

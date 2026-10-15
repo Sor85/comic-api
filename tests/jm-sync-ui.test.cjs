@@ -104,3 +104,20 @@ test('图片检查错误与普通同步不显示详情预读取说明', () => {
     assert.equal(failureNotice(context.jmRunCard(run(overrides))), undefined);
   }
 });
+
+test('修复任务显示已修复、补下载、移入备份数量和备份目录', () => {
+  const card = context.jmRunCard(run({mode: 'repair', status: 'completed', error: '', errors: [], failed: 0,
+    albums_done: 2, albums_total: 2, repaired_albums: 2, downloaded: 5, moved_images: 3,
+    backup_dir: '/data/.comic-api-repair/run', settings: {download_dir: '/data'}}));
+  const text = card.textContent;
+  assert.match(text, /异常漫画修复/);assert.match(text, /2 本已修复/);
+  assert.match(text, /5 张补下载 · 移入备份 3 张/);assert.match(text, /备份目录：\/data\/\.comic-api-repair\/run/);
+});
+
+test('修复任务列出章节目录改名记录', () => {
+  const card = context.jmRunCard(run({mode: 'repair', status: 'completed', error: '', errors: [], failed: 0,
+    repaired_albums: 1, downloaded: 2, moved_images: 0, renamed_chapters: 1,
+    renames: [{title: '漫画 101', from: '第2話 第 2 章', to: '第3話 第 2 章'}], settings: {download_dir: '/data'}}));
+  assert.match(card.textContent, /章节目录改名 1 个/);
+  assert.match(card.textContent, /漫画 101：第2話 第 2 章 → 第3話 第 2 章/);
+});
