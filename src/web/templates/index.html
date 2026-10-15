@@ -3,6 +3,18 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0e0e12">
+  <script>
+    // Runs before first paint: apply the saved theme, and hide the browse home while a deep link is restored.
+    (()=>{
+      const root=document.documentElement;let light=null;
+      try{light=JSON.parse(localStorage.getItem('comic:light'));}catch{}
+      if(typeof light!=='boolean')light=!matchMedia('(prefers-color-scheme: dark)').matches;
+      root.classList.toggle('light',light);
+      if(light)document.querySelector('meta[name=theme-color]').content='#f7f5f1';
+      const params=new URLSearchParams(location.search),tab=params.get('tab');
+      if((params.get('q')||'').trim()||params.get('browse')||(tab&&tab!=='browse'&&tab!=='settings'))root.classList.add('booting');
+    })();
+  </script>
   <meta name="description" content="聚合多个漫画源的一站式搜索、在线阅读与下载平台">
   <title>Comic · 聚合漫画</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f26d3f'/%3E%3Cpath d='M9 7h10a4 4 0 0 1 4 4v14h-2.5a4.5 4.5 0 0 0-4.5-4.5H9z' fill='%23fff'/%3E%3C/svg%3E">
@@ -35,6 +47,13 @@
       <button data-tab="jm-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m8 14 3 3 5-5"/></svg><span>JM 收藏</span></button>
       <button data-tab="bika-favorites" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="m9 10 2 2 4-4"/></svg><span>哔咔收藏</span></button>
     </nav>
+    <script>
+      // Highlight the deep-linked tab before first paint; app.js re-syncs it (and the panel) once sources load.
+      (()=>{
+        const tab=new URLSearchParams(location.search).get('tab'),target=tab&&document.querySelector(`.tabs [data-tab="${CSS.escape(tab)}"]`);
+        if(target)document.querySelectorAll('.tabs [data-tab]').forEach(n=>n.classList.toggle('active',n===target));
+      })();
+    </script>
     <div class="actions">
       <button id="theme" class="icon-btn ghost" type="button" title="切换主题" aria-label="切换主题">
         <svg class="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>

@@ -149,11 +149,13 @@ async function loadSources() {
   state.sources=sources;state.searchCategories={};
   renderSourceList();syncSourceNavigation();
   if(state.settingsSource)renderSourceSettings();
-  if(!state.browseReady)initBrowse();
+  if(!state.browseReady){initBrowse();endBooting();}
   else if(changed)refreshSourceViews();
   else if(state.view==='results')renderFilters();
   else if(state.shelfBlocked)run(loadShelves);
 }
+// Reveals the page once the deep-linked view is in place (set by the inline script in index.html).
+function endBooting(){document.documentElement.classList.remove('booting');}
 function sourcePlugin(id){return state.sources.find(s=>s.id===id);}
 function activeSources(){return state.sources.filter(p=>p.enabled!==false);}
 function discoverActions(p){return BROWSE_ORDER.filter(a=>p&&p.enabled!==false&&(p.capabilities||[]).includes(a));}
@@ -1359,7 +1361,6 @@ window.addEventListener('scroll',()=>{
   document.body.classList.toggle('scrolled',h.scrollTop>8);
 },{passive:true});
 $('to-top').onclick=()=>window.scrollTo({top:0,behavior:'smooth'});
-document.documentElement.classList.toggle('light',readLocal('comic:light')??!matchMedia('(prefers-color-scheme: dark)').matches);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',event=>{if(readLocal('comic:light')===null)document.documentElement.classList.toggle('light',!event.matches);});
 function syncThemeColor(){document.querySelector('meta[name=theme-color]').content=document.documentElement.classList.contains('light')?'#f7f5f1':'#0e0e12';}
 $('theme').onclick=()=>{saveLocal('comic:light',document.documentElement.classList.toggle('light'));syncThemeColor();};
@@ -1369,7 +1370,8 @@ setInterval(()=>{if((state.tab==='downloads'||state.activeTasks)&&!document.hidd
 if(matchMedia('(pointer:coarse)').matches&&document.activeElement===$('keyword'))$('keyword').blur();
 // All deferred feature scripts must be ready before restoring a deep-linked tab.
 const appReady=new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}))
-  .then(()=>run(async()=>{await loadSources();await loadLibrary();refreshTaskDot();}));
+  .then(()=>run(async()=>{await loadSources();await loadLibrary();refreshTaskDot();}))
+  .finally(endBooting);
 appReady.then(()=>run(async()=>{
   try{await migrateLocalReading();}catch(e){toast(`旧阅读记录导入失败，下次打开页面时重试：${e.message}`,{tone:'error'});}
   await loadReading();state.readingLoaded=true;
