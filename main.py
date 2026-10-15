@@ -276,6 +276,15 @@ def create_app(store=None, sources=None):
             raise ComicApiError("当前禁漫插件不支持加入收藏", 400, "unsupported", "jm")
         return await service.call("jm", "add_favorite", comic_id)
 
+    @app.delete("/api/jm/favorites/{comic_id}")
+    async def remove_jm_favorite(comic_id: str):
+        if not re.fullmatch(r"[0-9]{1,20}", comic_id) or int(comic_id) < 1:
+            raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
+        plugin = jm_sync.require_account()
+        if "remove_favorite" not in plugin.capabilities:
+            raise ComicApiError("当前禁漫插件不支持取消收藏", 400, "unsupported", "jm")
+        return await service.call("jm", "remove_favorite", comic_id)
+
     @app.get("/api/bika/favorites")
     async def bika_favorites(page: int = Query(1, ge=1, le=1000),
                              sort: str = Query("dd", pattern=r"^(dd|da|ld|vd)$")):
@@ -296,6 +305,12 @@ def create_app(store=None, sources=None):
         if "add_favorite" not in service.source("bika").capabilities:
             raise ComicApiError("当前哔咔插件不支持加入收藏", 400, "unsupported", "bika")
         return await service.call("bika", "add_favorite", comic_id)
+
+    @app.delete("/api/bika/favorites/{comic_id}")
+    async def remove_bika_favorite(comic_id: str):
+        if "remove_favorite" not in service.source("bika").capabilities:
+            raise ComicApiError("当前哔咔插件不支持取消收藏", 400, "unsupported", "bika")
+        return await service.call("bika", "remove_favorite", comic_id)
 
     def sync_routes(sync):
         prefix = f"/api/{sync.source}/sync"

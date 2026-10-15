@@ -24,10 +24,10 @@ class Element {
 function harness() {
   const state={tab:'browse',books:[],sources:[{id:'jm',capabilities:['favorites','add_favorite'],account:{authenticated:true}}]};
   const calls=[],toasts=[],bindings=[],roots={'detail-body':new Element('div'),'detail-title':new Element('div')};
-  let refreshes=0;
-  const context=vm.createContext({state,document:{createElement:tag=>new Element(tag)},$:id=>roots[id],enc:encodeURIComponent,
+  let refreshes=0;const asks=[];
+  const context=vm.createContext({state,asks,ask:async options=>{asks.push(options);return context.confirmAnswer!==false;},document:{createElement:tag=>new Element(tag)},$:id=>roots[id],enc:encodeURIComponent,
     sourcePlugin:id=>state.sources.find(source=>source.id===id),sourceName:id=>id,svgIcon:name=>`<svg>${name}</svg>`,
-    api:async(path,options)=>{calls.push({path,options});return options?.method==='POST'?{success:true,favorited:true,already_favorited:false}:{comic_id:'123',favorited:false};},
+    api:async(path,options)=>{calls.push({path,options});return options?.method==='POST'?{success:true,favorited:true,already_favorited:false}:options?.method==='DELETE'?{success:true,favorited:false,already_favorited:true}:{comic_id:'123',favorited:false};},
     toast:(message,options)=>toasts.push({message,options}),loadJmFavorites:async()=>{refreshes++;},
     bindButton:id=>{const button=new Element('button');button.textContent='绑定 JM 账号';button.onclick=()=>bindings.push(id);return button;},
     inLibrary:()=>false,readLocal:()=>null,readingLast:()=>null,renderComicLabels:()=>new Element('div'),
@@ -112,12 +112,26 @@ test('成功调用独立 POST，不写本地书库，重复点击仍由服务器
   const posts=h.calls.filter(call=>call.options.method==='POST');
   assert.equal(posts[0].path,'/api/jm/favorites/123');assert.deepEqual(h.state.books,[]);
   assert.equal(h.toasts[0].message,'已加入 JM 收藏');
+  h.context.confirmAnswer=false;await control.onclick();
+  assert.equal(h.context.asks.length,1);assert.equal(h.calls.filter(call=>call.options.method==='DELETE').length,0);assert.equal(control.textContent,'已收藏');
+  h.context.confirmAnswer=true;await control.onclick();
+  const deletes=h.calls.filter(call=>call.options.method==='DELETE');
+  assert.equal(deletes.length,1);assert.equal(deletes[0].path,'/api/jm/favorites/123');
+  assert.equal(control.textContent,'加入 JM 收藏');assert.equal(h.toasts[1].message,'已从 JM 收藏中取消');
   await control.onclick();assert.equal(h.calls.filter(call=>call.options.method==='POST').length,2);
+});
+
+test('再次点击已收藏取消 JM 收藏，远端已不在收藏中也显示未收藏并刷新收藏页',async()=>{
+  const h=harness();h.state.tab='jm-favorites';
+  h.context.api=async(_path,options={})=>options.method==='DELETE'?{success:true,favorited:false,already_favorited:false}:{comic_id:'123',favorited:true};
+  const control=await open(h);assert.equal(control.textContent,'已收藏');
+  await control.onclick();
+  assert.equal(h.toasts[0].message,'漫画不在 JM 收藏中');assert.equal(h.refreshes,1);assert.equal(control.textContent,'加入 JM 收藏');
 });
 
 test('已经收藏也显示成功，当前收藏页在成功后刷新',async()=>{
   const h=harness();h.state.tab='jm-favorites';
-  h.context.api=async()=>({success:true,favorited:true,already_favorited:true});
+  h.context.api=async(_path,options={})=>options.method==='POST'?{success:true,favorited:true,already_favorited:true}:{favorited:false};
   const control=await open(h);await control.onclick();
   assert.equal(h.toasts[0].message,'漫画已在 JM 收藏中');assert.equal(h.refreshes,1);assert.equal(control.textContent,'已收藏');
 });
@@ -137,7 +151,7 @@ test('添加期间禁用按钮，详情切换后的迟到响应不改动新漫�
   const h=harness(),control=await open(h);let resolve;
   h.context.api=()=>new Promise(done=>{resolve=done;});
   const pending=control.onclick();
-  assert.equal(control.disabled,true);assert.equal(control.textContent,'读取 JM 收藏…');
+  await flush();assert.equal(control.disabled,true);assert.equal(control.textContent,'正在加入 JM 收藏…');
   h.state.detail={...detail,id:'456'};
   resolve({success:true,favorited:true});await pending;
   assert.equal(control.disabled,false);assert.equal(h.state.detail.id,'456');assert.equal(h.state.detail.favorited,undefined);

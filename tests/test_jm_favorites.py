@@ -495,3 +495,60 @@ def test_add_favorite_api_preserves_unknown_and_conflict_errors(favorite_client)
         remote.failure = "conflict"
         result = web.post("/api/jm/favorites/123")
         assert result.status_code == 409 and result.json()["error"]["code"] == "favorite_conflict"
+
+
+def test_remove_favorite_checks_live_state_and_is_idempotent(favorite_client):
+    client, remote, _, store = favorite_client
+    owner = client._favorite_owner()
+    result = client.remove_favorite("0121")
+    assert result == {"success": True, "comic_id": "121", "favorited": False, "already_favorited": True}
+    assert "121" not in remote.ids and len(remote.posts) == 1
+    assert store.jm_favorite_status(owner, "121") is False
+    assert client.remove_favorite("121") == {"success": True, "comic_id": "121", "favorited": False,
+                                             "already_favorited": False}
+    assert len(remote.posts) == 1
+
+
+def test_remove_favorite_conflict_and_unknown_are_not_replayed(favorite_client):
+    client, remote, _, store = favorite_client
+    remote.failure = "network"
+    with pytest.raises(ComicApiError) as error:
+        client.remove_favorite("121")
+    assert error.value.code == "favorite_unknown" and len(remote.posts) == 1
+    assert store.jm_favorite_status(client._favorite_owner(), "121") is None
+    remote.failure = ""
+
+    def flip_to_add(method, url, **kwargs):
+        if method == "POST":
+            remote.calls.append((method, url, kwargs))
+            return response({"status": "ok", "type": "add"})
+        return remote.request(method, url, **kwargs)
+
+    client.request = flip_to_add
+    with pytest.raises(ComicApiError) as error:
+        client.remove_favorite("121")
+    assert error.value.code == "favorite_conflict" and len(remote.posts) == 2
+    assert store.jm_favorite_status(client._favorite_owner(), "121") is True
+
+
+def test_remove_favorite_api(favorite_client):
+    from main import create_app
+    _, remote, plugin, store = favorite_client
+    with TestClient(create_app(store, {"jm": plugin})) as web:
+        assert "remove_favorite" in web.get("/api/sources").json()["sources"][0]["capabilities"]
+        result = web.delete("/api/jm/favorites/121")
+        assert result.status_code == 200 and result.json()["favorited"] is False
+        assert web.get("/api/jm/favorites/121").json()["favorited"] is False
+        assert web.delete("/api/jm/favorites/abc").status_code == 422
+        plugin.capabilities = [cap for cap in plugin.capabilities if cap != "remove_favorite"]
+        assert web.delete("/api/jm/favorites/120").status_code == 400
+        assert len(remote.posts) == 1 and "120" in remote.ids
+
+
+def test_remove_ignores_stale_local_state_and_never_toggles_absent_comic(favorite_client):
+    client, remote, _, store = favorite_client
+    owner = client._favorite_owner()
+    store.set_jm_favorite(owner, "500", True)
+    assert client.remove_favorite("500")["already_favorited"] is False
+    assert not remote.posts and "500" not in remote.ids
+    assert store.jm_favorite_status(owner, "500") is False

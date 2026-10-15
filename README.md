@@ -178,7 +178,7 @@ docker compose up -d --build
 | --- | --- | --- |
 | GET | `/api/jm/favorites` | JM 收藏：`page`、`folder_id`（0 为全部）、`order=mr\|mp` |
 | GET | `/api/bika/favorites` | 哔咔收藏：`page`、`sort=dd\|da\|ld\|vd` |
-| GET / POST | `/api/{jm\|bika}/favorites/{comic_id}` | 本地登记的收藏状态／加入云收藏 |
+| GET / POST / DELETE | `/api/{jm\|bika}/favorites/{comic_id}` | 本地登记的收藏状态／加入云收藏／取消云收藏 |
 
 **收藏图片同步**（`{s}` 为 `jm` 或 `bika`）
 

@@ -353,3 +353,57 @@ def test_favorites_api_manifest_validation_and_no_store_status(favorite_client):
         assert web.post(path).status_code == 401
         assert web.get("/api/bika/favorites").status_code == 401
         assert len(remote.posts) == 1
+
+
+def test_remove_favorite_checks_live_detail_and_is_idempotent(favorite_client):
+    client, remote, _, store = favorite_client
+    value = comic_id(10)
+    remote.ids.add(value)
+    result = client.remove_favorite(value.upper())
+    assert result == {"success": True, "comic_id": value, "favorited": False, "already_favorited": True}
+    assert value not in remote.ids and len(remote.posts) == 1
+    assert client.favorite_status(value)["favorited"] is False
+    assert client.remove_favorite(value)["already_favorited"] is False
+    assert len(remote.posts) == 1
+
+
+def test_remove_favorite_unexpected_action_is_conflict(favorite_client, monkeypatch):
+    client, remote, _, _ = favorite_client
+    value = comic_id(10)
+    remote.ids.add(value)
+    request = remote.request
+
+    def wrong_action(method, url, **kwargs):
+        if method == "POST":
+            remote.calls.append((method, url, kwargs))
+            return response({"data": {"action": "favourite"}})
+        return request(method, url, **kwargs)
+
+    monkeypatch.setattr(client, "request", wrong_action)
+    with pytest.raises(ComicApiError) as error:
+        client.remove_favorite(value)
+    assert error.value.code == "favorite_conflict"
+    assert client.favorite_status(value)["favorited"] is True
+
+
+def test_remove_favorite_api(favorite_client):
+    from main import create_app
+    client, remote, plugin, store = favorite_client
+    value = comic_id(10)
+    remote.ids.add(value)
+    with TestClient(create_app(store, {"bika": plugin})) as web:
+        assert "remove_favorite" in web.get("/api/sources").json()["sources"][0]["capabilities"]
+        assert web.delete(f"/api/bika/favorites/{value}").json()["favorited"] is False
+        assert web.delete("/api/bika/favorites/bad").status_code == 422
+        plugin.capabilities = [cap for cap in plugin.capabilities if cap != "remove_favorite"]
+        assert web.delete(f"/api/bika/favorites/{value}").status_code == 400
+        assert len(remote.posts) == 1
+
+
+def test_remove_ignores_stale_local_state_and_never_toggles_absent_comic(favorite_client):
+    client, remote, _, store = favorite_client
+    value = comic_id(20)
+    store.set_bika_favorite(client._favorite_owner(), value, True)
+    assert client.remove_favorite(value)["already_favorited"] is False
+    assert not remote.posts and value not in remote.ids
+    assert client.favorite_status(value)["favorited"] is False

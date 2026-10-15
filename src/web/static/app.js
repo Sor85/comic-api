@@ -15,7 +15,7 @@ const BROWSE_ORDER = ['latest', 'category', 'leaderboard', 'random'];
 const TAB_LABELS = {browse:'发现漫画',library:'我的书库',downloads:'下载任务','jm-favorites':'JM 收藏','bika-favorites':'哔咔收藏'};
 const statuses = {queued:'排队中',running:'下载中',cancelling:'正在取消',cancelled:'已取消',failed:'失败',completed:'已完成',fetching:'获取章节',downloading:'下载图片',packaging:'打包 PDF',interrupted:'重启中断'};
 const TONES = {queued:'muted',running:'info',cancelling:'warn',cancelled:'muted',failed:'danger',interrupted:'danger',completed:'ok'};
-const CAP_LABELS = {search:'搜索',latest:'最新',category:'分类',leaderboard:'排行',random:'随机',login:'账号',favorites:'收藏夹',add_favorite:'加入收藏'};
+const CAP_LABELS = {search:'搜索',latest:'最新',category:'分类',leaderboard:'排行',random:'随机',login:'账号',favorites:'收藏夹',add_favorite:'加入收藏',remove_favorite:'取消收藏'};
 
 const icons = {
   star:'<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
@@ -894,17 +894,19 @@ function cloudFavoriteButton(detail){
   if(!(plugin.account?.authenticated||plugin.account?.configured)){const bind=bindButton(source);bind.title=`加入${space}${name}需要绑定账号`;return bind;}
   let confirmed=null,loaded=false;
   const path=`/api/${enc(source)}/favorites/${enc(detail.id)}`;
-  const sync=busy=>{control.innerHTML=svgIcon(confirmed?'check':'star');control.append(node('span',busy?`读取${space}${name}…`:!loaded?'收藏状态未确认':confirmed?'已收藏':`加入${space}${name}`));control.classList.toggle('on',confirmed===true);control.title=loaded&&confirmed===null?'本地收藏表尚无此漫画的状态，添加前实时检查远端；不提供取消收藏':`${account}收藏与本地书库独立；状态读取失败时点击重试，不提供取消收藏`;};
+  const sync=busy=>{control.innerHTML=svgIcon(confirmed?'check':'star');control.append(node('span',busy?(typeof busy==='string'?busy:`读取${space}${name}…`):!loaded?'收藏状态未确认':confirmed?'已收藏':`加入${space}${name}`));control.classList.toggle('on',confirmed===true);control.title=loaded&&confirmed===null?'本地收藏表尚无此漫画的状态，添加前实时检查远端':confirmed?`再次点击从${space}${name}中取消；${account}收藏与本地书库独立`:`${account}收藏与本地书库独立；状态读取失败时点击重试`;};
   const report=error=>toast(error.message,{tone:'error',...(error.code==='login_required'?{action:{label:`绑定${space}${account}`,run:()=>bindButton(source).onclick()}}:{})});
   const control=button('',async()=>{
     if(sourcePlugin(source)?.enabled===false){report(new Error('图源已关闭，重新启用入口位于「设置 → 图源管理」'));return;}
     if(!loaded){await loadStatus();return;}
-    sync(true);
+    const remove=confirmed===true;
+    if(remove&&!await ask({title:'取消收藏',message:`确定将《${detail.title}》从${space}${name}中移除吗？`,ok:'取消收藏',danger:true}))return;
+    sync(remove?'正在取消收藏…':`正在加入${space}${name}…`);
     try{
-      const data=await api(path,{method:'POST'});
-      if(!data.success||data.favorited!==true)throw new Error(`${source==='jm'?'禁漫':'哔咔'}未确认加入收藏`);
-      confirmed=true;loaded=true;
-      toast(data.already_favorited?`漫画已在${space}${name}中`:`已加入${space}${name}`);
+      const data=await api(path,{method:remove?'DELETE':'POST'});
+      if(!data.success||data.favorited!==!remove)throw new Error(`${source==='jm'?'禁漫':'哔咔'}未确认${remove?'取消':'加入'}收藏`);
+      confirmed=!remove;loaded=true;
+      toast(remove?(data.already_favorited?`已从${space}${name}中取消`:`漫画不在${space}${name}中`):(data.already_favorited?`漫画已在${space}${name}中`:`已加入${space}${name}`));
       if(state.tab===`${source}-favorites`)await (source==='jm'?loadJmFavorites():loadBikaFavorites()).catch(report);
     }catch(error){confirmed=null;loaded=false;report(error);}
     finally{sync(false);}

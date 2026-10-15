@@ -497,16 +497,23 @@ class JmClient(BaseClient):
         return {"comic_id": comic_id, "favorited": self.store.jm_favorite_status(owner, comic_id)}
 
     def add_favorite(self, comic_id: str) -> dict:
+        return self._set_favorite(comic_id, True)
+
+    def remove_favorite(self, comic_id: str) -> dict:
+        return self._set_favorite(comic_id, False)
+
+    def _set_favorite(self, comic_id: str, wanted: bool) -> dict:
         comic_id = self._favorite_id(comic_id)
-        # Serialize preflight + toggle with login/logout and other additions.
+        verb, expected = ("加入", "add") if wanted else ("取消", "remove")
+        # Serialize preflight + toggle with login/logout and other favorite changes.
         with self._auth_lock:
             self.ensure_authenticated()
-            # Local absence must never trigger the upstream toggle without preflight.
+            # The upstream endpoint toggles, so local state must never drive it without a live preflight.
             self._favorite_pages.clear()
             ids = self._favorite_ids()
             owner = self._favorite_owner()
-            already_favorited = comic_id in ids
-            if not already_favorited:
+            current = comic_id in ids
+            if current != wanted:
                 self.store.set_jm_favorite(owner, comic_id, None)
                 try:
                     response = self.jm_request("/favorite", method="POST", data={"aid": comic_id},
@@ -514,19 +521,20 @@ class JmClient(BaseClient):
                 except Exception as exc:
                     if isinstance(exc, ComicApiError) and exc.code in ("login_required", "busy"):
                         raise
-                    raise ComicApiError("禁漫收藏结果未确认，再次添加前将重新检查收藏状态", 502,
+                    raise ComicApiError(f"禁漫{verb}收藏结果未确认，再次操作前将重新检查收藏状态", 502,
                                         "favorite_unknown", "jm") from exc
                 data = response.get("data", response) if isinstance(response, dict) else response
                 if not isinstance(data, dict) or data.get("status") != "ok" or data.get("type") not in ("add", "remove"):
-                    raise ComicApiError("禁漫未确认加入收藏，再次添加前将重新检查收藏状态", 502,
+                    raise ComicApiError(f"禁漫未确认{verb}收藏，再次操作前将重新检查收藏状态", 502,
                                         "favorite_unknown", "jm")
-                if data["type"] == "remove":
-                    self.store.set_jm_favorite(owner, comic_id, False)
-                    raise ComicApiError("上游返回取消收藏结果，收藏状态存在并发冲突，需在 JM 核对", 409,
+                if data["type"] != expected:
+                    self.store.set_jm_favorite(owner, comic_id, not wanted)
+                    opposite = "取消" if wanted else "加入"
+                    raise ComicApiError(f"上游返回{opposite}收藏结果，收藏状态存在并发冲突，需在 JM 核对", 409,
                                         "favorite_conflict", "jm")
-            self.store.set_jm_favorite(owner, comic_id, True)
-            return {"success": True, "comic_id": comic_id, "favorited": True,
-                    "already_favorited": already_favorited}
+            self.store.set_jm_favorite(owner, comic_id, wanted)
+            return {"success": True, "comic_id": comic_id, "favorited": wanted,
+                    "already_favorited": current}
 
     def search(self, keyword: str, page: int = 1) -> List[Dict[str, Any]]:
         """搜索漫画：GET /search；第 1 页输入纯数字或 jm 前缀 ID 时直接取详情"""

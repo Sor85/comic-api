@@ -330,8 +330,15 @@ class BikaClient(BaseClient):
             return {"comic_id": comic_id, "favorited": self.store.bika_favorite_status(owner, comic_id)}
 
     def add_favorite(self, comic_id: str) -> dict:
+        return self._set_favorite(comic_id, True)
+
+    def remove_favorite(self, comic_id: str) -> dict:
+        return self._set_favorite(comic_id, False)
+
+    def _set_favorite(self, comic_id: str, wanted: bool) -> dict:
         comic_id = self._favorite_id(comic_id)
-        # Serialize the live check and toggle with login/logout and other additions.
+        verb, expected = ("加入", "favourite") if wanted else ("取消", "un_favourite")
+        # Serialize the live check and toggle with login/logout and other favorite changes.
         with self._auth_lock:
             self.ensure_authenticated()
             owner = self._favorite_owner()
@@ -342,30 +349,31 @@ class BikaClient(BaseClient):
             comic = data.get("comic") if isinstance(data, dict) else None
             if (not isinstance(comic, dict) or str(comic.get("_id", "")).lower() != comic_id
                     or not isinstance(comic.get("isFavourite"), bool)):
-                raise ComicApiError("哔咔未返回有效收藏状态，未执行添加", 502, "invalid_response", "bika")
-            already_favorited = comic["isFavourite"]
+                raise ComicApiError(f"哔咔未返回有效收藏状态，未执行{verb}", 502, "invalid_response", "bika")
+            current = comic["isFavourite"]
             self._favorite_pages.clear()
-            self.store.set_bika_favorite(owner, comic_id, already_favorited)
-            if not already_favorited:
+            self.store.set_bika_favorite(owner, comic_id, current)
+            if current != wanted:
                 self.store.set_bika_favorite(owner, comic_id, None)
                 try:
                     response = self.bika_request(f"comics/{comic_id}/favourite", method="POST", _retry_safe=False)
                 except Exception as exc:
                     if isinstance(exc, ComicApiError) and exc.code in ("login_required", "busy"):
                         raise
-                    raise ComicApiError("哔咔收藏结果未确认，再次添加前将重新检查远端状态", 502,
+                    raise ComicApiError(f"哔咔{verb}收藏结果未确认，再次操作前将重新检查远端状态", 502,
                                         "favorite_unknown", "bika") from exc
                 data = response.get("data") if isinstance(response, dict) else None
                 if not isinstance(data, dict) or data.get("action") not in ("favourite", "un_favourite"):
-                    raise ComicApiError("哔咔未确认加入收藏，再次添加前将重新检查远端状态", 502,
+                    raise ComicApiError(f"哔咔未确认{verb}收藏，再次操作前将重新检查远端状态", 502,
                                         "favorite_unknown", "bika")
-                if data["action"] == "un_favourite":
-                    self.store.set_bika_favorite(owner, comic_id, False)
-                    raise ComicApiError("上游返回取消收藏结果，收藏状态存在并发冲突，需在哔咔核对", 409,
+                if data["action"] != expected:
+                    self.store.set_bika_favorite(owner, comic_id, not wanted)
+                    opposite = "取消" if wanted else "加入"
+                    raise ComicApiError(f"上游返回{opposite}收藏结果，收藏状态存在并发冲突，需在哔咔核对", 409,
                                         "favorite_conflict", "bika")
-            self.store.set_bika_favorite(owner, comic_id, True)
-            return {"success": True, "comic_id": comic_id, "favorited": True,
-                    "already_favorited": already_favorited}
+            self.store.set_bika_favorite(owner, comic_id, wanted)
+            return {"success": True, "comic_id": comic_id, "favorited": wanted,
+                    "already_favorited": current}
 
     def search(self, keyword: str, page: int = 1, sort: str = "dd", category: str = "") -> List[Dict[str, Any]]:
         """搜索漫画"""
