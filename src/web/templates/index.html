@@ -266,11 +266,13 @@
       <div class="tip-sources" hidden><p id="tip-fav-local-check">本地检查按同步范围核对已有漫画的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。检查结果按漫画保存，收藏页和漫画详情显示本地状态；标记为异常的漫画可通过「修复异常漫画」处理：标题相同、仅「第N話」序号不同的章节目录唯一时改名对上，保留有效图片、补齐缺失页，损坏或多余的图片移入保存目录下的 .comic-api-repair 备份目录。</p></div>
     </div>
     <div class="modal-foot sync-foot">
-      <p class="sync-foot-note">不修改远端收藏，不删除本地文件；修复时替换下的文件移入备份目录</p>
-      <button id="fav-sync-repair" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5"/></svg><span>修复异常漫画</span></button>
-      <button id="fav-sync-check-local" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="m8 12 3 3 5-6"/></svg><span>检查本地漫画</span></button>
-      <button id="fav-sync-run" class="primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>同步收藏</span></button>
-      <button id="fav-sync-cancel" class="danger-soft" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>停止本次任务</span></button>
+      <p class="sync-foot-note">不改远端收藏，不删本地文件</p>
+      <div class="sync-foot-actions">
+        <button id="fav-sync-repair" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5"/></svg><span>修复异常漫画</span></button>
+        <button id="fav-sync-check-local" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="m8 12 3 3 5-6"/></svg><span>检查本地漫画</span></button>
+        <button id="fav-sync-run" class="primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>同步收藏</span></button>
+        <button id="fav-sync-cancel" class="danger-soft" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>停止本次任务</span></button>
+      </div>
     </div>
   </dialog>
   <dialog id="fav-sync-settings" class="modal modal-wide fav-sync-dialog" aria-labelledby="fav-sync-settings-title">

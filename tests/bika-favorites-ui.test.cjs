@@ -189,16 +189,18 @@ test('哔咔收藏页头提供本地同步入口，与 JM 共用同步窗口',()
   assert.match(favoriteSync,/\/api\/\$\{source\}\/sync\/run/);
 });
 
-test('收藏卡片按本地检查结果显示已下载或本地异常角标，未下载不显示',async()=>{
+test('收藏卡片在作者行末尾附加本地状态提示（不画在封面上），未下载不显示',async()=>{
   const h=harness(),ids=['00000000000000000000000a','00000000000000000000000b','00000000000000000000000c'];
   const items=ids.map((id,index)=>({...detail,id,title:`漫画 ${index}`}));
   const local={[ids[0]]:{status:'downloaded',images:12,path:'/data/a',message:''},[ids[1]]:{status:'error',images:0,path:'/data/b',message:'章节图片数量不符'},[ids[2]]:{status:'missing',images:0,path:'',message:''}};
-  h.context.card=item=>{const el=new Element('article'),cover=new Element('div');cover.className='cover';el.append(cover);el.item=item;return el;};
+  h.context.card=item=>{const el=new Element('article'),cover=new Element('div'),authors=new Element('span');cover.className='cover';authors.className='comic-authors';el.append(cover,authors);el.item=item;return el;};
   h.context.api=async path=>{h.calls.push({path});return path.includes('/sync/local-status')?{root:'/data',counts:{},items:local}:page(items);};
   await h.context.loadBikaFavorites();await flush();await flush();
   const query=h.calls.find(call=>call.path.includes('/sync/local-status')).path;
   assert.match(query,/^\/api\/bika\/sync\/local-status\?ids=/);assert.equal(decodeURIComponent(query.split('ids=')[1]),ids.join(','));
-  const badges=h.roots['bika-favorites-books'].children.map(card=>card.querySelectorAll('.cover-local')[0]);
+  const cards=h.roots['bika-favorites-books'].children;
+  assert.ok(cards.every(card=>!card.querySelectorAll('.cover')[0].querySelectorAll('.card-local').length));
+  const badges=cards.map(card=>card.querySelectorAll('.comic-authors')[0].querySelectorAll('.card-local')[0]);
   assert.equal(badges[0].textContent,'已下载');assert.ok(badges[0].className.includes('ok'));
   assert.equal(badges[1].textContent,'本地异常');assert.match(badges[1].dataset.tipText,/章节图片数量不符/);
   assert.equal(badges[2],undefined);

@@ -50,12 +50,14 @@ function syncableCard(item,source,view,onSelect){
       {label:check.checked?'取消选择':'选择',icon:svgIcon('check'),act:()=>{check.checked=!check.checked;check.onchange();}},
     ],onPick:entry=>entry.act()});
   });
+  // Local state is a quiet hint next to the authors, revealed on hover or focus rather than drawn on the cover.
   const local=favSync[source]?.local?.[id];
   if(local&&local.status!=='missing'){
-    const meta=LOCAL_STATUS[local.status],badge=node('span',undefined,`cover-local ${meta.tone}`);
-    badge.innerHTML=svgIcon(meta.icon);badge.append(node('span',meta.label));
-    badge.dataset.tipText=local.status==='error'?`本地检查异常：${local.message||'原因未记录'}`:`本地 ${local.images} 张 · ${local.path}`;
-    box.querySelector?.('.cover')?.prepend(badge);
+    const meta=LOCAL_STATUS[local.status],hint=node('span',undefined,`card-local ${meta.tone}`);
+    hint.innerHTML=svgIcon(meta.icon);hint.append(node('span',meta.label));
+    hint.dataset.tipText=local.status==='error'?`本地检查异常：${local.message||'原因未记录'}`:`本地 ${local.images} 张 · ${local.path}`;
+    const authors=box.querySelector?.('.comic-authors');
+    if(authors){box.classList.add('has-local');authors.append(hint);}else box.append(hint);
   }
   box.append(label,syncOne);return box;
 }
