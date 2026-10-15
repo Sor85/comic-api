@@ -21,13 +21,13 @@ class Element {
 
 // Evaluate the real render functions without booting the app, polling or opening a browser.
 const app = readFileSync(join(__dirname, '../src/web/static/app.js'), 'utf8');
-const sync = readFileSync(join(__dirname, '../src/web/static/jm-sync.js'), 'utf8');
+const sync = readFileSync(join(__dirname, '../src/web/static/favorite-sync.js'), 'utf8');
 const context = {document: {createElement: tag => new Element(tag)}};
 vm.createContext(context);
 vm.runInContext(
   app.slice(app.indexOf('function node('), app.indexOf('function button(')) +
-  sync.slice(sync.indexOf('const JM_SYNC_LABELS'), sync.indexOf('async function loadJmFavoritesView(')) +
-  sync.slice(sync.indexOf('function jmRunCard('), sync.indexOf('async function loadJmStatus(')),
+  sync.slice(sync.indexOf('const JM_SYNC_LABELS'), sync.indexOf('async function loadSyncSettings(')) +
+  sync.slice(sync.indexOf('function jmRunCard('), sync.indexOf('function syncProgressLabel(')),
   context,
 );
 

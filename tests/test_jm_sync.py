@@ -513,9 +513,9 @@ def test_sync_api_and_static_ui(jm_client):
 
 def test_directory_switch_warning_is_visible_before_changing_settings(jm_client):
     html = jm_client.get("/").text
-    start = html.index('<div id="jm-sync-switch-note"')
+    start = html.index('<div id="fav-sync-switch-note"')
     notice = html[start:html.index("</div>", start)]
-    assert 'role="note"' in notice and 'aria-labelledby="jm-sync-switch-title"' in notice
+    assert 'role="note"' in notice and 'aria-labelledby="fav-sync-switch-title"' in notice
     assert "hidden" not in notice
     assert "每次保存设置都会立即同步一次" in notice and "不会等待下一个周期" in notice
     assert "包括仅修改目录规则或下载目录" in notice and "之后按设定间隔运行" in notice

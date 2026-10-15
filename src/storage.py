@@ -78,6 +78,21 @@ class Store:
                     size INTEGER NOT NULL, digest TEXT NOT NULL,
                     PRIMARY KEY(root, album_id, chapter_id, page), UNIQUE(root, path)
                 );
+                CREATE TABLE IF NOT EXISTS bika_sync_runs (
+                    id TEXT PRIMARY KEY, state TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS bika_sync_files (
+                    scope TEXT NOT NULL, album_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                    page INTEGER NOT NULL, image_key TEXT NOT NULL, path TEXT NOT NULL,
+                    size INTEGER NOT NULL DEFAULT 0, digest TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(scope, album_id, chapter_id, page)
+                );
+                CREATE TABLE IF NOT EXISTS bika_sync_local_files (
+                    root TEXT NOT NULL, album_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                    page INTEGER NOT NULL, image_key TEXT NOT NULL, path TEXT NOT NULL,
+                    size INTEGER NOT NULL, digest TEXT NOT NULL,
+                    PRIMARY KEY(root, album_id, chapter_id, page), UNIQUE(root, path)
+                );
                 CREATE TABLE IF NOT EXISTS jm_favorites (
                     owner TEXT NOT NULL, comic_id TEXT NOT NULL,
                     favorited INTEGER CHECK(favorited IN (0,1)),
@@ -112,6 +127,8 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS jm_sync_files_path ON jm_sync_files(path);
                 CREATE INDEX IF NOT EXISTS jm_sync_local_files_path ON jm_sync_local_files(path);
+                CREATE INDEX IF NOT EXISTS bika_sync_files_path ON bika_sync_files(path);
+                CREATE INDEX IF NOT EXISTS bika_sync_local_files_path ON bika_sync_local_files(path);
                 CREATE INDEX IF NOT EXISTS reading_comics_updated ON reading_comics(updated_at);
                 PRAGMA user_version=7;
             """)

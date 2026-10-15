@@ -176,12 +176,12 @@ function refreshSourceViews(){
     if($('detail-dialog').open)$('detail-dialog').close();state.detail=state.detailItem=null;
   }
   ++jm.request;jm.items=[];jm.hasNext=false;jm.loadedKey='';jm.selected.clear();syncJmSelection();
-  ++bikaFavorites.request;bikaFavorites.loadedKey='';bikaFavorites.items=[];bikaFavorites.hasNext=false;
+  ++bikaFavorites.request;bikaFavorites.loadedKey='';bikaFavorites.items=[];bikaFavorites.hasNext=false;bikaFavorites.selected?.clear();
   for(const source of ['jm','bika']){$(`${source}-favorites-books`).replaceChildren();$(`${source}-favorites-count`).textContent='';$(`${source}-favorites-pager`).hidden=true;}
   syncSourceNavigation();renderQuick();renderContinue();filterBooks();normalizeSearch();
   if(state.view==='results')run(state.search?loadSearch:loadDiscover);else run(loadShelves);
   if(state.tab==='jm-favorites')run(loadJmFavoritesView);
-  if(state.tab==='bika-favorites')run(loadBikaFavorites);
+  if(state.tab==='bika-favorites')run(loadBikaFavoritesView);
 }
 function needsLogin(p){return !!p&&(p.capabilities||[]).includes('login')&&!p.account?.authenticated&&!p.account?.configured;}
 // Default to a source that can list without an account, so discovery is never empty on first visit.
@@ -649,7 +649,7 @@ function showTab(tab,updateHistory=true,dismissSettings=true) {
   if(tab==='library')run(loadLibrary);
   if(tab==='downloads')run(loadTasks);
   if(tab==='jm-favorites')run(loadJmFavoritesView);
-  if(tab==='bika-favorites')run(loadBikaFavorites);
+  if(tab==='bika-favorites')run(loadBikaFavoritesView);
 }
 function card(item,{showSource=true,library=false,history=null}={}){
   const el=node('article',undefined,'card'+(history?' card-history':'')+(library?' card-fixed card-library':''));
@@ -1041,7 +1041,7 @@ function renderSourceSettings(){
   const links=node('div',undefined,'group');
   if(plugin.capabilities.includes('login'))links.append(linkRow('key','登录凭证',accountLabel(plugin),()=>{configureAccount();$('credentials-dialog').showModal();}));
   if(plugin.id==='jm'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites'))links.append(linkRow('bookmark','收藏与本地同步','浏览远端收藏夹，按目录规则增量保存图片。',()=>{$('source-settings-dialog').close();showTab('jm-favorites');}));
-  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites'))links.append(linkRow('bookmark','哔咔收藏','浏览账号的全部云端收藏；默认与本地书库独立，可单独开启收藏同步到书库。',()=>{$('source-settings-dialog').close();showTab('bika-favorites');}));
+  if(plugin.id==='bika'&&plugin.enabled!==false&&plugin.capabilities.includes('favorites'))links.append(linkRow('bookmark','收藏与本地同步','浏览账号的全部云端收藏，按目录规则增量保存图片；可单独开启收藏同步到书库。',()=>{$('source-settings-dialog').close();showTab('bika-favorites');}));
   if(links.children.length)section('账号与收藏').append(links);
   if(['jm','bika'].includes(plugin.id)&&plugin.capabilities.includes('favorites'))body.append(favoriteLibrarySettings(plugin));
   if(!(plugin.settings_fields||[]).length&&!plugin.capabilities.includes('login'))body.append(node('p','此图源使用自动服务器配置，无需登录，暂无可修改选项。','callout subtle'));

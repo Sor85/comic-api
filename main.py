@@ -19,9 +19,10 @@ from pydantic import BaseModel, Field
 from src.auth import AuthManager, AuthUpdate, BasicAuthMiddleware
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
+from src.services.bika_sync import BikaSync
 from src.services.downloads import DownloadManager, pdf_password_for
 from src.services.favorites_library_sync import FavoritesLibrarySettings, FavoritesLibrarySync
-from src.services.jm_sync import JmSync, SyncSettings
+from src.services.jm_sync import JmSync
 from src.services.search_dedup import search_result_payload
 from src.storage import Store
 
@@ -119,25 +120,29 @@ def create_app(store=None, sources=None):
     service = AggregatorService(store, sources)
     downloads = DownloadManager(store, service)
     jm_sync = JmSync(store, service)
+    bika_sync = BikaSync(store, service)
+    image_syncs = {"jm": jm_sync, "bika": bika_sync}
     library_sync = FavoritesLibrarySync(store, service)
 
     @asynccontextmanager
     async def lifespan(app):
         await downloads.start()
-        await jm_sync.start()
+        for sync in image_syncs.values():
+            await sync.start()
         await library_sync.start()
         try:
             yield
         finally:
             await library_sync.stop()
-            await jm_sync.stop()
+            for sync in image_syncs.values():
+                await sync.stop()
             await downloads.stop()
 
     app = FastAPI(title="Comic · 图源与书库", version="2.0.0", lifespan=lifespan)
     app.add_middleware(BasicAuthMiddleware, auth=auth)
     app.state.auth = auth
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
-    app.state.jm_sync, app.state.library_sync = jm_sync, library_sync
+    app.state.jm_sync, app.state.bika_sync, app.state.library_sync = jm_sync, bika_sync, library_sync
     app.mount("/static", VersionedStaticFiles(directory=WEB_STATIC), name="static")
 
     @app.exception_handler(ComicApiError)
@@ -179,8 +184,8 @@ def create_app(store=None, sources=None):
         service.set_enabled(source, values.enabled)
         if not values.enabled:
             downloads.cancel_source(source)
-        if source == "jm":
-            jm_sync.source_changed()
+        if source in image_syncs:
+            image_syncs[source].source_changed()
         library_sync.source_changed(source)
         return {"success": True, "source": service.manifest(source)}
 
@@ -192,16 +197,17 @@ def create_app(store=None, sources=None):
             raise ComicApiError("该图源不提供登录", 400, "unsupported", source)
         if any(not values.get(field["name"], "").strip() for field in plugin.login_fields):
             raise ComicApiError("请填写全部登录字段", 422, "invalid_request", source)
-        if source == "jm":
-            jm_sync.guard_account_change()
+        sync = image_syncs.get(source)
+        if sync:
+            sync.guard_account_change()
         try:
             async with library_sync.account_change(source):
                 await service.call(source, "login", values)
-                if source == "jm":
-                    jm_sync.account_changed()
+                if sync:
+                    sync.account_changed()
         finally:
-            if source == "jm":
-                jm_sync.account_changing = False
+            if sync:
+                sync.account_changing = False
         return {"success": True, "account": plugin.account_status()}
 
     @app.put("/api/sources/{source}/settings")
@@ -217,16 +223,17 @@ def create_app(store=None, sources=None):
     async def logout(source: str):
         if "login" not in service.source(source, allow_disabled=True).capabilities:
             raise ComicApiError("该图源不提供登录", 400, "unsupported", source)
-        if source == "jm":
-            jm_sync.guard_account_change()
+        sync = image_syncs.get(source)
+        if sync:
+            sync.guard_account_change()
         try:
             async with library_sync.account_change(source):
                 await service.call(source, "logout")
-                if source == "jm":
-                    jm_sync.account_changed()
+                if sync:
+                    sync.account_changed()
         finally:
-            if source == "jm":
-                jm_sync.account_changing = False
+            if sync:
+                sync.account_changing = False
         return {"success": True}
 
     @app.get("/api/sources/{source}/library-sync")
@@ -290,35 +297,40 @@ def create_app(store=None, sources=None):
             raise ComicApiError("当前哔咔插件不支持加入收藏", 400, "unsupported", "bika")
         return await service.call("bika", "add_favorite", comic_id)
 
-    @app.get("/api/jm/sync/settings")
-    async def jm_sync_settings():
-        return jm_sync.options()
+    def sync_routes(sync):
+        prefix = f"/api/{sync.source}/sync"
 
-    @app.put("/api/jm/sync/settings")
-    async def save_jm_sync_settings(values: SyncSettings):
-        return jm_sync.save_settings(values)
+        @app.get(f"{prefix}/settings", name=f"{sync.source}_sync_settings")
+        async def sync_settings():
+            return sync.options()
 
-    @app.get("/api/jm/sync/directories")
-    async def jm_sync_directories(path: str = Query("", max_length=2048)):
-        return await asyncio.to_thread(jm_sync.paths.browse, path)
+        @app.put(f"{prefix}/settings", name=f"save_{sync.source}_sync_settings")
+        async def save_sync_settings(values: sync.settings_model):
+            return sync.save_settings(values)
 
-    @app.get("/api/jm/sync")
-    async def jm_sync_status():
-        return jm_sync.status()
+        @app.get(f"{prefix}/directories", name=f"{sync.source}_sync_directories")
+        async def sync_directories(path: str = Query("", max_length=2048)):
+            return await asyncio.to_thread(sync.paths.browse, path)
 
-    @app.post("/api/jm/sync/run", status_code=202)
-    async def run_jm_sync(values: SyncInput):
-        if values.album_ids and any(not re.fullmatch(r"[0-9]{1,20}", value) for value in values.album_ids):
-            raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
-        return jm_sync.launch(values.album_ids)
+        @app.get(prefix, name=f"{sync.source}_sync_status")
+        async def sync_status():
+            return sync.status()
 
-    @app.post("/api/jm/sync/check-local", status_code=202)
-    async def check_jm_local():
-        return jm_sync.launch(check_local=True)
+        @app.post(f"{prefix}/run", status_code=202, name=f"run_{sync.source}_sync")
+        async def run_sync(values: SyncInput):
+            album_ids = [sync.normalize_id(value) for value in values.album_ids] if values.album_ids else None
+            return sync.launch(album_ids)
 
-    @app.post("/api/jm/sync/cancel")
-    async def cancel_jm_sync():
-        return jm_sync.cancel()
+        @app.post(f"{prefix}/check-local", status_code=202, name=f"check_{sync.source}_local")
+        async def check_local():
+            return sync.launch(check_local=True)
+
+        @app.post(f"{prefix}/cancel", name=f"cancel_{sync.source}_sync")
+        async def cancel_sync():
+            return sync.cancel()
+
+    for sync in image_syncs.values():
+        sync_routes(sync)
 
     @app.get("/api/sources/{source}/search-categories")
     async def search_categories(source: str):

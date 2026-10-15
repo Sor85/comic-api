@@ -13,6 +13,7 @@ services:
       - AUTH_USERNAME=${AUTH_USERNAME:-}
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
       - JM_DOWNLOAD_ROOTS=${JM_DOWNLOAD_ROOTS:-/app/data/jm-favorites}
+      - BIKA_DOWNLOAD_ROOTS=${BIKA_DOWNLOAD_ROOTS:-/app/data/bika-favorites}
       - BIKA_ACCOUNT=${BIKA_ACCOUNT:-}
       - BIKA_PASSWORD=${BIKA_PASSWORD:-}
       - COPY_API_BASE=${COPY_API_BASE:-https://api.copy3000.com/api/v3}

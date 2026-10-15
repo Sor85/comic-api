@@ -28,7 +28,7 @@ function harness(){
     api:async(path,options)=>{calls.push({path,options});const id=path.split('/')[3];return path==='/api/sources'?{sources:state.sources.map(p=>({...p}))}:{success:true,source:{...state.sources.find(p=>p.id===id),enabled:JSON.parse(options.body).enabled}};},
     needsLogin:()=>false,renderSourceSettings(){},initBrowse(){},showTab:tab=>{state.tab=tab;},renderQuick(){},renderContinue(){},filterBooks(){},syncSearchMode(){},renderFilters(){},
     loadShelves:async()=>loads.push(context.activeSources().map(p=>p.id)),loadSearch:async()=>loads.push('search'),loadDiscover:async()=>loads.push('discover'),
-    loadJmFavoritesView:async()=>loads.push('jm'),loadBikaFavorites:async()=>loads.push('bika'),syncJmSelection(){},
+    loadJmFavoritesView:async()=>loads.push('jm'),loadBikaFavoritesView:async()=>loads.push('bika'),syncJmSelection(){},
     jm:{request:0,items:[],selected:new Set()},bikaFavorites:{request:0,items:[]},chapterPreviews:{stop:()=>loads.push('previews-stop')},closeReader:()=>{root('reader-dialog').close();loads.push('reader-close');},
     pick:(values,value)=>values.some(v=>v.value===value)?value:values[0]?.value||'',BROWSE_ORDER:['latest'],CAP_LABELS:{search:'搜索',favorites:'收藏夹'},
   });

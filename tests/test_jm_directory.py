@@ -195,4 +195,4 @@ def test_plain_rule_setting_and_ui_option(jm_client):
     assert jm_client.put("/api/jm/sync/settings", json=settings).status_code == 200
     assert jm_client.get("/api/jm/sync/settings").json()["settings"]["directory_rule"] == "title_plain"
     assert 'value="title_plain">漫画标题 / 第N話 章节标题</option>' in jm_client.get("/").text
-    assert "漫画标题/第1話 章节标题" in jm_client.get("/static/jm-sync.js").text
+    assert "漫画标题/第1話 章节标题" in jm_client.get("/static/favorite-sync.js").text

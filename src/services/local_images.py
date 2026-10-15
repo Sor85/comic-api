@@ -1,4 +1,4 @@
-"""Local image output for JM sync. Paths are confined to administrator-owned roots."""
+"""Local image output for favorites sync. Paths are confined to administrator-owned roots."""
 import hashlib
 import io
 import os
@@ -45,19 +45,23 @@ def plain_chapter_name(chapter, index):
     return safe_name(f"第{index}話 {title}", max_bytes=None)
 
 
-def numeric_id(value):
+def numeric_id(value, source="jm"):
     value = str(value)
     if not re.fullmatch(r"[0-9]{1,20}", value):
-        raise ComicApiError("禁漫返回了无效编号", 502, "invalid_response", "jm")
+        raise ComicApiError("禁漫返回了无效编号" if source == "jm" else "图源返回了无效编号", 502, "invalid_response", source)
     return value
 
 
 class DownloadPaths:
-    def __init__(self, store):
-        configured = os.environ.get("JM_DOWNLOAD_ROOTS", "")
+    """Download roots come from an administrator-controlled environment variable per source."""
+
+    def __init__(self, store, source="jm", env="JM_DOWNLOAD_ROOTS", default="jm-favorites", comic_id=None):
+        self.source, self.env = source, env
+        self.comic_id = comic_id or (lambda value: numeric_id(value, source))
+        configured = os.environ.get(env, "")
         self.roots = [Path(p.strip()).expanduser().resolve() for p in configured.split(os.pathsep) if p.strip()]
         if not self.roots:
-            self.roots = [(store.root / "jm-favorites").resolve()]
+            self.roots = [(store.root / default).resolve()]
 
     def resolve(self, value):
         value = str(value).replace("\\", "/")
@@ -75,7 +79,7 @@ class DownloadPaths:
                 resolved = path.resolve()
                 if resolved.is_relative_to(root):
                     return resolved
-        raise ComicApiError("目录不在 JM_DOWNLOAD_ROOTS 允许范围内", 422, "invalid_directory")
+        raise ComicApiError(f"目录不在 {self.env} 允许范围内", 422, "invalid_directory")
 
     def browse(self, value=""):
         current = self.resolve(value or self.roots[0])
@@ -105,7 +109,7 @@ class DownloadPaths:
         return path
 
     def album(self, settings, book):
-        album_id = numeric_id(book["id"])
+        album_id = self.comic_id(book["id"])
         root = self.resolve(settings["download_dir"])
         rule = settings["directory_rule"]
         if rule == "id":
@@ -115,7 +119,7 @@ class DownloadPaths:
         elif rule == "title_plain":
             album = safe_name(book["title"], max_bytes=None)
             if len(album.encode("utf-8")) > 255:
-                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", "jm")
+                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", self.source)
         else:
             album = f"{safe_name(book['title'])} [{album_id}]"
             if rule == "author":
@@ -123,7 +127,7 @@ class DownloadPaths:
         return self.resolve(root / album)
 
     def chapter(self, settings, book, chapter, index):
-        chapter_id = numeric_id(chapter["id"])
+        chapter_id = numeric_id(chapter["id"], self.source)
         album = self.album(settings, book)
         rule = settings["directory_rule"]
         if rule == "id":
@@ -133,13 +137,13 @@ class DownloadPaths:
         elif rule == "title_plain":
             episode = plain_chapter_name(chapter, index)
             if len(episode.encode("utf-8")) > 255:
-                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", "jm")
+                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", self.source)
         else:
             episode = f"{index:03d} - {safe_name(chapter.get('name'))} [{chapter_id}]"
         return self.resolve(album / episode)
 
 
-def encode_image(data, image_format, quality):
+def encode_image(data, image_format, quality, source="jm"):
     """Preserve animated originals; explicit conversion deliberately uses the first frame."""
     try:
         with Image.open(io.BytesIO(data)) as image:
@@ -162,14 +166,14 @@ def encode_image(data, image_format, quality):
                 image.convert("RGBA" if "A" in image.getbands() else "RGB").save(output, "PNG")
             return output.getvalue(), "jpg" if image_format == "jpeg" else image_format
     except (OSError, ValueError, Image.DecompressionBombError) as exc:
-        raise ComicApiError("图片无法解码或转换", 502, "invalid_image", "jm") from exc
+        raise ComicApiError("图片无法解码或转换", 502, "invalid_image", source) from exc
 
 
-def receive_image(plugin, url, chapter_id, settings, signal):
+def receive_image(plugin, url, chapter_id, settings, signal, source="jm"):
     """One sync worker + libcurl receive limit bounds aggregate sync traffic, not reader traffic."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
-        raise ComicApiError("图片地址无效", 502, "invalid_image", "jm")
+        raise ComicApiError("图片地址无效", 502, "invalid_image", source)
     target = ensure_public_url(url)
     rate = settings["speed_limit_kbps"] * 1024
     last_error = None
@@ -186,12 +190,12 @@ def receive_image(plugin, url, chapter_id, settings, signal):
                 allow_redirects=False, max_recv_speed=rate, timeout=(10, 20),
                 _image_target=target.retry(attempt) if target else None) as response:
                 if response.status_code != 200:
-                    raise ComicApiError(f"图片下载失败 (HTTP {response.status_code})", 502, "image_download_failed", "jm")
+                    raise ComicApiError(f"图片下载失败 (HTTP {response.status_code})", 502, "image_download_failed", source)
                 for chunk in response.iter_content():
                     if signal.is_set():
                         raise DownloadCancelled()
                     if output.tell() + len(chunk) > MAX_IMAGE_BYTES:
-                        raise ComicApiError("单张图片超过 64 MiB 限制", 502, "image_too_large", "jm")
+                        raise ComicApiError("单张图片超过 64 MiB 限制", 502, "image_too_large", source)
                     output.write(chunk)
             if signal.is_set():
                 raise DownloadCancelled()
@@ -200,7 +204,7 @@ def receive_image(plugin, url, chapter_id, settings, signal):
             if rate and signal.wait(max(0, len(data) / rate - (time.monotonic() - started))):
                 raise DownloadCancelled()
             transformed = plugin.transform_image(data, chapter_id, url)
-            converted, extension = encode_image(transformed, settings["image_format"], settings["quality"])
+            converted, extension = encode_image(transformed, settings["image_format"], settings["quality"], source)
             return converted, extension, len(data)
         except Exception as exc:
             if signal.is_set() or isinstance(exc, DownloadCancelled):

@@ -5,16 +5,20 @@ const {test} = require('node:test');
 const vm = require('node:vm');
 const app = readFileSync(join(__dirname, '../src/web/static/app.js'), 'utf8');
 const listing = readFileSync(join(__dirname, '../src/web/static/bika-favorites.js'), 'utf8');
+const favoriteSync = readFileSync(join(__dirname, '../src/web/static/favorite-sync.js'), 'utf8');
 
 class Element {
   constructor(tag) {
     this.tagName=tag;this.children=[];this.className='';this.disabled=false;this.value='';
-    this.classes=new Set();this.classList={toggle:(name,on)=>on?this.classes.add(name):this.classes.delete(name)};
+    this.classes=new Set();this.classList={toggle:(name,on)=>on?this.classes.add(name):this.classes.delete(name),add:name=>this.classes.add(name)};
+    this.dataset={};this.listeners={};
   }
   set textContent(value) { this.text=String(value);this.children=[]; }
   get textContent() { return (this.text||'')+this.children.map(child=>child.textContent).join(''); }
   set innerHTML(value) { this.html=value;this.text='';this.children=[]; }
   setAttribute(name,value) { this[name]=String(value); }
+  removeAttribute(name) { delete this[name]; }
+  addEventListener(type,listener) { this.listeners[type]=listener; }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.text='';this.children=children; }
   querySelectorAll(selector) {
@@ -46,6 +50,9 @@ function harness(){
   vm.runInContext(app.slice(app.indexOf('function emptyState('),app.indexOf('function timeAgo(')),context);
   vm.runInContext(app.slice(app.indexOf('function cloudFavoriteButton('),app.indexOf('function syncDetailHead(')),context);
   vm.runInContext(app.slice(app.indexOf('function coverKey('),app.indexOf('// Reconcile a card list')),context);
+  vm.runInContext(favoriteSync.slice(favoriteSync.indexOf('const FAV_SYNC'),favoriteSync.indexOf('const syncField')),context);
+  vm.runInContext(favoriteSync.slice(favoriteSync.indexOf('function syncableCard('),favoriteSync.indexOf('async function startFavSync(')),context);
+  context.startFavSync=(source,ids)=>{calls.push({sync:source,ids});};
   vm.runInContext(listing,context);
   return {context,state,roots,calls,toasts,bindings,tabs,view:vm.runInContext('bikaFavorites',context)};
 }
@@ -149,5 +156,32 @@ test('桌面和移动导航有哔咔收藏入口，并支持动态列数及独�
   assert.equal(html.match(/data-tab="bika-favorites"/g).length,2);
   assert.match(html,/bika-favorites.js\?v=/);assert.match(css,/\.bika-favorites-view\{font-size:15px;line-height:1\.6\}/);
   assert.match(css,/\.tabbar\{display:grid;grid-auto-flow:column;grid-auto-columns:minmax\(0,1fr\)/);
-  assert.match(app,/if\(tab==='bika-favorites'\)run\(loadBikaFavorites\)/);
+  assert.match(app,/if\(tab==='bika-favorites'\)run\(loadBikaFavoritesView\)/);
+});
+
+test('收藏卡片可选择并批量或单本同步到本地，换页清空选择',async()=>{
+  const h=harness(),items=[{...detail},{...detail,id:'00000000000000000000000b',title:'第二本'}];
+  h.context.api=async path=>{h.calls.push({path});return page(items,4,true);};
+  await h.context.loadBikaFavorites();
+  const books=h.roots['bika-favorites-books'],[first]=books.children;
+  assert.equal(h.roots['bika-sync-selected'].hidden,true);assert.equal(h.roots['bika-select-page'].disabled,false);
+  const check=first.querySelectorAll('.select-mark')[0].children[0];check.checked=true;check.onchange();
+  assert.equal(JSON.stringify([...h.view.selected]),JSON.stringify([detail.id]));assert.equal(h.roots['bika-sync-selected'].hidden,false);
+  assert.equal(h.roots['bika-sync-selected'].textContent,'同步所选（1）');assert.ok(books.classes.has('selecting'));
+  h.roots['bika-select-page'].onclick();assert.equal(h.view.selected.size,2);
+  h.roots['bika-select-page'].onclick();assert.equal(h.view.selected.size,0);
+  h.roots['bika-select-page'].onclick();await h.roots['bika-sync-selected'].onclick();
+  assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:'bika',ids:items.map(item=>item.id)}));
+  await first.querySelectorAll('.card-sync')[0].onclick();
+  assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:'bika',ids:[detail.id]}));
+  h.roots['bika-favorites-next'].onclick();await flush();assert.equal(h.view.selected.size,0);
+});
+
+test('哔咔收藏页头提供本地同步入口，与 JM 共用同步窗口',()=>{
+  const html=readFileSync(join(__dirname,'../src/web/templates/index.html'),'utf8');
+  assert.match(html,/id="bika-sync-open"[^>]*aria-controls="fav-sync-dialog"/);
+  assert.match(html,/id="jm-sync-open"[^>]*aria-controls="fav-sync-dialog"/);
+  assert.ok(html.indexOf('/static/favorite-sync.js')<html.indexOf('/static/jm-sync.js'));
+  assert.ok(html.indexOf('/static/favorite-sync.js')<html.indexOf('/static/bika-favorites.js'));
+  assert.match(favoriteSync,/\/api\/\$\{source\}\/sync\/run/);
 });

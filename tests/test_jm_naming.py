@@ -262,4 +262,4 @@ def test_exact_compatibility_option_is_exposed_and_saved(jm_client):
     assert jm_client.put("/api/jm/sync/settings", json=settings).status_code == 200
     assert jm_client.get("/api/jm/sync/settings").json()["settings"]["directory_rule"] == JM_DIRECTORY_RULE
     assert f'value="{JM_DIRECTORY_RULE}">【作者】原标题 / 第N話 章节标题</option>' in jm_client.get("/").text
-    assert "【作者】原标题/第1話 章节标题" in jm_client.get("/static/jm-sync.js").text
+    assert "【作者】原标题/第1話 章节标题" in jm_client.get("/static/favorite-sync.js").text

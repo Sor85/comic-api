@@ -260,7 +260,7 @@ function routeHarness(){
   const history={state:null,pushState(snap,_title,url){this.state=plain(snap);this.url=url;pushes.push({snap:this.state,url});},replaceState(snap,_title,url){this.state=plain(snap);this.url=url;},back(){calls.push('back');}};
   Object.assign(context,{state,location,history,URLSearchParams,
     sourcePlugin:id=>id?{id,enabled:true,capabilities:['favorites']}:undefined,
-    renderContinue(){},loadLibrary:()=>calls.push('library'),loadTasks:()=>calls.push('downloads'),loadJmFavoritesView:()=>calls.push('jm'),loadBikaFavorites:()=>calls.push('bika'),
+    renderContinue(){},loadLibrary:()=>calls.push('library'),loadTasks:()=>calls.push('downloads'),loadJmFavoritesView:()=>calls.push('jm'),loadBikaFavoritesView:()=>calls.push('bika'),
     renderQuick(){},renderRecent(){},syncSearchMode(){},readLocal:()=>null,normalizeSearch(){},
     setView:view=>{state.view=view;},showHome:()=>{state.view='home';state.search=null;},syncClear(){},
     loadSearch:()=>calls.push('search'),loadDiscover:()=>calls.push('discover'),loadShelves:()=>calls.push('shelves'),

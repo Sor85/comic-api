@@ -125,7 +125,9 @@ API：`GET /api/sources/{source}/library-sync` 读取设置、分类名、当前
 
 ## 哔咔收藏
 
-导航「哔咔收藏」（或 `/?tab=bika-favorites`）读取已绑定哔咔账号的全部云端收藏，支持分页、最新／最旧上架／最多喜欢／最多观看排序及本页标题、作者筛选。桌面导航、移动导航和哔咔图源设置均提供入口。收藏默认与「我的书库」独立，可通过独立开关自动同步到书库；当前不提供命名收藏夹、分组管理、取消收藏或图片同步，阅读与 PDF 下载沿用原有功能。
+导航「哔咔收藏」（或 `/?tab=bika-favorites`）读取已绑定哔咔账号的全部云端收藏，支持分页、最新／最旧上架／最多喜欢／最多观看排序及本页标题、作者筛选。桌面导航、移动导航和哔咔图源设置均提供入口。收藏默认与「我的书库」独立，可通过独立开关自动同步到书库；哔咔没有命名收藏夹或分组，本项目也不提供取消收藏，阅读与 PDF 下载沿用原有功能。
+
+页头「本地同步」打开与 JM 共用的同步窗口，可把收藏图片增量保存到服务器目录，详见下方 [哔咔收藏图片同步](#哔咔收藏图片同步)。
 
 漫画详情的「加入哔咔收藏」沿用 JM 的交互与本地状态表：每次打开详情通过 `GET /api/bika/favorites/{comic_id}` 仅读取当前账号在 SQLite 中的记录，返回 `comic_id/favorited`，其中 `true/false/null` 分别表示已收藏、已确认未收藏和未知；不额外访问哔咔或加载章节。未知仍显示加入按钮并说明添加前实时检查远端；读取失败显示「收藏状态未确认」，点击只重读状态。状态接口和收藏列表响应均禁止缓存。
 
@@ -136,6 +138,19 @@ API：`GET /api/sources/{source}/library-sync` 读取设置、分类名、当前
 网络失败或响应不完整时，该漫画状态保留为未知，不自动重发切换；再次添加仍先查询远端。上游返回 `un_favourite` 时登记为未收藏并报告并发冲突，不自动补偿。上游不提供原子“仅添加”，其他客户端在预检查与写入之间修改收藏仍可能产生冲突。站点鉴权默认关闭，未开启时任何可访问服务的人都可操作绑定账号；公网部署必须启用访问认证并配置 HTTPS。
 
 协议依据：[pica-go 请求实现](https://github.com/niuhuan/pica-go/blob/master/client.go)、[分页及收藏状态字段](https://github.com/niuhuan/pica-go/blob/master/dto.go)、[收藏动作枚举](https://github.com/niuhuan/pica-go/blob/master/enum.go)。
+
+### 哔咔收藏图片同步
+
+哔咔收藏页的「本地同步」、卡片封面左上角的「同步本书」、「选择本页 / 同步所选」与 JM 使用同一套同步窗口、任务卡片、设置与服务器目录选择，行为与下文「同步行为」「检查已有漫画」「下载设置」一致，差异如下：
+
+- 同步范围固定为账号的全部收藏（哔咔没有收藏夹），整轮扫描使用「最旧上架」排序逐页读取，按漫画 ID 去重后获取最新详情与章节。
+- 漫画 ID 为 24 位十六进制字符串，章节 ID 为章节序号；带 ID 的目录规则写作 `漫画标题 [5e7f…]/001 - 章节标题 [1]`。不提供 JM 专用的「【作者】原标题 / 第N話 章节标题」规则。
+- 下载根目录由 `BIKA_DOWNLOAD_ROOTS` 控制，默认 `DATA_DIR/bika-favorites`，规则与 `JM_DOWNLOAD_ROOTS` 相同（见「服务器目录选择」）。
+- 任务记录、文件检查点与本地检查登记存放在独立的 `bika_sync_runs`、`bika_sync_files`、`bika_sync_local_files` 表；JM 与哔咔可同时运行各自的任务，设置与定时计划互不影响。
+- 「同步添加到本地书库」使用「哔咔收藏」分类，已有分类不变。更换或解除哔咔账号绑定后定时同步自动关闭；任务运行时拒绝账号变更。
+- 图片原样保存（哔咔图片无需反切割），格式转换、质量、限速与重试设置同 JM。
+
+API 与 JM 相同，前缀换成 `/api/bika/sync`；`POST /api/bika/sync/run` 的 `album_ids` 为最多 200 个 24 位十六进制漫画 ID，设置不含 `folder_ids`。
 
 ## JM 收藏与图片同步
 
@@ -290,6 +305,7 @@ services:
 | POST | `/api/jm/sync/run` | JSON `{}` 同步设置范围，或 `{"album_ids":["123"]}` 指定最多 200 本 |
 | POST | `/api/jm/sync/check-local` | 检查设置范围内收藏对应的已有漫画，完整校验后登记为已下载，不下载图片 |
 | POST | `/api/jm/sync/cancel` | 停止本次同步或本地检查，不关闭定时计划 |
+| GET / PUT / POST | `/api/bika/sync/...` | 哔咔收藏图片同步，子路径与 JM 相同（settings / directories / run / check-local / cancel）；无 `folder_ids` |
 | GET | `/api/search?keyword=&source=&page=&sort=&mode=&tag_value=&category=&deduplicate=` | `deduplicate=false`（默认不去重），传 `true` 开启；`mode=keyword`（默认）或 `tag`；省略 source 聚合支持该模式的图源；sort 按 search_sorts/tag_sorts 校验，tag_value 仅单源标签搜索可用，category 仅支持搜索分类的单源可用（内置为哔咔） |
 | GET | `/api/sources/{source}/search-categories` | 按需获取搜索分类目录；内置仅哔咔支持，需要该图源登录 |
 | GET | `/api/comic/{source}/{comic_id}` | 详情 |
@@ -324,7 +340,9 @@ src/services/aggregator.py   插件调度、聚合搜索、标题排序
 src/services/image_proxy.py  图片代理：SSRF 防护、并发上限、磁盘缓存
 src/services/pdf.py          章节图片并发下载与自适应压缩 PDF
 src/services/downloads.py    PDF 下载任务队列与生命周期
-src/services/jm_sync.py      JM 收藏扫描、定时同步与文件检查点
+src/services/favorite_sync.py  收藏图片同步通用流程：定时调度、本地检查、文件检查点
+src/services/jm_sync.py      JM 收藏夹范围与 Pindextitle 章节信息
+src/services/bika_sync.py    哔咔收藏扫描与 24 位 ID 规则
 src/services/favorites_library_sync.py  JM／哔咔云收藏定时增补书库，不下载图片
 src/services/local_images.py 服务器目录边界、带宽限速与图片输出
 src/services/images.py       JM 图片反切割
