@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="Comic 图标" width="128" height="128">
+</p>
+
 # Comic API
 
 Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画；前端按插件能力生成浏览入口与登录表单。

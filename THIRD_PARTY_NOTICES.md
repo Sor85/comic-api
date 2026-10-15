@@ -1,9 +1,3 @@
-# 第三方许可说明
-
-## JMComic-Crawler-Python
-
-`src/services/jm_naming.py` 的原标题提取算法改编自 [JMComic-Crawler-Python](https://github.com/hect0x7/JMComic-Crawler-Python) 2.6.13 的 `JmcomicText.parse_orig_album_name/tokenize`，用于兼容 `Bd_Aauthoroname_Pindextitle`。目录规则通过该版本的实体属性与 commonX 0.6.40 路径规则进行对照验证。本项目没有引入这两个包作为运行依赖。
-
 MIT License
 
 Copyright (c) 2023 hect0x7
