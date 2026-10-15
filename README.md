@@ -41,12 +41,76 @@ Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画；
 
 ## 部署
 
+### 使用预构建镜像（推荐）
+
+镜像由 GitHub Actions 构建并发布到 GitHub Container Registry：`ghcr.io/sor85/comic-api`，支持 `linux/amd64`、`linux/arm64`、`linux/arm/v7`。
+
+| 标签 | 含义 |
+| --- | --- |
+| `main` | `main` 分支最新提交 |
+| `sha-<短哈希>` | 指定提交，适合固定版本 |
+| `x.y.z` / `x.y` | 推送 `vX.Y.Z` 标签时生成的版本 |
+
+新建部署目录，保存以下 `docker-compose.yml`：
+
+```yaml
+services:
+  comic-api:
+    image: ghcr.io/sor85/comic-api:main
+    container_name: comic-api
+    ports:
+      - "34587:8699"
+    environment:
+      - TZ=Asia/Shanghai
+      - DATA_DIR=/app/data
+      - AUTH_ENABLED=${AUTH_ENABLED:-false}
+      - AUTH_USERNAME=${AUTH_USERNAME:-}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      - JM_DOWNLOAD_ROOTS=${JM_DOWNLOAD_ROOTS:-/app/data/jm-favorites}
+      - BIKA_DOWNLOAD_ROOTS=${BIKA_DOWNLOAD_ROOTS:-/app/data/bika-favorites}
+      - BIKA_ACCOUNT=${BIKA_ACCOUNT:-}
+      - BIKA_PASSWORD=${BIKA_PASSWORD:-}
+      - COPY_API_BASE=${COPY_API_BASE:-https://api.copy3000.com/api/v3}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+```
+
+需要修改默认值时，在同一目录创建 `.env`（变量说明见仓库的 `.env.example`），然后启动：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+升级到最新镜像：
+
+```bash
+docker compose pull
+docker compose up -d
+docker image prune -f
+```
+
+`./data` 保存数据库、凭据加密密钥 `credentials.key`、图片缓存及默认的收藏同步目录，升级和重建容器时保留；备份时整个目录一起备份，数据库与密钥缺一不可。收藏同步写入自定义目录时，需同时设置 `JM_DOWNLOAD_ROOTS` / `BIKA_DOWNLOAD_ROOTS` 并挂载对应卷，见「服务器目录选择」。
+
+不使用 Compose 时：
+
+```bash
+docker run -d --name comic-api --restart unless-stopped \
+  -p 34587:8699 \
+  -e TZ=Asia/Shanghai -e DATA_DIR=/app/data \
+  -v "$(pwd)/data:/app/data" \
+  ghcr.io/sor85/comic-api:main
+```
+
+### 从源码构建
+
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-访问 http://localhost:34587 。哔咔和禁漫账号可在「设置 → 图源管理 → 设置 → 登录凭证」绑定；哔咔也可在首次启动前填入 `.env`。拷贝使用游客接口。禁漫收藏夹与自动同步需要账号，登录兼容 JWT 和 AVS Cookie 会话，凭据与会话均加密保存在 SQL。
+访问 http://localhost:34587 （其他设备访问时将 `localhost` 换成服务器 IP）。哔咔和禁漫账号可在「设置 → 图源管理 → 设置 → 登录凭证」绑定；哔咔也可在首次启动前填入 `.env`。拷贝使用游客接口。禁漫收藏夹与自动同步需要账号，登录兼容 JWT 和 AVS Cookie 会话，凭据与会话均加密保存在 SQL。
 
 本地运行：
 
