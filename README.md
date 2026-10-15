@@ -117,18 +117,79 @@ docker compose up -d --build
 
 ## API
 
-完整参数见 `/docs`。
+请求与响应均为 JSON。开启站点鉴权后，除 `GET /health` 外均需 HTTP Basic 认证。服务运行时也可打开 `http://<地址>:<端口>/docs` 查看交互式接口文档（FastAPI 自动生成）。
 
-| 方法 | 路径 | 用途 |
+**图源与设置**
+
+| 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/sources` | 插件能力、账号状态与开关 |
-| GET | `/api/search?keyword=&source=&page=` | 搜索；省略 source 聚合各源 |
-| GET | `/api/comic/{source}/{comic_id}` | 详情 |
-| GET | `/api/chapter/{source}/{comic_id}/{chapter_id}` | 图片代理列表 |
-| GET | `/api/{source}/{action}` | latest / category / leaderboard / random |
-| GET | `/api/library` | 书库 |
-| GET / POST | `/api/downloads` | 列表 / 创建下载 |
-| GET | `/api/downloads/{task_id}/file` | 下载 PDF |
+| GET | `/health` | 健康检查，公开访问 |
+| GET / PUT | `/api/settings/auth` | 站点鉴权；PUT 字段 `enabled/username/password/revision`，密码留空保留原值 |
+| GET | `/api/sources` | 图源能力、账号状态与开关 |
+| PUT | `/api/sources/{source}/state` | 启用／关闭图源：`{"enabled":true}` |
+| POST | `/api/sources/{source}/login` | 绑定账号，字段按图源 `login_fields`（如 nhentai 为 `api_key`） |
+| DELETE | `/api/sources/{source}/account` | 解除账号绑定 |
+| PUT | `/api/sources/{source}/settings` | 图源设置（如拷贝接口线路） |
+| GET | `/api/sources/{source}/search-categories` | 搜索分类目录（哔咔） |
+
+**搜索、浏览与阅读**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/search` | `keyword` 必填；`source` 省略时聚合；`page`、`sort`、`mode=keyword\|tag`、`tag_value`、`category`、`deduplicate` |
+| GET | `/api/{source}/{action}` | `action` 为 `latest/category/leaderboard/random`；`page`、`sort`、`mode`（榜单周期）、`name`（分类） |
+| GET | `/api/comic/{source}/{comic_id}` | 漫画详情与章节 |
+| GET | `/api/chapter/{source}/{comic_id}/{chapter_id}` | 章节图片代理地址列表 |
+| GET | `/api/image/proxy` | 图片代理：`source`、`url`、`chapter_id` |
+
+**阅读记录**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/reading` | 全部阅读记录 |
+| GET / PUT | `/api/reading/{source}/{comic_id}` | 读取／保存进度；PUT 必填 `chapter_id`、`page`（从 0 开始） |
+| DELETE | `/api/reading/history` | 清空「继续阅读」，保留各章进度 |
+| POST | `/api/reading/import` | 导入旧版浏览器记录：`comics`、`chapters` |
+
+**书库**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/library` | 书库列表，`category` 筛选（空字符串为未分类） |
+| PUT / PATCH / DELETE | `/api/library/{source}/{comic_id}` | 加入／修改分类／移除，字段 `category` |
+| POST | `/api/library/{source}/{comic_id}/refresh` | 检查章节更新 |
+| GET / PUT | `/api/sources/{source}/library-sync` | 云收藏自动入库（`jm`、`bika`）：`enabled`、`interval_minutes` |
+| POST | `/api/sources/{source}/library-sync/run` | 立即执行一次入库 |
+
+**PDF 下载**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET / POST | `/api/downloads` | 任务列表／创建任务：`source`、`comic_id`、`chapter_id`、`title`、`chapter` |
+| GET / DELETE | `/api/downloads/{task_id}` | 任务状态／删除任务及文件 |
+| POST | `/api/downloads/{task_id}/cancel` | 取消 |
+| POST | `/api/downloads/{task_id}/retry` | 重试 |
+| GET | `/api/downloads/{task_id}/file` | 取回 PDF |
+| GET | `/api/download/{source}/{comic_id}/{chapter_id}` | 旧接口：创建任务并等待完成，不建议使用 |
+
+**云收藏（JM／哔咔）**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/jm/favorites` | JM 收藏：`page`、`folder_id`（0 为全部）、`order=mr\|mp` |
+| GET | `/api/bika/favorites` | 哔咔收藏：`page`、`sort=dd\|da\|ld\|vd` |
+| GET / POST | `/api/{jm\|bika}/favorites/{comic_id}` | 本地登记的收藏状态／加入云收藏 |
+
+**收藏图片同步**（`{s}` 为 `jm` 或 `bika`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET / PUT | `/api/{s}/sync/settings` | 同步设置：`enabled`、`interval_minutes`、`download_dir`、`speed_limit_kbps`、`image_format`、`quality`、`directory_rule`、`retries`、`add_to_library`；JM 另有 `folder_ids` |
+| GET | `/api/{s}/sync/directories` | 浏览允许范围内的服务器目录：`path` |
+| GET | `/api/{s}/sync` | 当前任务、下次执行时间与最近记录 |
+| POST | `/api/{s}/sync/run` | 立即同步；`{"album_ids":[...]}` 指定漫画（最多 200 本） |
+| POST | `/api/{s}/sync/check-local` | 检查并登记本地已有漫画，不下载图片 |
+| POST | `/api/{s}/sync/cancel` | 停止当前任务 |
 
 ## 项目结构
 
