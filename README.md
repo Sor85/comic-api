@@ -4,7 +4,7 @@
 
 # Comic API
 
-Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画；前端按插件能力生成浏览入口与登录表单。
+Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画、nhentai；前端按插件能力生成浏览入口与登录表单。
 
 ## Fork 说明
 
@@ -17,6 +17,7 @@ Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画；
 - **收藏图片同步到本地**：JM 与哔咔收藏可按目录规则增量下载到服务器目录，支持定时同步、单本／所选同步、限速、图片格式与质量、失败重试、SHA-256 文件检查点；「检查本地漫画」可登记已有目录，避免重复下载。JM 额外支持按收藏夹限定范围。下载根目录分别由 `JM_DOWNLOAD_ROOTS`、`BIKA_DOWNLOAD_ROOTS` 限定。
 - **云收藏自动同步到书库**：JM 与哔咔收藏可定时增补到「我的书库」的独立分类，不下载图片，默认关闭。
 - **搜索增强**：禁漫、哔咔、拷贝三源标签搜索，哔咔分类筛选，作者搜索，以及可选的跨图源搜索结果去重。
+- **nhentai 图源**：基于官方 API v2 的搜索、标签搜索、最新、分类、人气榜、随机与阅读；可选绑定 API Key 提高限额，PDF 下载使用官方归档接口。
 - **章节封面预览**：详情页章节列表可显示章节首图，默认关闭，开关状态保存在当前浏览器。
 - **阅读记录存服务器**：观看记录与阅读进度改存服务器 SQLite，多设备共享；支持从浏览器旧数据导入。
 - **图源开关**：每个图源可独立启用或关闭，关闭后退出搜索、发现与收藏入口，并停止相关任务。
@@ -205,6 +206,18 @@ Surge 等代理的 DNS 可能把公开 CDN 域名映射到 `198.18.0.0/15` 虚�
 
 本机服务通常可直接沿用现有代理环境，无需关闭 Surge 或放宽 SSRF 防护。Docker 内使用宿主机代理时，需要显式传入容器可访问的代理地址；容器内的 `127.0.0.1` 不是宿主机。环境变量变化后需要重启服务。
 
+## nhentai
+
+nhentai 适配器使用官方 [REST API v2](https://nhentai.net/api/v2/docs)，不抓取网页、不绕过 Cloudflare。每部作品作为单章节「全本」呈现。
+
+- **搜索**：关键词支持官方查询语法（短语、`-排除`、`artist:"名称"`、`pages:>10`、`uploaded:<7d` 等）；排序为最新上传及总、今日、本周、本月人气。
+- **标签**：详情页标签、作者、社团、原作、角色、语言均以 `类型:"名称"` 检索；手动输入的普通名称按 `tag:"名称"` 检索。
+- **浏览**：最新、分类（同人志、漫画等）、人气榜（今日、本周、本月、总榜）；随机推荐为最新列表中的随机一页。
+- **图片**：图片与缩略图服务器从 `/api/v2/cdn` 获取并缓存 1 小时，不写死子域名；详情缓存 10 分钟。
+- **API Key**：在 nhentai 网站「账号设置 → API Keys」（`https://nhentai.net/user/settings#apikeys`）生成，填入「设置 → 图源管理 → nhentai → 登录凭证」。保存前调用 `/api/v2/user` 校验，加密存入 SQLite。未绑定时搜索、浏览、阅读均可使用，但匿名限额较低（搜索 10 次／分钟、详情 20 次／分钟，按 IP 计）；绑定后提高限额。超限返回 `429/rate_limited`，约 1 分钟后恢复。
+- **PDF 下载**：官方要求整本下载使用归档接口，不得逐页抓取 CDN 拼接。因此 nhentai 的 PDF 任务调用 `POST /api/v2/galleries/{id}/download` 获取短时有效的 zip 地址，下载后在服务器解压并按现有流程压缩、加密为 PDF。需要 API Key，未绑定时创建任务直接返回 `401/login_required`；官方限额约每 5 分钟 10 次，官方关闭下载功能时返回 `503`。归档上限 1 GiB、单张图片 64 MiB。
+- 不提供云收藏与本地图片同步。
+
 ## 云收藏自动同步到书库
 
 「设置 → 图源管理 → JM／哔咔设置 → 收藏同步到书库」提供独立开关，两源均**默认关闭**。开启前需要启用图源并绑定账号；设置保存在服务器 SQLite，对全部浏览器生效，重启后保留。该功能独立于 JM 图片下载同步，不会开启图片下载。
@@ -371,6 +384,8 @@ services:
 - `pages(comic_id, chapter_id)`：有序图片 URL 列表。
 - `client.request(...)`：图片请求客户端应复用 `BaseClient`，其 `request` / `stream` 支持内部 `_image_target` 参数，在隔离连接中固定已校验的目标 IP 与代理；自定义传输不能忽略这一策略。可选 `transform_image(data, chapter_id, url)` 解码图片。
 - 可选 `browse(action, **filters)`、`login(values)`、`logout()`、`account_status()`；通过 `categories/sorts/leaderboard_modes/login_fields` 描述界面。
+- 可选 `login_hint`：登录凭证表单上方显示的纯文本说明。
+- 可选 `download_archive(comic_id, chapter_id, out_dir, progress, cancelled)`：返回已下载到 `out_dir` 的有序图片路径；声明后 PDF 任务改用此方法，不再逐页请求 `pages` 中的地址。可选 `check_download()` 在创建或重试任务前抛出 `ComicApiError` 拒绝任务。
 - 可选 `settings_fields`、`settings()` 描述非敏感设置；`save_settings(values)` 持久化并返回替换用的新插件实例。不要把密码或 Token 放进设置清单，应使用登录凭证接口。
 
 参考 `src/sources/bika.py` 的账号插件和 `src/sources/copy.py` 的游客插件。账号可使用 `store.save_account(plugin.id, data)` 保存，加密由存储层处理。

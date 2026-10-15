@@ -10,6 +10,8 @@ class SourcePlugin:
     name = ""
     capabilities = ["search", "detail", "pages"]
     login_fields = []
+    # Optional plain-text note shown above the credential form.
+    login_hint = ""
     categories = []
     sorts = []
     # Sort values a plugin's search(keyword, page, sort) accepts; shown as
@@ -29,7 +31,7 @@ class SourcePlugin:
 
     def manifest(self):
         return {"id": self.id, "name": self.name, "capabilities": self.capabilities,
-                "login_fields": self.login_fields, "categories": self.categories,
+                "login_fields": self.login_fields, "login_hint": self.login_hint, "categories": self.categories,
                 "sorts": self.sorts, "search_sorts": self.search_sorts, "tag_sorts": self.tag_sorts,
                 "latest_sorts": self.latest_sorts,
                 "leaderboard_modes": self.leaderboard_modes,

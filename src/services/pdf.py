@@ -157,22 +157,30 @@ async def build_chapter_pdf(service, source: str, comic_id: str, chapter_id: str
                             progress=None, cancelled=None) -> str:
     """下载章节并打包成自适应压缩的 PDF，返回本地临时 PDF 路径"""
     plugin = service.source(source)
+    # Sources whose terms forbid rebuilding a work page by page provide an official archive.
+    archive = getattr(plugin, "download_archive", None)
 
-    image_urls = await service.get_chapter_images(source, comic_id, chapter_id)
-    if not image_urls:
-        raise ComicApiError("该章节没有图片，或平台限制访问", status_code=404)
+    image_urls = []
+    if not callable(archive):
+        image_urls = await service.get_chapter_images(source, comic_id, chapter_id)
+        if not image_urls:
+            raise ComicApiError("该章节没有图片，或平台限制访问", status_code=404)
     if cancelled and cancelled():
         raise DownloadCancelled()
-    if progress:
+    if progress and image_urls:
         progress("downloading", 0, len(image_urls))
 
     temp_dir = tempfile.mkdtemp(prefix="comic_api_dl_")
     try:
         loop = asyncio.get_running_loop()
-        worker_count = max(1, min(int(concurrency), 16))
-        all_paths = await loop.run_in_executor(
-            None, _download_images_parallel, plugin, image_urls, temp_dir,
-            source, chapter_id, worker_count, progress, cancelled)
+        if callable(archive):
+            all_paths = await loop.run_in_executor(
+                None, archive, comic_id, chapter_id, temp_dir, progress, cancelled)
+        else:
+            worker_count = max(1, min(int(concurrency), 16))
+            all_paths = await loop.run_in_executor(
+                None, _download_images_parallel, plugin, image_urls, temp_dir,
+                source, chapter_id, worker_count, progress, cancelled)
 
         fd, pdf_path = tempfile.mkstemp(prefix="comic_", suffix=".pdf")
         os.close(fd)

@@ -41,8 +41,14 @@ class DownloadManager:
             raise ComicApiError("任务不存在", 404, "not_found")
         return task
 
+    def _check_source(self, source):
+        plugin = self.service.source(source)
+        check = getattr(plugin, "check_download", None)
+        if callable(check):
+            check()
+
     def create(self, source, comic_id, chapter_id, title="", chapter=""):
-        self.service.source(source)
+        self._check_source(source)
         with self.store.connect() as db:
             existing = db.execute(
                 "SELECT id FROM downloads WHERE source=? AND comic_id=? AND chapter_id=? AND status IN ('queued','running','cancelling')",
@@ -81,7 +87,7 @@ class DownloadManager:
             raise ComicApiError("请等待任务停止后重试", 409, "invalid_state")
         if self.queue.full():
             raise ComicApiError("下载队列已满", 429, "busy")
-        self.service.source(task["source"])
+        self._check_source(task["source"])
         self.store.update_task(task_id, status="queued", stage="queued", completed=0, total=0, error="")
         self.signals[task_id] = threading.Event()
         self.queue.put_nowait(task_id)

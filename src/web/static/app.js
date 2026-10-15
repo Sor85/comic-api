@@ -1092,6 +1092,7 @@ function configureAccount(){
   $('credentials-title').textContent=plugin.name+' · 登录凭证';
   if(!plugin.capabilities.includes('login')){$('account-state').textContent='此图源插件不提供登录功能。';return;}
   $('account-state').textContent=plugin.account.authenticated?'会话已保存，可直接使用。':plugin.account.configured?'账号已保存，将在请求时自动恢复会话。':'尚未绑定账号。凭证仅加密保存在本服务器。';
+  if(plugin.login_hint)form.append(node('p',plugin.login_hint,'field-hint'));
   for(const field of plugin.login_fields){const label=node('label',field.label);const input=node('input');input.name=field.name;input.type=field.type==='password'?'password':'text';input.autocomplete=field.type==='password'?'current-password':'username';input.required=true;label.append(input);form.append(label);}
   const actions=node('div',undefined,'form-actions');
   const submit=node('button','登录并保存','primary');submit.type='submit';submit.disabled=plugin.enabled===false;actions.append(submit);
