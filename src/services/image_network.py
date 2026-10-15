@@ -175,7 +175,7 @@ def _doh_lookup(host, proxy):
             raise
         except Exception as exc:
             last_error = exc
-    raise ComicApiError("无法通过代理获取图片域名的真实 DNS 结果", 502, "image_dns_failed") from last_error
+    raise ComicApiError("图片域名解析为 Fake-IP，且无法获取真实 DNS 结果；请确认代理可访问 dns.google", 502, "image_dns_failed") from last_error
 
 
 def _real_addresses(host, proxy):
@@ -223,7 +223,8 @@ def image_target(url):
     if not all(_public(address) for address in parsed):
         if any(not _public(address) and not (address.version == 4 and address in FAKE_IP_NETWORK) for address in parsed):
             raise _invalid_url()
-        if not proxy:
-            raise ComicApiError("图片域名解析为 Fake-IP，但未配置代理或被 NO_PROXY 排除", 502, "image_proxy_required")
+        # Fake-IP DNS means a proxy is intercepting traffic. Without an explicit proxy this is a
+        # transparent/gateway proxy (e.g. Surge, Clash TUN): look up and validate the real public
+        # addresses, then connect to them directly so the gateway still routes the pinned connection.
         addresses = _real_addresses(host, proxy)
     return ImageTarget(normalized, host, port, addresses, proxy)

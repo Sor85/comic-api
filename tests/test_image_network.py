@@ -128,16 +128,43 @@ def test_untrusted_real_dns_answers_are_rejected(network, addresses):
 
 
 @pytest.mark.parametrize("bypass", [None, "*", "cdn.example", ".example", "cdn.example:443"])
-def test_fake_ip_requires_proxy_and_respects_no_proxy(network, monkeypatch, bypass):
-    from src.errors import ComicApiError
-    from src.services.image_network import image_target
+def test_fake_ip_without_proxy_uses_transparent_gateway(network, monkeypatch, bypass):
+    from src.services import image_network
     if bypass is None:
         monkeypatch.delenv("https_proxy")
     else:
         monkeypatch.setenv("no_proxy", bypass)
+    target = image_network.image_target("https://cdn.example/a.jpg")
+    assert target.proxy is None and target.addresses == ("93.184.216.34",)
+    dns_url, dns_kwargs, dns_options = network.calls[0]
+    assert dns_url == "https://dns.google/resolve" and dns_kwargs["proxy"] is None
+    assert dns_options[CurlOpt.PROXY] == "" and dns_options[CurlOpt.NOPROXY] == "*"
+    options = target.curl_options
+    assert options[CurlOpt.CONNECT_TO] == ["cdn.example:443:93.184.216.34:443"]
+    assert options[CurlOpt.PROXY] == "" and options[CurlOpt.NOPROXY] == "*"
+
+
+def test_transparent_gateway_cover_download(network, monkeypatch, tmp_path):
+    monkeypatch.delenv("https_proxy")
+    client = BaseClient()
+    plugin = SimpleNamespace(client=client, transform_image=lambda data, *args: data)
+    result = asyncio.run(ImageProxy(Store(tmp_path)).image(plugin, "jm", "https://cdn.example/cover.jpg"))
+    assert result == network.picture
+    url, kwargs, options = network.calls[-1]
+    assert url == "https://cdn.example/cover.jpg" and kwargs["proxy"] == ""
+    assert options[CurlOpt.CONNECT_TO] == ["cdn.example:443:93.184.216.34:443"]
+    assert options[CurlOpt.NOPROXY] == "*"
+
+
+def test_transparent_gateway_dns_failure_is_reported(network, monkeypatch):
+    from src.errors import ComicApiError
+    from src.services.image_network import image_target
+    monkeypatch.delenv("https_proxy")
+    network.dns_status = 2
     with pytest.raises(ComicApiError) as error:
         image_target("https://cdn.example/a.jpg")
-    assert error.value.code == "image_proxy_required" and not network.calls
+    assert error.value.code == "image_dns_failed"
+    assert all(url.startswith("https://dns.google/") for url, _, _ in network.calls)
 
 
 def test_system_proxy_is_used_without_environment_proxy(network, monkeypatch):
@@ -150,14 +177,12 @@ def test_system_proxy_is_used_without_environment_proxy(network, monkeypatch):
 
 
 def test_system_proxy_exceptions_remain_effective(network, monkeypatch):
-    from src.errors import ComicApiError
     from src.services import image_network
     monkeypatch.delenv("https_proxy")
     monkeypatch.setattr(image_network, "getproxies", lambda: {"https": "http://127.0.0.1:6152"})
     monkeypatch.setattr(image_network, "proxy_bypass", lambda host: True)
-    with pytest.raises(ComicApiError) as error:
-        image_network.image_target("https://cdn.example/a.jpg")
-    assert error.value.code == "image_proxy_required" and not network.calls
+    target = image_network.image_target("https://cdn.example/a.jpg")
+    assert target.proxy is None and target.addresses == ("93.184.216.34",)
 
 
 def test_dns_failure_never_falls_back_to_unchecked_connection(network):
@@ -313,15 +338,15 @@ def test_image_redirect_revalidates_same_host_against_dns_rebinding(network, mon
 
 
 def test_image_redirect_respects_destination_no_proxy(network, monkeypatch):
-    from src.errors import ComicApiError
     from src.services.image_proxy import download_image
     original = "https://cdn.example/a.jpg"
     network.responses[original] = 302, {"Location": "https://other.example/b.jpg"}
     monkeypatch.setenv("no_proxy", "other.example")
-    with pytest.raises(ComicApiError) as error:
-        download_image(BaseClient(), original, retries=1)
-    assert error.value.code == "image_proxy_required"
-    assert [url for url, _, _ in network.calls if not url.startswith("https://dns.google/")] == [original]
+    assert download_image(BaseClient(), original, retries=1) == network.picture
+    image_calls = [(url, options) for url, _, options in network.calls if not url.startswith("https://dns.google/")]
+    assert [url for url, _ in image_calls] == [original, "https://other.example/b.jpg"]
+    assert image_calls[0][1][CurlOpt.PROXY] == "http://127.0.0.1:18888"
+    assert image_calls[1][1][CurlOpt.PROXY] == "" and image_calls[1][1][CurlOpt.NOPROXY] == "*"
 
 
 @pytest.mark.parametrize("headers", [{}, {"Location": ""}])
