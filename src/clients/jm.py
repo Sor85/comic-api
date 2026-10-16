@@ -441,22 +441,23 @@ class JmClient(BaseClient):
         except ComicApiError as exc:
             self._favorite_pages.pop(order, None)
             raise ComicApiError("禁漫收藏编号无效，未登记到本地表", 502, "invalid_response", "jm") from exc
-        self.store.record_jm_favorites(owner, ids)
+        self.store.record_jm_favorites(owner, ids, items=dict(zip(ids, data["items"])))
         if folder_id != "0":
             return
         page, total = data["page"], data["total"]
         if page == 1:
-            self._favorite_pages[order] = {"next": 1, "total": total, "ids": set()}
+            self._favorite_pages[order] = {"next": 1, "total": total, "ids": set(), "order": []}
         scan = self._favorite_pages.get(order)
         if (not scan or page != scan["next"] or total != scan["total"]
                 or len(set(ids)) != len(ids) or scan["ids"].intersection(ids)):
             self._favorite_pages.pop(order, None)
             return
         scan["ids"].update(ids)
+        scan["order"].extend(ids)
         scan["next"] += 1
         if not data["has_next"]:
             if len(scan["ids"]) == total:
-                self.store.record_jm_favorites(owner, scan["ids"], complete=True)
+                self.store.record_jm_favorites(owner, scan["order"], complete=True, sort=order)
             self._favorite_pages.pop(order, None)
 
     def _favorite_ids(self) -> set[str]:

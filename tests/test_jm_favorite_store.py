@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 
 import pytest
@@ -55,7 +56,7 @@ def test_v3_database_migrates_without_losing_existing_data(tmp_path):
         db.execute("PRAGMA user_version=3")
     migrated = Store(tmp_path)
     with migrated.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 9
     assert migrated.account("jm")["account"] == "test"
     assert migrated.books()[0]["library_category"] == "Existing category"
     owner = migrated.account_owner("test")
@@ -120,3 +121,16 @@ def test_failed_sync_keeps_pulled_rows_without_completing_snapshot(favorite_clie
         assert store.jm_favorite_status(owner, "999") is True
         assert store.jm_favorite_status(owner, "121") is None
     asyncio.run(scenario())
+
+
+def test_browsing_every_page_records_items_in_listing_order(favorite_client):
+    client, remote, _, store = favorite_client
+    owner = store.account_owner("test-account")
+    client.favorites(page=1, order="mp")
+    data = store.favorite_catalog("jm", owner, "/root")
+    assert not data["complete"] and len(data["rows"]) == 20
+    client.favorites(page=2, order="mp")
+    data = store.favorite_catalog("jm", owner, "/root")
+    assert data["complete"] and data["sort"] == "mp"
+    assert [row["comic_id"] for row in data["rows"]] == [str(value) for value in range(101, 122)]
+    assert json.loads(data["rows"][0]["item"])["title"] == "漫画 101"

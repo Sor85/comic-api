@@ -191,6 +191,8 @@ docker compose up -d --build
 | POST | `/api/{s}/sync/check-local` | 检查并登记本地已有漫画，不下载图片 |
 | POST | `/api/{s}/sync/repair` | 修复本地检查标记为异常的漫画：序号错位的章节目录改名对上，保留有效图片、补下载缺页，损坏或多余图片移入 `.comic-api-repair` 备份目录；`{"album_ids":[...]}` 限定范围 |
 | GET | `/api/{s}/sync/local-status?ids=a,b` | 当前保存目录下各漫画的本地状态（已下载 / 异常 / 未下载）及总数，单次最多 200 本 |
+| GET | `/api/{s}/sync/catalog` | 本地记录的全部收藏及其本地状态：`local=downloaded\|missing`（未下载含异常）、`page`；返回筛选结果、各状态总数、列表是否完整与更新进度 |
+| POST | `/api/{s}/sync/catalog/refresh` | 后台读取全部收藏分页并替换本地记录：`sort`（JM `mr\|mp`，哔咔 `dd\|da\|ld\|vd`） |
 | POST | `/api/{s}/sync/cancel` | 停止当前任务 |
 
 ## 项目结构

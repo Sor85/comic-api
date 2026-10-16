@@ -97,19 +97,23 @@ class Store:
                     owner TEXT NOT NULL, comic_id TEXT NOT NULL,
                     favorited INTEGER CHECK(favorited IN (0,1)),
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    item TEXT, position INTEGER,
                     PRIMARY KEY(owner, comic_id)
                 );
                 CREATE TABLE IF NOT EXISTS jm_favorite_catalog (
-                    owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    sort TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS bika_favorites (
                     owner TEXT NOT NULL, comic_id TEXT NOT NULL,
                     favorited INTEGER CHECK(favorited IN (0,1)),
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    item TEXT, position INTEGER,
                     PRIMARY KEY(owner, comic_id)
                 );
                 CREATE TABLE IF NOT EXISTS bika_favorite_catalog (
-                    owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    owner TEXT PRIMARY KEY, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    sort TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS reading_comics (
                     source TEXT NOT NULL, comic_id TEXT NOT NULL,
@@ -146,8 +150,17 @@ class Store:
                 CREATE INDEX IF NOT EXISTS bika_sync_files_path ON bika_sync_files(path);
                 CREATE INDEX IF NOT EXISTS bika_sync_local_files_path ON bika_sync_local_files(path);
                 CREATE INDEX IF NOT EXISTS reading_comics_updated ON reading_comics(updated_at);
-                PRAGMA user_version=8;
+                PRAGMA user_version=9;
             """)
+            # v9: favorites rows keep the listing item and snapshot order so the whole collection can be filtered locally.
+            for table, columns in (("jm_favorites", ("item TEXT", "position INTEGER")),
+                                   ("bika_favorites", ("item TEXT", "position INTEGER")),
+                                   ("jm_favorite_catalog", ("sort TEXT NOT NULL DEFAULT ''",)),
+                                   ("bika_favorite_catalog", ("sort TEXT NOT NULL DEFAULT ''",))):
+                existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+                for column in columns:
+                    if column.split()[0] not in existing:
+                        db.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
 
     @contextmanager
     def connect(self):
@@ -208,19 +221,50 @@ class Store:
             raise ValueError("Invalid JM comic ID")
         return str(int(value))
 
-    def record_jm_favorites(self, owner, comic_ids, complete=False):
+    def record_jm_favorites(self, owner, comic_ids, complete=False, items=None, sort=""):
+        self._record_favorites("jm", self._jm_comic_id, owner, comic_ids, complete, items, sort)
+
+    def _record_favorites(self, source, normalize, owner, comic_ids, complete, items, sort):
+        """Upsert favorited rows; items (raw ID -> listing item) refresh stored card data.
+
+        A complete snapshot drops rows missing from it. With ``sort`` the IDs are in that listing
+        order and replace the stored positions; rows first seen later keep a NULL position.
+        """
         if not owner:
             return
-        ids = list(dict.fromkeys(self._jm_comic_id(value) for value in comic_ids))
+        ids = list(dict.fromkeys(normalize(value) for value in comic_ids))
+        stored = {normalize(key): json.dumps(value, ensure_ascii=False) for key, value in (items or {}).items()}
+        ordered = complete and bool(sort)
+        table, catalog = f"{source}_favorites", f"{source}_favorite_catalog"
         with self.connect() as db:
             if complete:
-                db.execute("DELETE FROM jm_favorites WHERE owner=?", (owner,))
-            db.executemany("""INSERT INTO jm_favorites(owner,comic_id,favorited) VALUES (?,?,1)
-                ON CONFLICT(owner,comic_id) DO UPDATE SET favorited=1,updated_at=CURRENT_TIMESTAMP""",
-                ((owner, comic_id) for comic_id in ids))
+                # Mark, upsert, sweep: rows outside the snapshot go away while kept rows retain their stored item.
+                db.execute(f"UPDATE {table} SET favorited=0{', position=NULL' if ordered else ''} WHERE owner=?", (owner,))
+            db.executemany(f"""INSERT INTO {table}(owner,comic_id,favorited,item,position) VALUES (?,?,1,?,?)
+                ON CONFLICT(owner,comic_id) DO UPDATE SET favorited=1,item=COALESCE(excluded.item,item),
+                position=COALESCE(excluded.position,position),updated_at=CURRENT_TIMESTAMP""",
+                ((owner, comic_id, stored.get(comic_id), index if ordered else None) for index, comic_id in enumerate(ids)))
             if complete:
-                db.execute("""INSERT INTO jm_favorite_catalog(owner) VALUES (?)
-                    ON CONFLICT(owner) DO UPDATE SET updated_at=CURRENT_TIMESTAMP""", (owner,))
+                db.execute(f"DELETE FROM {table} WHERE owner=? AND favorited=0", (owner,))
+                db.execute(f"""INSERT INTO {catalog}(owner,sort) VALUES (?,?)
+                    ON CONFLICT(owner) DO UPDATE SET updated_at=CURRENT_TIMESTAMP,
+                    sort=CASE WHEN excluded.sort<>'' THEN excluded.sort ELSE sort END""", (owner, sort or ""))
+
+    def favorite_catalog(self, source, owner, root):
+        """Favorited rows for one account joined with their local state under ``root``.
+
+        Rows favorited after the last ordered snapshot have no position and come first, newest first.
+        """
+        if source not in ("jm", "bika"):
+            raise ValueError("Unsupported favorites source")
+        with self.connect() as db:
+            meta = db.execute(f"SELECT updated_at, sort FROM {source}_favorite_catalog WHERE owner=?", (owner,)).fetchone()
+            rows = db.execute(f"""SELECT f.comic_id, f.item, f.position, s.status, s.title, s.path, s.images, s.message, s.checked_at
+                FROM {source}_favorites f LEFT JOIN {source}_local_status s ON s.root=? AND s.album_id=f.comic_id
+                WHERE f.owner=? AND f.favorited=1
+                ORDER BY f.position IS NOT NULL, f.position, f.updated_at DESC, f.comic_id""", (root, owner)).fetchall()
+        return {"complete": meta is not None, "updated_at": meta["updated_at"] if meta else None,
+                "sort": meta["sort"] if meta else "", "rows": [dict(row) for row in rows]}
 
     def set_jm_favorite(self, owner, comic_id, favorited):
         if not owner:
@@ -251,19 +295,8 @@ class Store:
             raise ValueError("Invalid Bika comic ID")
         return value
 
-    def record_bika_favorites(self, owner, comic_ids, complete=False):
-        if not owner:
-            return
-        ids = list(dict.fromkeys(self._bika_comic_id(value) for value in comic_ids))
-        with self.connect() as db:
-            if complete:
-                db.execute("DELETE FROM bika_favorites WHERE owner=?", (owner,))
-            db.executemany("""INSERT INTO bika_favorites(owner,comic_id,favorited) VALUES (?,?,1)
-                ON CONFLICT(owner,comic_id) DO UPDATE SET favorited=1,updated_at=CURRENT_TIMESTAMP""",
-                ((owner, comic_id) for comic_id in ids))
-            if complete:
-                db.execute("""INSERT INTO bika_favorite_catalog(owner) VALUES (?)
-                    ON CONFLICT(owner) DO UPDATE SET updated_at=CURRENT_TIMESTAMP""", (owner,))
+    def record_bika_favorites(self, owner, comic_ids, complete=False, items=None, sort=""):
+        self._record_favorites("bika", self._bika_comic_id, owner, comic_ids, complete, items, sort)
 
     def set_bika_favorite(self, owner, comic_id, favorited):
         if not owner:

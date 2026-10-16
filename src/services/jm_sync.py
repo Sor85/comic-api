@@ -36,6 +36,11 @@ class JmSync(FavoriteSync):
     def scopes(self, config):
         return [{"folder_id": folder_id, "order": "mr"} for folder_id in config["folder_ids"] or ["0"]]
 
+    catalog_sorts = ("mr", "mp")
+
+    def catalog_scope(self, sort):
+        return {"folder_id": "0", "order": sort}
+
     async def _chapter_data(self, config, album_id, chapter):
         chapter_id = numeric_id(chapter["id"])
         if config["directory_rule"] != JM_DIRECTORY_RULE:

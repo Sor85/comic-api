@@ -353,6 +353,16 @@ def create_app(store=None, sources=None):
             data = await asyncio.to_thread(sync.local_status, album_ids)
             return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
+        @app.get(f"{prefix}/catalog", name=f"{sync.source}_favorite_catalog")
+        async def favorite_catalog(local: str = Query("", pattern=r"^(|downloaded|missing)$"),
+                                   page: int = Query(1, ge=1, le=10000)):
+            data = await asyncio.to_thread(sync.catalog, local, page)
+            return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+        @app.post(f"{prefix}/catalog/refresh", status_code=202, name=f"refresh_{sync.source}_favorite_catalog")
+        async def refresh_favorite_catalog(sort: str = Query("", max_length=8)):
+            return sync.refresh_catalog(sort or None)
+
         @app.post(f"{prefix}/cancel", name=f"cancel_{sync.source}_sync")
         async def cancel_sync():
             return sync.cancel()

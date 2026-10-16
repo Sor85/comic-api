@@ -7,12 +7,13 @@ async function loadBikaFavoritesView(){
 }
 // Reloading the page already shown (tab re-entry, refresh) keeps its cards and only patches what changed remotely.
 async function loadBikaFavorites(){
-  const view=bikaFavorites,request=++view.request,box=$('bika-favorites-books'),key=`${view.page}|${view.sort}`,plugin=sourcePlugin('bika');
+  const view=bikaFavorites,catalog=favCatalogMode('bika',view),request=++view.request,box=$('bika-favorites-books'),plugin=sourcePlugin('bika');
+  const key=`${view.page}|${view.sort}|${catalog?$('bika-favorites-local').value:''}`;
   const canRead=plugin?.enabled!==false&&plugin?.capabilities.includes('favorites')&&(plugin.account?.authenticated||plugin.account?.configured);
   const keep=canRead&&view.loadedKey===key&&view.items.length>0;
   if(!keep){
-    view.loadedKey='';view.items=[];view.hasNext=false;box.keyedCards=null;view.selected.clear();syncBikaSelection();
-    $('bika-favorites-message').replaceChildren();$('bika-favorites-pager').hidden=true;$('bika-favorites-count').textContent='';
+    view.loadedKey='';view.items=[];view.hasNext=false;view.catalog=null;box.keyedCards=null;view.selected.clear();syncBikaSelection();
+    $('bika-favorites-message').replaceChildren();$('bika-favorites-catalog').replaceChildren();$('bika-favorites-pager').hidden=true;$('bika-favorites-count').textContent='';
   }
   if(plugin?.enabled===false){box.replaceChildren(emptyState('哔咔图源已关闭','账号和收藏保留；图源管理中可重新启用。',null,'bookmark'));return;}
   if(!plugin?.capabilities.includes('favorites')||!(plugin.account?.authenticated||plugin.account?.configured)){
@@ -21,6 +22,10 @@ async function loadBikaFavorites(){
   }
   if(!keep)box.replaceChildren(...skeletons(8));
   try{
+    if(catalog){
+      if(await loadFavCatalog('bika',view,request,loadBikaFavorites)){view.loadedKey=key;$('bika-favorites-message').replaceChildren();renderBikaFavorites();}
+      return;
+    }
     const data=await api('/api/bika/favorites?'+new URLSearchParams({page:view.page,sort:view.sort}),{cache:'no-store'});
     if(request!==view.request)return;
     if(keep){
@@ -59,7 +64,8 @@ function bikaCard(item){return syncableCard(item,'bika',bikaFavorites,syncBikaSe
 function renderBikaFavorites(){
   const items=filteredBikaFavorites(),box=$('bika-favorites-books');
   if(items.length)for(const el of renderKeyed(box,items,item=>String(item.id),bikaCardSignature,bikaCard))el.syncSelection?.();
-  else{box.keyedCards=null;box.replaceChildren(emptyState(bikaFavorites.items.length?'本页没有匹配漫画':'收藏为空',bikaFavorites.items.length?'筛选仅作用于当前页。':'远端账号暂无收藏漫画。',null,'bookmark'));}
+  else{box.keyedCards=null;box.replaceChildren(favCatalogMode('bika',bikaFavorites)&&bikaFavorites.catalog&&!bikaFavorites.items.length?favCatalogEmpty('bika',bikaFavorites):emptyState(bikaFavorites.items.length?'本页没有匹配漫画':'收藏为空',bikaFavorites.items.length?'筛选仅作用于当前页。':'远端账号暂无收藏漫画。',null,'bookmark'));}
+  renderFavCatalogNotice('bika',bikaFavorites,loadBikaFavorites);
   syncBikaSelection();
 }
 function syncBikaSelection(){syncSelectionBar('bika',bikaFavorites);}
@@ -67,10 +73,10 @@ FAV_SYNC.bika.onStatus=syncBikaSelection;
 $('bika-favorites-refresh').onclick=()=>run(loadBikaFavoritesView,$('bika-favorites-refresh'));
 $('bika-favorites-filter').onsubmit=event=>{event.preventDefault();renderBikaFavorites();};
 $('bika-favorites-keyword').oninput=renderBikaFavorites;
-$('bika-favorites-local').onchange=renderBikaFavorites;
+$('bika-favorites-local').onchange=()=>{bikaFavorites.page=1;run(loadBikaFavorites);};
 $('bika-favorites-sort').onchange=()=>{bikaFavorites.sort=$('bika-favorites-sort').value;bikaFavorites.page=1;run(loadBikaFavorites);};
 $('bika-favorites-prev').onclick=()=>{if(bikaFavorites.page>1){bikaFavorites.page--;run(loadBikaFavorites);}};
 $('bika-favorites-next').onclick=()=>{if(bikaFavorites.hasNext){bikaFavorites.page++;run(loadBikaFavorites);}};
 $('bika-select-page').onclick=()=>toggleSyncPage(bikaFavorites,filteredBikaFavorites().map(item=>String(item.id)),renderBikaFavorites);
 $('bika-sync-selected').onclick=()=>run(()=>startFavSync('bika',[...bikaFavorites.selected]),$('bika-sync-selected'));
-FAV_SYNC.bika.onLocalChange=async()=>{if(bikaFavorites.items.length&&await loadLocalStatus('bika',bikaFavorites.items.map(item=>String(item.id))))renderBikaFavorites();};
+FAV_SYNC.bika.onLocalChange=async()=>{if(favCatalogMode('bika',bikaFavorites)){run(loadBikaFavorites);return;}if(bikaFavorites.items.length&&await loadLocalStatus('bika',bikaFavorites.items.map(item=>String(item.id))))renderBikaFavorites();};

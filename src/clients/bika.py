@@ -305,20 +305,21 @@ class BikaClient(BaseClient):
         if not owner:
             return
         ids = [item["id"] for item in data["items"]]
-        self.store.record_bika_favorites(owner, ids)
+        self.store.record_bika_favorites(owner, ids, items=dict(zip(ids, data["items"])))
         page, total = data["page"], data["total"]
         if page == 1:
-            self._favorite_pages[sort] = {"next": 1, "total": total, "limit": data["page_size"], "ids": set()}
+            self._favorite_pages[sort] = {"next": 1, "total": total, "limit": data["page_size"], "ids": set(), "order": []}
         scan = self._favorite_pages.get(sort)
         if (not scan or page != scan["next"] or total != scan["total"]
                 or data["page_size"] != scan["limit"] or scan["ids"].intersection(ids)):
             self._favorite_pages.pop(sort, None)
             return
         scan["ids"].update(ids)
+        scan["order"].extend(ids)
         scan["next"] += 1
         if not data["has_next"]:
             if len(scan["ids"]) == total:
-                self.store.record_bika_favorites(owner, scan["ids"], complete=True)
+                self.store.record_bika_favorites(owner, scan["order"], complete=True, sort=sort)
             self._favorite_pages.pop(sort, None)
 
     def favorite_status(self, comic_id: str) -> dict:

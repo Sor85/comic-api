@@ -126,14 +126,27 @@ test('页内标题作者筛选不请求上游，筛选失败与空收藏分别�
   assert.equal(h.roots['bika-favorites-pager'].hidden,true);
 });
 
-test('按本地下载状态筛选：未下载包含未检查与本地异常',async()=>{
-  const h=harness(),items=['a','b','c','d'].map(id=>({...detail,id,title:`漫画${id}`}));
-  h.context.api=async path=>path.includes('local-status')?{items:{a:{status:'downloaded',images:3,path:'/d/a'},b:{status:'error',message:'坏图'},c:{status:'missing'}}}:page(items);
-  await h.context.loadBikaFavorites();await flush();
-  const shown=()=>h.roots['bika-favorites-books'].children.map(el=>el.item.id);
-  h.roots['bika-favorites-local'].value='downloaded';h.roots['bika-favorites-local'].onchange();assert.deepEqual(shown(),['a']);
-  h.roots['bika-favorites-local'].value='missing';h.roots['bika-favorites-local'].onchange();assert.deepEqual(shown(),['b','c','d']);
-  h.roots['bika-favorites-local'].value='';h.roots['bika-favorites-local'].onchange();assert.equal(shown().length,4);
+test('选择下载状态后按本地记录的全部收藏筛选，并可更新收藏列表',async()=>{
+  const h=harness();h.context.setTimeout=()=>0;h.context.clearTimeout=()=>{};
+  let refresh={active:false,sort:'',pages:0,total_pages:0,error:''};
+  const items=[{...detail,id:'b',title:'乙'},{...detail,id:'c',title:'丙'}];
+  h.context.api=async(path,options)=>{
+    h.calls.push({path,options});
+    if(path.startsWith('/api/bika/sync/catalog/refresh')){refresh={...refresh,active:true,pages:1,total_pages:3};return refresh;}
+    if(path.startsWith('/api/bika/sync/catalog'))return {complete:false,updated_at:null,sort:'',counts:{all:3,downloaded:1,missing:2},total:2,page:1,page_size:20,has_next:false,items,local:{b:{status:'error',message:'坏图'}},refresh};
+    return page([{...detail,id:'a',title:'甲'}]);
+  };
+  const shown=()=>h.roots['bika-favorites-books'].children.map(el=>el.item.id),notice=()=>h.roots['bika-favorites-catalog'];
+  await h.context.loadBikaFavorites();assert.deepEqual(shown(),['a']);
+  h.roots['bika-favorites-local'].value='missing';h.roots['bika-favorites-local'].onchange();await flush();
+  assert.match(h.calls.at(-1).path,/^\/api\/bika\/sync\/catalog\?local=missing&page=1$/);
+  assert.deepEqual(shown(),['b','c']);assert.equal(h.roots['bika-favorites-count'].textContent,'2 本');
+  assert.match(notice().textContent,/本地尚未记录完整收藏列表，当前按已记录的 3 本筛选/);
+  await notice().querySelector('button').onclick();await flush();
+  assert.equal(h.calls.find(call=>call.path.includes('/refresh')).path,'/api/bika/sync/catalog/refresh?sort=dd');
+  assert.match(notice().textContent,/正在更新收藏列表：第 1 \/ 3 页/);
+  h.roots['bika-favorites-local'].value='';h.roots['bika-favorites-local'].onchange();await flush();
+  assert.deepEqual(shown(),['a']);assert.equal(notice().children.length,0);
 });
 
 test('再次进入同一页不显示骨架屏，未变化卡片原样保留',async()=>{

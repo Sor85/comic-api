@@ -401,7 +401,7 @@ def test_existing_database_migration_keeps_download_checkpoints(tmp_path):
         db.execute("PRAGMA user_version=2")
     migrated = Store(tmp_path)
     with migrated.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 9
         assert db.execute("SELECT digest FROM jm_sync_files").fetchone()[0] == "digest"
         assert not db.execute("SELECT * FROM jm_sync_local_files").fetchall()
 

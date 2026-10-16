@@ -7,11 +7,12 @@ async function loadJmFavoritesView(){
 function jmCanRead(){const p=sourcePlugin('jm');return p?.enabled!==false&&p?.capabilities.includes('favorites')&&(p.account?.authenticated||p.account?.configured);}
 // Reloading the page already shown (tab re-entry, refresh) keeps its cards and only patches what changed remotely.
 async function loadJmFavorites(){
-  const request=++jm.request,box=$('jm-favorites-books'),key=`${jm.page}|${jm.folder}|${jm.order}`;
+  const catalog=favCatalogMode('jm',jm),request=++jm.request,box=$('jm-favorites-books');
+  const key=`${jm.page}|${jm.folder}|${jm.order}|${catalog?$('jm-favorites-local').value:''}`;
   const keep=jm.loadedKey===key&&jm.items.length>0&&jmCanRead();
   if(!keep){
-    jm.loadedKey='';box.keyedCards=null;jm.selected.clear();jm.items=[];syncJmSelection();
-    $('jm-favorites-message').replaceChildren();$('jm-favorites-pager').hidden=true;$('jm-favorites-count').textContent='';
+    jm.loadedKey='';box.keyedCards=null;jm.selected.clear();jm.items=[];jm.catalog=null;syncJmSelection();
+    $('jm-favorites-message').replaceChildren();$('jm-favorites-catalog').replaceChildren();$('jm-favorites-pager').hidden=true;$('jm-favorites-count').textContent='';
   }
   if(sourcePlugin('jm')?.enabled===false){box.replaceChildren(emptyState('JM 图源已关闭','账号、收藏和已完成文件保留；图源管理中可重新启用。',null,'bookmark'));return;}
   if(!jmCanRead()){
@@ -20,6 +21,10 @@ async function loadJmFavorites(){
   }
   if(!keep)box.replaceChildren(...skeletons(8));
   try{
+    if(catalog){
+      if(await loadFavCatalog('jm',jm,request,loadJmFavorites)){jm.loadedKey=key;$('jm-favorites-message').replaceChildren();renderJmBooks();}
+      return;
+    }
     const data=await api('/api/jm/favorites?'+new URLSearchParams({page:jm.page,folder_id:jm.folder,order:jm.order}));
     if(request!==jm.request)return;
     if(keep){
@@ -55,17 +60,18 @@ function renderJmBooks(){
   const items=filteredJmBooks(),box=$('jm-favorites-books');
   if(!items.length){
     box.keyedCards=null;
-    box.replaceChildren(emptyState(jm.items.length?'本页没有匹配漫画':'收藏夹为空',jm.items.length?'筛选仅作用于当前页。':'远端账号在此收藏夹中暂无漫画。',null,'bookmark'));
+    box.replaceChildren(favCatalogMode('jm',jm)&&jm.catalog&&!jm.items.length?favCatalogEmpty('jm',jm):emptyState(jm.items.length?'本页没有匹配漫画':'收藏夹为空',jm.items.length?'筛选仅作用于当前页。':'远端账号在此收藏夹中暂无漫画。',null,'bookmark'));
   }else for(const el of renderKeyed(box,items,item=>String(item.id),jmCardSignature,jmCard))el.syncSelection?.();
+  renderFavCatalogNotice('jm',jm,loadJmFavorites);
   syncJmSelection();
 }
 function syncJmSelection(){syncSelectionBar('jm',jm);}
 FAV_SYNC.jm.onStatus=syncJmSelection;
-FAV_SYNC.jm.onLocalChange=async()=>{if(jm.items.length&&await loadLocalStatus('jm',jm.items.map(item=>String(item.id))))renderJmBooks();};
+FAV_SYNC.jm.onLocalChange=async()=>{if(favCatalogMode('jm',jm)){run(loadJmFavorites);return;}if(jm.items.length&&await loadLocalStatus('jm',jm.items.map(item=>String(item.id))))renderJmBooks();};
 $('jm-favorites-refresh').onclick=()=>run(loadJmFavoritesView,$('jm-favorites-refresh'));
 $('jm-favorites-filter').onsubmit=event=>{event.preventDefault();renderJmBooks();};
 $('jm-favorites-keyword').oninput=renderJmBooks;
-$('jm-favorites-local').onchange=renderJmBooks;
+$('jm-favorites-local').onchange=()=>{if(jm.folder!=='0'){renderJmBooks();return;}jm.page=1;run(loadJmFavorites);};
 $('jm-favorites-folder').onchange=()=>{jm.folder=$('jm-favorites-folder').value;jm.page=1;run(loadJmFavorites);};
 $('jm-favorites-order').onchange=()=>{jm.order=$('jm-favorites-order').value;jm.page=1;run(loadJmFavorites);};
 $('jm-favorites-prev').onclick=()=>{if(jm.page>1){jm.page--;run(loadJmFavorites);}};

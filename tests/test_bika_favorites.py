@@ -295,7 +295,7 @@ def test_v4_database_migration_preserves_jm_and_library(tmp_path):
     assert migrated.books()[0]["library_category"] == "Existing category"
     assert migrated.bika_favorite_status(owner, comic_id(1)) is None
     with migrated.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 9
 
 
 def test_status_does_not_restore_session_or_read_remote(favorite_client):

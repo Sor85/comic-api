@@ -4,8 +4,8 @@
  * 同一套窗口按 favSync.source 显示对应图源；各图源的任务状态独立保存，页头入口始终反映自身图源的进度。
  */
 const FAV_SYNC = {
-  jm:{label:'JM',tab:'jm-favorites',folders:true,ids:['123456','123457']},
-  bika:{label:'哔咔',tab:'bika-favorites',folders:false,ids:['5e7f2a9c1b3d4e6f8a0b2c4d','1']},
+  jm:{label:'JM',tab:'jm-favorites',folders:true,ids:['123456','123457'],sortKey:'order',sorts:{mr:'收藏时间',mp:'更新时间'}},
+  bika:{label:'哔咔',tab:'bika-favorites',folders:false,ids:['5e7f2a9c1b3d4e6f8a0b2c4d','1'],sortKey:'sort',sorts:{dd:'最新上架',da:'最旧上架',ld:'最多喜欢',vd:'最多观看'}},
 };
 const favSync = {source:'jm',view:{},jm:{active:false,settings:null,local:{}},bika:{active:false,settings:null,local:{}}};
 const LOCAL_STATUS = {downloaded:{label:'已下载',tone:'ok',icon:'check'},error:{label:'本地异常',tone:'danger',icon:'alert'},missing:{label:'未下载',tone:'muted',icon:'download'}};
@@ -73,6 +73,47 @@ async function loadLocalStatus(source,ids){
 }
 // Toolbar filter by local state: "downloaded" keeps verified copies; "missing" keeps everything else, including comics flagged as broken.
 function matchesLocalFilter(source,id,filter){if(!filter)return true;const downloaded=favSync[source]?.local?.[id]?.status==='downloaded';return filter==='downloaded'?downloaded:!downloaded;}
+// With a local-state filter the whole collection is served from the favorites catalog recorded on the server;
+// JM custom folders keep filtering the current upstream page.
+function favCatalogMode(source,view){return Boolean($(`${source}-favorites-local`).value)&&(!FAV_SYNC[source].folders||view.folder==='0');}
+async function loadFavCatalog(source,view,request,reload){
+  const data=await api(`/api/${source}/sync/catalog?`+new URLSearchParams({local:$(`${source}-favorites-local`).value,page:view.page}),{cache:'no-store'});
+  if(request!==view.request)return false;
+  const ids=new Set(data.items.map(item=>String(item.id))),known=favSync[source].local;
+  for(const id of view.selected)if(!ids.has(id))view.selected.delete(id);
+  for(const id of ids)delete known[id];Object.assign(known,data.local);
+  view.items=data.items;view.hasNext=data.has_next;view.catalog=data;
+  $(`${source}-favorites-count`).textContent=`${data.total} 本`;
+  $(`${source}-favorites-page`).textContent=`第 ${data.page} / ${Math.max(1,Math.ceil(data.total/data.page_size))} 页`;
+  $(`${source}-favorites-prev`).disabled=view.page<=1;$(`${source}-favorites-next`).disabled=!data.has_next;
+  $(`${source}-favorites-pager`).hidden=!data.total;
+  clearTimeout(view.catalogPoll);
+  if(data.refresh.active)view.catalogPoll=setTimeout(()=>{if(state.tab===FAV_SYNC[source].tab&&favCatalogMode(source,view))run(reload);},1500);
+  return true;
+}
+async function refreshFavCatalog(source,view,reload){
+  await api(`/api/${source}/sync/catalog/refresh?`+new URLSearchParams({sort:view[FAV_SYNC[source].sortKey]}),{method:'POST'});
+  await reload();
+}
+const catalogTime=value=>value?new Date(value.replace(' ','T')+'Z').toLocaleString():'';
+function renderFavCatalogNotice(source,view,reload){
+  const box=$(`${source}-favorites-catalog`);
+  if(!$(`${source}-favorites-local`).value){box.replaceChildren();return;}
+  if(!favCatalogMode(source,view)){box.replaceChildren(node('span','下载状态筛选在自建收藏夹中仅作用于当前页。'));return;}
+  const data=view.catalog;if(!data){box.replaceChildren();return;}
+  const refresh=data.refresh,counts=data.counts;
+  if(refresh.active){box.replaceChildren(node('span',`正在更新收藏列表${refresh.total_pages?`：第 ${refresh.pages} / ${refresh.total_pages} 页`:'…'}`));return;}
+  const parts=[node('span',data.complete
+    ?`按本地记录的 ${counts.all} 本收藏筛选 · 已下载 ${counts.downloaded} · 未下载 ${counts.missing} · 按${FAV_SYNC[source].sorts[data.sort]||'记录'}排列 · 更新于 ${catalogTime(data.updated_at)}`
+    :`本地尚未记录完整收藏列表，当前按已记录的 ${counts.all} 本筛选。`)];
+  if(refresh.error)parts.push(node('span',`上次更新失败：${refresh.error}`,'error'));
+  parts.push(labelBtn('refresh-cw','更新收藏列表',()=>refreshFavCatalog(source,view,reload),'small'));
+  box.replaceChildren(...parts);
+}
+function favCatalogEmpty(source,view){
+  const label=$(`${source}-favorites-local`).value==='downloaded'?'已下载':'未下载';
+  return emptyState(`没有${label}的漫画`,view.catalog.complete?'按本地记录的全部收藏筛选。':'本地尚未记录完整收藏列表，更新收藏列表后重新筛选。',null,'bookmark');
+}
 function localStatusSignature(source,id){const local=favSync[source]?.local?.[id];return local?[local.status,local.images,local.message,local.path]:null;}
 function syncSelectionBar(source,view){
   const selected=$(`${source}-sync-selected`);selected.hidden=!view.selected.size;selected.textContent=`同步所选（${view.selected.size}）`;selected.disabled=favSync[source].active;

@@ -19,3 +19,8 @@ class BikaSync(FavoriteSync):
     def scopes(self, config):
         # Bika has no favorite folders; "da" (oldest first) keeps pages stable while new favorites arrive.
         return [{"sort": "da"}]
+
+    catalog_sorts = ("dd", "da", "ld", "vd")
+
+    def catalog_scope(self, sort):
+        return {"sort": sort}
