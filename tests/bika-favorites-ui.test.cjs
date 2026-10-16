@@ -11,7 +11,7 @@ class Element {
   constructor(tag) {
     this.tagName=tag;this.children=[];this.className='';this.disabled=false;this.value='';
     this.classes=new Set();this.classList={toggle:(name,on)=>on?this.classes.add(name):this.classes.delete(name),add:name=>this.classes.add(name)};
-    this.dataset={};this.listeners={};
+    this.dataset={};this.listeners={};this.style={};
   }
   set textContent(value) { this.text=String(value);this.children=[]; }
   get textContent() { return (this.text||'')+this.children.map(child=>child.textContent).join(''); }
@@ -144,7 +144,7 @@ test('选择下载状态后按本地记录的全部收藏筛选，并可更新�
   assert.match(notice().textContent,/本地尚未记录完整收藏列表，当前按已记录的 3 本筛选/);
   await notice().querySelector('button').onclick();await flush();
   assert.equal(h.calls.find(call=>call.path.includes('/refresh')).path,'/api/bika/sync/catalog/refresh?sort=dd');
-  assert.match(notice().textContent,/正在更新收藏列表：第 1 \/ 3 页/);
+  assert.match(notice().textContent,/正在更新收藏列表.*第 1 \/ 3 页/);
   h.roots['bika-favorites-local'].value='';h.roots['bika-favorites-local'].onchange();await flush();
   assert.deepEqual(shown(),['a']);assert.equal(notice().children.length,0);
 });

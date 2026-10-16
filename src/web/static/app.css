@@ -583,8 +583,8 @@ body.site-settings-open{overflow:hidden}
 .pane-intro p{margin:2px 0 0;font-size:13px;color:var(--muted)}
 .pane-intro.with-actions{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .pane-actions{display:flex;gap:6px}
-.pane-actions .small{border-radius:999px;background:var(--group);border-color:transparent;color:var(--muted)}
-.pane-actions .small:hover{color:var(--text)}
+.pane-actions .small,.fav-catalog .small{border-radius:999px;background:var(--group);border-color:transparent;color:var(--muted)}
+.pane-actions .small:hover,.fav-catalog .small:hover{color:var(--text)}
 .health-legend{display:flex;align-items:center}
 .health-legend .health-dot{margin-right:8px}
 .title-line{display:inline-flex;align-items:center;gap:6px;min-width:0}
@@ -813,6 +813,29 @@ button.danger-soft:hover{border-color:var(--danger)}
 .jm-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
 .bika-favorites-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
 .fav-view .pager .icon-btn{border-radius:50%}
+/* 本地记录摘要：按下载状态筛选时出现在工具栏下方，浅卡片收纳计数、排序与更新时间，「更新收藏列表」退为卡片内的轻量胶囊。 */
+.status.fav-catalog{margin-top:14px;min-height:44px;padding:5px 5px 5px 8px;gap:4px 6px;border-radius:14px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--hairline);font-size:13px;line-height:1.5}
+.fav-catalog[data-state]{padding-left:14px;gap:4px 10px}
+.fav-catalog[data-state=note],.fav-catalog[data-state=busy]{padding-right:14px}
+.fav-catalog[data-state=warn]{color:var(--warn);background:color-mix(in srgb,var(--warn) 7%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 24%,transparent)}
+.fav-catalog-icon{display:flex;color:var(--muted)}
+.fav-catalog-icon svg{width:16px;height:16px}
+.fav-catalog[data-state=warn] .fav-catalog-icon{color:inherit}
+.fav-catalog-icon.spin{color:var(--accent)}
+.fav-catalog-icon.spin svg{animation:sync-spin 1.2s linear infinite}
+.fav-catalog-stat{--tone:var(--muted);display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;color:var(--muted);white-space:nowrap}
+.fav-catalog-stat.ok{--tone:var(--ok)}
+.fav-catalog-stat svg{width:14px;height:14px;color:var(--tone)}
+.fav-catalog-stat b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.fav-catalog-stat.active{color:var(--tone);background:color-mix(in srgb,var(--tone) 12%,transparent)}
+.fav-catalog-stat.muted.active{--tone:var(--text)}
+.fav-catalog-stat.active b{color:inherit}
+.fav-catalog-end{margin-left:auto;display:inline-flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px 12px}
+.fav-catalog-meta{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.fav-catalog .small{padding:6px 13px}
+.fav-catalog-progress{flex:0 1 140px;height:4px;border-radius:999px;background:var(--group);overflow:hidden}
+.fav-catalog-progress>span{display:block;height:100%;border-radius:inherit;background:var(--accent)}
+.fav-catalog-error{flex-basis:100%;padding:0 10px 4px;font-size:12.5px}
 /* Selection marks sit on the cover corner, iOS photo-picker style. */
 .card .select-mark{position:absolute;top:8px;right:8px;z-index:3;width:28px;height:28px;margin:0;display:grid;place-items:center;border-radius:50%;background:#00000059;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);box-shadow:inset 0 0 0 1.5px #ffffffd9;opacity:0;transform:scale(.85);transition:opacity .18s,transform .18s,background-color .18s}
 .card:hover .select-mark,.card .select-mark:focus-within,.selecting .select-mark,.card.selected .select-mark{opacity:1;transform:none}

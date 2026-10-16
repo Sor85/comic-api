@@ -96,18 +96,43 @@ async function refreshFavCatalog(source,view,reload){
   await reload();
 }
 const catalogTime=value=>value?new Date(value.replace(' ','T')+'Z').toLocaleString():'';
+function catalogIcon(name,className){const n=node('span',undefined,'fav-catalog-icon'+(className?' '+className:''));n.innerHTML=svgIcon(name);return n;}
+function catalogStat(label,value,icon,tone,active){
+  const n=node('span',undefined,`fav-catalog-stat ${tone}${active?' active':''}`);
+  n.innerHTML=svgIcon(icon);n.append(node('span',label),node('b',String(value)));return n;
+}
+// 本地记录摘要：计数在左、当前筛选项高亮；排序、更新时间与「更新收藏列表」靠右。
 function renderFavCatalogNotice(source,view,reload){
-  const box=$(`${source}-favorites-catalog`);
-  if(!$(`${source}-favorites-local`).value){box.replaceChildren();return;}
-  if(!favCatalogMode(source,view)){box.replaceChildren(node('span','下载状态筛选在自建收藏夹中仅作用于当前页。'));return;}
+  const box=$(`${source}-favorites-catalog`),filter=$(`${source}-favorites-local`).value;
+  delete box.dataset.state;
+  if(!filter){box.replaceChildren();return;}
+  if(!favCatalogMode(source,view)){box.dataset.state='note';box.replaceChildren(catalogIcon('alert'),node('span','下载状态筛选在自建收藏夹中仅作用于当前页。'));return;}
   const data=view.catalog;if(!data){box.replaceChildren();return;}
   const refresh=data.refresh,counts=data.counts;
-  if(refresh.active){box.replaceChildren(node('span',`正在更新收藏列表${refresh.total_pages?`：第 ${refresh.pages} / ${refresh.total_pages} 页`:'…'}`));return;}
-  const parts=[node('span',data.complete
-    ?`按本地记录的 ${counts.all} 本收藏筛选 · 已下载 ${counts.downloaded} · 未下载 ${counts.missing} · 按${FAV_SYNC[source].sorts[data.sort]||'记录'}排列 · 更新于 ${catalogTime(data.updated_at)}`
-    :`本地尚未记录完整收藏列表，当前按已记录的 ${counts.all} 本筛选。`)];
-  if(refresh.error)parts.push(node('span',`上次更新失败：${refresh.error}`,'error'));
-  parts.push(labelBtn('refresh-cw','更新收藏列表',()=>refreshFavCatalog(source,view,reload),'small'));
+  if(refresh.active){
+    box.dataset.state='busy';
+    const parts=[catalogIcon('refresh-cw','spin'),node('span','正在更新收藏列表')];
+    if(refresh.total_pages){
+      const bar=node('span',undefined,'fav-catalog-progress'),fill=node('span');
+      fill.style.width=`${Math.min(100,refresh.pages/refresh.total_pages*100)}%`;bar.append(fill);
+      parts.push(bar,node('span',`第 ${refresh.pages} / ${refresh.total_pages} 页`,'fav-catalog-meta'));
+    }
+    box.replaceChildren(...parts);return;
+  }
+  const end=node('span',undefined,'fav-catalog-end'),parts=[];
+  if(data.complete){
+    parts.push(catalogStat('本地记录',counts.all,'bookmark','all',false),
+      ...['downloaded','missing'].map(key=>catalogStat(LOCAL_STATUS[key].label,counts[key],LOCAL_STATUS[key].icon,LOCAL_STATUS[key].tone,filter===key)));
+    const meta=node('span',`按${FAV_SYNC[source].sorts[data.sort]||'记录'}排列 · 更新于 ${timeAgo(data.updated_at)}`,'fav-catalog-meta');
+    meta.dataset.tipText=`按本地记录的 ${counts.all} 本收藏筛选，更新于 ${catalogTime(data.updated_at)}`;
+    end.append(meta);
+  }else{
+    box.dataset.state='warn';
+    parts.push(catalogIcon('alert'),node('span',`本地尚未记录完整收藏列表，当前按已记录的 ${counts.all} 本筛选。`));
+  }
+  end.append(labelBtn('refresh-cw','更新收藏列表',()=>refreshFavCatalog(source,view,reload),'small'));
+  parts.push(end);
+  if(refresh.error)parts.push(node('span',`上次更新失败：${refresh.error}`,'error fav-catalog-error'));
   box.replaceChildren(...parts);
 }
 function favCatalogEmpty(source,view){
