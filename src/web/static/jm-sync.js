@@ -46,7 +46,8 @@ async function loadJmFavorites(){
 }
 function filteredJmBooks(){
   const keyword=$('jm-favorites-keyword').value.trim().toLocaleLowerCase();
-  return jm.items.filter(item=>!keyword||`${item.title} ${item.author||''}`.toLocaleLowerCase().includes(keyword));
+  const local=$('jm-favorites-local').value;
+  return jm.items.filter(item=>(!keyword||`${item.title} ${item.author||''}`.toLocaleLowerCase().includes(keyword))&&matchesLocalFilter('jm',String(item.id),local));
 }
 function jmCard(item){return syncableCard(item,'jm',jm,syncJmSelection);}
 function jmCardSignature(item){return [localStatusSignature('jm',String(item.id)),item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
@@ -64,6 +65,7 @@ FAV_SYNC.jm.onLocalChange=async()=>{if(jm.items.length&&await loadLocalStatus('j
 $('jm-favorites-refresh').onclick=()=>run(loadJmFavoritesView,$('jm-favorites-refresh'));
 $('jm-favorites-filter').onsubmit=event=>{event.preventDefault();renderJmBooks();};
 $('jm-favorites-keyword').oninput=renderJmBooks;
+$('jm-favorites-local').onchange=renderJmBooks;
 $('jm-favorites-folder').onchange=()=>{jm.folder=$('jm-favorites-folder').value;jm.page=1;run(loadJmFavorites);};
 $('jm-favorites-order').onchange=()=>{jm.order=$('jm-favorites-order').value;jm.page=1;run(loadJmFavorites);};
 $('jm-favorites-prev').onclick=()=>{if(jm.page>1){jm.page--;run(loadJmFavorites);}};

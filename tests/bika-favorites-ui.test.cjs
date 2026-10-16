@@ -126,6 +126,16 @@ test('页内标题作者筛选不请求上游，筛选失败与空收藏分别�
   assert.equal(h.roots['bika-favorites-pager'].hidden,true);
 });
 
+test('按本地下载状态筛选：未下载包含未检查与本地异常',async()=>{
+  const h=harness(),items=['a','b','c','d'].map(id=>({...detail,id,title:`漫画${id}`}));
+  h.context.api=async path=>path.includes('local-status')?{items:{a:{status:'downloaded',images:3,path:'/d/a'},b:{status:'error',message:'坏图'},c:{status:'missing'}}}:page(items);
+  await h.context.loadBikaFavorites();await flush();
+  const shown=()=>h.roots['bika-favorites-books'].children.map(el=>el.item.id);
+  h.roots['bika-favorites-local'].value='downloaded';h.roots['bika-favorites-local'].onchange();assert.deepEqual(shown(),['a']);
+  h.roots['bika-favorites-local'].value='missing';h.roots['bika-favorites-local'].onchange();assert.deepEqual(shown(),['b','c','d']);
+  h.roots['bika-favorites-local'].value='';h.roots['bika-favorites-local'].onchange();assert.equal(shown().length,4);
+});
+
 test('再次进入同一页不显示骨架屏，未变化卡片原样保留',async()=>{
   const h=harness(),items=[{...detail,cover:'/api/image/proxy?source=bika&url=https%3A%2F%2Fa.example%2F1.jpg'},{...detail,id:'b',title:'另一本'}];
   let resolve;h.context.api=async()=>page(items);

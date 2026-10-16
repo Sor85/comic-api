@@ -71,6 +71,8 @@ async function loadLocalStatus(source,ids){
     favSync[source].local=next;return changed;
   }catch{return false;}
 }
+// Toolbar filter by local state: "downloaded" keeps verified copies; "missing" keeps everything else, including comics flagged as broken.
+function matchesLocalFilter(source,id,filter){if(!filter)return true;const downloaded=favSync[source]?.local?.[id]?.status==='downloaded';return filter==='downloaded'?downloaded:!downloaded;}
 function localStatusSignature(source,id){const local=favSync[source]?.local?.[id];return local?[local.status,local.images,local.message,local.path]:null;}
 function syncSelectionBar(source,view){
   const selected=$(`${source}-sync-selected`);selected.hidden=!view.selected.size;selected.textContent=`同步所选（${view.selected.size}）`;selected.disabled=favSync[source].active;
