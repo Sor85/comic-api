@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlparse
 from PIL import Image
 
 from src.errors import ComicApiError, DownloadCancelled
-from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_name
+from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_name, cut_of, fits
 from src.services.local_images import MAX_IMAGE_BYTES, file_digest, numeric_id, plain_chapter_name, safe_name
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"}
@@ -120,7 +120,11 @@ class LocalLibrary:
         candidates = self.children(album)
         if self.jm_names:
             expected = chapter_name(chapter)
-            return self.unique([path for path in candidates if path.name == expected], "Pindextitle")
+            named = [path for path in candidates if path.name == expected]
+            if not named and not fits(expected):
+                # An over-long name exists only cut down: by JMComic under any save root, or by this project.
+                named = [path for path in candidates if cut_of(path.name, expected)]
+            return self.unique(named, "Pindextitle")
         chapter_id = numeric_id(chapter["id"], self.source)
         identified = [p for p in candidates if directory_id(p.name) == chapter_id]
         keys = name_keys(chapter.get("name")) | name_keys(plain_chapter_name(chapter, index))

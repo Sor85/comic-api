@@ -344,9 +344,9 @@
           <p id="fav-directory-preview" class="jm-path path-preview"></p>
           <details class="hint-details">
             <summary>目录规则说明</summary>
-            <p data-source="jm">“【作者】原标题 / 第N話 章节标题”对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle 规则：漫画目录为“【第一作者】原标题”，章节目录为“第N話 完整章节标题”。不附加 ID，不合并多位作者，不去重标题原有的“第N話”。本地检查按相同规则核对目录。</p>
+            <p data-source="jm">“【作者】原标题 / 第N話 章节标题”对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle 规则：漫画目录为“【第一作者】原标题”，章节目录为“第N話 完整章节标题”。不附加 ID，不合并多位作者，不去重标题原有的“第N話”。本地检查按相同规则核对目录。章节目录名超过 255 字节时按 JMComic 的做法截短：整条保存路径保留前 100 个字符；截短后缺少“第N話”时改为只把章节目录名截短到 255 字节。漫画目录名超过 255 字节时截短到 255 字节。本地检查同时识别 JMComic 在其他保存路径下截短的章节目录。</p>
             <p>已有“漫画名 / 章节名 / 图片”目录可通过“检查本地漫画”识别，无需补上 ID；下载目录应设为所有漫画文件夹的上一级。目录层级只控制新下载的文件，不会重命名已检查的漫画。</p>
-            <p>“漫画标题 / 第N話 章节标题”是无 ID 规则，输出为“漫画标题/第1話 章节标题/图片”，不附加 ID，也不使用“001 -”。合法标题不截断；单个目录名超过 255 字节或目录已关联其他漫画时报告冲突。</p>
+            <p>“漫画标题 / 第N話 章节标题”是无 ID 规则，输出为“漫画标题/第1話 章节标题/图片”，不附加 ID，也不使用“001 -”。目录名不超过 255 字节时保留完整标题，超过时截短到 255 字节；目录已关联其他漫画时报告冲突。</p>
           </details>
         </section>
         <section id="fav-sync-scope-section" class="form-section" data-source="jm">

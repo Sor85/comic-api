@@ -51,8 +51,8 @@ def test_plain_rule_preserves_long_titles_and_existing_rules_stay_unchanged(tmp_
     assert previous.parts[-2:] == (f"{safe_name(title)} [101]", f"001 - {safe_name(chapter_title)} [1011]")
 
 
-@pytest.mark.parametrize("field", ["album", "chapter"])
-def test_plain_rule_rejects_oversized_names_without_silent_truncation(tmp_path, field):
+@pytest.mark.parametrize("field, expected", [("album", "长" * 85), ("chapter", "第1話 " + "长" * 82)])
+def test_plain_rule_cuts_oversized_names_to_filesystem_limit(tmp_path, field, expected):
     sync, plugin = plain_sync(tmp_path)
     book = plugin.detail("101")
     chapter = dict(book["chapters"][0])
@@ -60,8 +60,8 @@ def test_plain_rule_rejects_oversized_names_without_silent_truncation(tmp_path, 
         book["title"] = "长" * 86
     else:
         chapter["name"] = "长" * 84
-    with pytest.raises(ComicApiError, match="超过 255 字节"):
-        sync.paths.chapter(sync.settings(), book, chapter, 1)
+    target = sync.paths.chapter(sync.settings(), book, chapter, 1)
+    assert (target.parent.name if field == "album" else target.name) == expected
     assert not Path(sync.settings()["download_dir"]).exists()
 
 
@@ -196,3 +196,21 @@ def test_plain_rule_setting_and_ui_option(jm_client):
     assert jm_client.get("/api/jm/sync/settings").json()["settings"]["directory_rule"] == "title_plain"
     assert 'value="title_plain">漫画标题 / 第N話 章节标题</option>' in jm_client.get("/").text
     assert "漫画标题/第1話 章节标题" in jm_client.get("/static/favorite-sync.js").text
+
+
+def test_plain_rule_check_finds_directories_cut_by_sync(tmp_path):
+    async def scenario():
+        sync, plugin = plain_sync(tmp_path)
+        original = plugin.detail
+        long = {"title": "很长的标题" * 20, "chapters": [{"id": "1011", "name": "很长的章节名" * 20}]}
+        plugin.detail = lambda cid: dict(original(cid), **(long if cid == "101" else {}))
+        sync.launch(["101"])
+        await sync.task
+        assert sync.current["status"] == "completed" and sync.current["downloaded"] == 2, sync.current
+        [album] = Path(sync.settings()["download_dir"]).iterdir()
+        [chapter] = album.iterdir()
+        assert len(album.name.encode()) <= 255 and len(chapter.name.encode()) <= 255
+        sync.launch(check_local=True)
+        await sync.task
+        assert sync.current["local_albums"] == 1 and sync.current["local_images"] == 2, sync.current
+    asyncio.run(scenario())

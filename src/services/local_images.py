@@ -12,7 +12,7 @@ from PIL import Image
 
 from src.errors import ComicApiError, DownloadCancelled
 from src.services.image_proxy import ensure_public_url
-from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_name, validate_name
+from src.services.jm_naming import JM_DIRECTORY_RULE, MAX_NAME_BYTES, album_name, chapter_directory, validate_name
 
 
 DIRECTORY_RULES = {
@@ -42,7 +42,7 @@ def plain_chapter_name(chapter, index):
     prefix = re.match(r"^第\s*([0-9]+)\s*[話话]\s*(.*)$", title, re.DOTALL)
     if prefix and int(prefix[1]) == index:
         title = prefix[2].strip()
-    return safe_name(f"第{index}話 {title}", max_bytes=None)
+    return safe_name(f"第{index}話 {title}", max_bytes=MAX_NAME_BYTES)
 
 
 def numeric_id(value, source="jm"):
@@ -117,9 +117,7 @@ class DownloadPaths:
         elif rule == JM_DIRECTORY_RULE:
             album = validate_name(album_name(book))
         elif rule == "title_plain":
-            album = safe_name(book["title"], max_bytes=None)
-            if len(album.encode("utf-8")) > 255:
-                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", self.source)
+            album = safe_name(book["title"], max_bytes=MAX_NAME_BYTES)
         else:
             album = f"{safe_name(book['title'])} [{album_id}]"
             if rule == "author":
@@ -133,11 +131,9 @@ class DownloadPaths:
         if rule == "id":
             episode = chapter_id
         elif rule == JM_DIRECTORY_RULE:
-            episode = validate_name(chapter_name(chapter))
+            episode = validate_name(chapter_directory(album, chapter))
         elif rule == "title_plain":
             episode = plain_chapter_name(chapter, index)
-            if len(episode.encode("utf-8")) > 255:
-                raise ComicApiError("无 ID 目录名称超过 255 字节，未截断标题；需调整标题或改用带 ID 规则", 422, "invalid_directory", self.source)
         else:
             episode = f"{index:03d} - {safe_name(chapter.get('name'))} [{chapter_id}]"
         return self.resolve(album / episode)

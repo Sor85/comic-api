@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.errors import ComicApiError, DownloadCancelled
 from src.services.jm_local import LocalLibrary, local_file_valid
-from src.services.jm_naming import JM_DIRECTORY_RULE, chapter_name, validate_name
+from src.services.jm_naming import JM_DIRECTORY_RULE, chapter_directory, validate_name
 from src.services.local_images import (
     DIRECTORY_RULES, FORMATS, DownloadPaths, file_digest, numeric_id, receive_image, write_atomic,
 )
@@ -721,7 +721,7 @@ class FavoriteSync:
         matched = [path for path in found if path]
         if len(set(matched)) != len(matched):
             raise ComicApiError("多个章节匹配到同一目录，未自动修复", 409, "local_ambiguous", self.source)
-        names = [self._chapter_dir_name(config, book, chapter, index) for index, (_, chapter) in enumerate(prepared, 1)]
+        names = [self._chapter_dir_name(config, book, chapter, index, album) for index, (_, chapter) in enumerate(prepared, 1)]
         used, spare = set(matched), {}
         for path in local.children(album):
             title = local.episode_title(path.name)
@@ -757,9 +757,9 @@ class FavoriteSync:
         local.directories.pop(self.paths.resolve(album), None)
         return targets
 
-    def _chapter_dir_name(self, config, book, chapter, index):
+    def _chapter_dir_name(self, config, book, chapter, index, album):
         if config["directory_rule"] == JM_DIRECTORY_RULE:
-            return validate_name(chapter_name(chapter))
+            return validate_name(chapter_directory(album, chapter))
         return self.paths.chapter(config, book, chapter, index).name
 
     def _recorded_elsewhere(self, directory, album_id, chapter_id):

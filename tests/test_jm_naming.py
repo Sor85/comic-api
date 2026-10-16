@@ -6,7 +6,7 @@ import pytest
 
 from src.clients.jm import JmClient
 from src.errors import ComicApiError
-from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_name, directory_name, original_name
+from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_directory, chapter_name, directory_name, original_name
 from src.services.jm_sync import SyncSettings
 from tests.test_jm_sync import isolated_environment, jm_client, make_sync
 
@@ -63,8 +63,94 @@ def test_compatibility_preserves_long_names_without_appending_ids(tmp_path):
     path = sync.paths.chapter(config, book, chapter, 1)
     assert path.parts[-2:] == (f"【作者】{title}", "第12話 " + "章节标题" * 12)
     chapter["name"] = "长" * 90
-    with pytest.raises(ComicApiError, match="超过 255 字节"):
-        sync.paths.chapter(config, book, chapter, 1)
+    cut = sync.paths.chapter(config, book, chapter, 1)
+    assert cut.parent == path.parent and ("第12話 " + "长" * 90).startswith(cut.name) and len(cut.name.encode()) <= 255
+
+
+LONG_TITLE = ("魔物棲息之所 時隔6年再會被已經變成家里蹲的朋友的姐姐要挾然後被榨取精液的故事 [白楊漢化組][鄰居toby去碼] [桃汁庭園 (桃雲)] "
+              "マモノノヘヤ ～6年ぶりに再會したら引きこもりニートになっていた親友のお姉さんに迫られて精液を搾り取られる話～ [中國翻譯] [無修正] [DL版]")
+
+
+def test_over_long_chapter_name_is_cut_like_jmcomic_save_path():
+    chapter = {"id": "101", "name": LONG_TITLE, "sort": "2", "series_id": "0"}
+    full = f"第1話 {LONG_TITLE}"
+    assert len(full.encode()) == 378
+    # JMComic 2.6.13 (JmcomicText.try_mkdir) retries the save path cut to its first 100 characters.
+    assert chapter_directory("/data/本子/【桃雲】魔物棲息之所", chapter) == (
+        "第1話 魔物棲息之所 時隔6年再會被已經變成家里蹲的朋友的姐姐要挾然後被榨取精液的故事 [白楊漢化組][鄰居toby去碼] [桃汁庭園 (桃雲)] マモノノヘヤ")
+    # When that cut would drop the 第N話 label, only the name is cut to the 255-byte filesystem limit.
+    deep = chapter_directory("/data/" + "子" * 95, chapter)
+    assert full.startswith(deep) and len(deep.encode()) == 253
+    short = {"id": "102", "name": "短标题", "sort": "1", "series_id": "101"}
+    assert chapter_directory("/data/" + "子" * 95, short) == "第1話 短标题"
+    assert album_name({"title": "长" * 90, "authors": ["作者"]}) == "【作者】" + "长" * 81
+
+
+def long_single_sync(tmp_path):
+    sync, plugin, client, album, photos, calls = api_sync(tmp_path, single=True)
+    photos["101"]["name"] = LONG_TITLE
+    return sync, plugin, Path(sync.settings()["download_dir"]) / "【ひとにたち】ヒトメボレ"
+
+
+def test_check_imports_chapter_directory_cut_by_jmcomic_under_another_root(tmp_path):
+    async def scenario():
+        sync, plugin, album_dir = long_single_sync(tmp_path)
+        # JMComic ran with another save root, so its 100-character cut has a different length.
+        target = album_dir / f"/volume1/jm/【ひとにたち】ヒトメボレ/第1話 {LONG_TITLE}"[:100].rsplit("/", 1)[1]
+        target.mkdir(parents=True)
+        for page in (1, 2):
+            (target / f"{page:05d}.png").write_bytes(plugin.picture)
+        sync.launch(check_local=True)
+        await sync.task
+        assert sync.current["local_albums"] == 1 and sync.current["local_images"] == 2, sync.current
+        sync.launch(["101"])
+        await sync.task
+        assert sync.current["skipped"] == 2 and not plugin.requests
+        assert [p.name for p in album_dir.iterdir()] == [target.name]
+    asyncio.run(scenario())
+
+
+def test_sync_cuts_over_long_chapter_directory_and_check_finds_it(tmp_path):
+    async def scenario():
+        sync, plugin, album_dir = long_single_sync(tmp_path)
+        sync.launch(["101"])
+        await sync.task
+        assert sync.current["status"] == "completed" and sync.current["downloaded"] == 2, sync.current
+        [directory] = album_dir.iterdir()
+        assert f"第1話 {LONG_TITLE}".startswith(directory.name) and len(directory.name.encode()) <= 255
+        sync.launch(check_local=True)
+        await sync.task
+        assert sync.current["local_albums"] == 1 and sync.current["local_images"] == 2, sync.current
+    asyncio.run(scenario())
+
+
+def test_two_cut_directories_for_one_chapter_are_ambiguous(tmp_path):
+    async def scenario():
+        sync, plugin, album_dir = long_single_sync(tmp_path)
+        for name in ("第1話 魔物棲息之所", "第1話 魔物棲息之所 時隔6年"):
+            (album_dir / name).mkdir(parents=True)
+        sync.launch(check_local=True)
+        await sync.task
+        assert sync.current["local_albums"] == 0
+        assert "Pindextitle匹配到多个目录" in sync.current["errors"][0]["message"]
+    asyncio.run(scenario())
+
+
+def test_repair_downloads_over_long_chapter_into_existing_album_directory(tmp_path):
+    async def scenario():
+        sync, plugin, album_dir = long_single_sync(tmp_path)
+        # JMComic created the album directory, then failed on the over-long chapter directory.
+        album_dir.mkdir(parents=True)
+        sync.launch(check_local=True)
+        await sync.task
+        assert sync.local_status(["101"])["items"]["101"]["status"] == "error"
+        sync.launch(["101"], repair=True)
+        await sync.task
+        assert sync.current["status"] == "completed" and sync.current["downloaded"] == 2, sync.current
+        [directory] = album_dir.iterdir()
+        assert f"第1話 {LONG_TITLE}".startswith(directory.name) and len(directory.name.encode()) <= 255
+        assert sync.local_status(["101"])["items"]["101"]["status"] == "downloaded"
+    asyncio.run(scenario())
 
 
 def test_name_cleaning_preserves_upstream_order_and_author_whitespace():
