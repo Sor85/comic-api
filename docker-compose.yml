@@ -1,8 +1,6 @@
 services:
   comic-api:
-    build:
-      context: .
-    image: comic-api:local
+    image: ghcr.io/sor85/comic-api:main
     container_name: comic-api
     ports:
       - "34587:8699"

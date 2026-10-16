@@ -68,13 +68,14 @@ docker compose pull
 docker compose up -d
 ```
 
-环境变量说明见 `.env.example`。升级时重复以上两条命令。`./data` 保存数据库、加密密钥与默认同步目录，备份时整个目录一起备份。
+仓库自带的 `docker-compose.yml` 即上方配置。环境变量说明见 `.env.example`。升级时重复以上两条命令。`./data` 保存数据库、加密密钥与默认同步目录，备份时整个目录一起备份。
 
 ### 从源码运行
 
 ```bash
 cp .env.example .env
-docker compose up -d --build
+docker build -t ghcr.io/sor85/comic-api:main .
+docker compose up -d
 ```
 
 访问 http://localhost:34587 。本地运行使用 `pip install -r requirements.txt && python main.py`，端口 8699。只运行一个服务进程。
