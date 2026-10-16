@@ -725,6 +725,7 @@ async function loadLibrary() {
   const data=await api('/api/library');state.books=data.items;state.categories=data.categories||[];
   options($('library-category'),[{value:'*',label:'全部分类'},{value:'',label:'未分类'},...state.categories.map(v=>({value:v,label:v}))],$('library-category').value);
   $('library-count').textContent=state.books.length?String(state.books.length):'';
+  state.libraryMenu?.sync();
   filterBooks();
 }
 // Library cards keyed by book; unchanged cards stay mounted so covers and entrance animations do not replay.
@@ -1318,7 +1319,7 @@ function restorePage(snap){
   if(tab==='settings')run(openSiteSettings);
 }
 window.addEventListener('popstate',event=>restorePage(event.state));
-$('library-refresh').onclick=()=>run(loadLibrary,$('library-refresh'));$('library-category').onchange=filterBooks;$('library-sort').onchange=filterBooks;$('library-filter').oninput=filterBooks;$('tasks-refresh').onclick=()=>run(loadTasks,$('tasks-refresh'));
+$('library-refresh').onclick=()=>run(loadLibrary,$('library-refresh'));$('library-category').onchange=filterBooks;$('library-sort').onchange=filterBooks;$('library-filter').oninput=filterBooks;if(typeof dropdown!=='undefined')state.libraryMenu=dropdown.filterMenu($('library-filter-open'),[{select:$('library-sort')},{select:$('library-category'),default:'*'}]);$('tasks-refresh').onclick=()=>run(loadTasks,$('tasks-refresh'));
 initSiteSettings();
 $('health-recheck').onclick=()=>runHealthChecks(true);
 $('login-form').onsubmit=event=>{event.preventDefault();const source=state.settingsSource;run(async()=>{await api(`/api/sources/${enc(source)}/login`,write('POST',Object.fromEntries(new FormData(event.target))));await loadSources();configureAccount();if(source==='bika')refreshBikaAccountViews();toast('图源账号已保存');},event.submitter);};

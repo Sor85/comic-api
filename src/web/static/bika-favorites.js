@@ -72,6 +72,7 @@ function syncBikaSelection(){syncSelectionBar('bika',bikaFavorites);}
 FAV_SYNC.bika.onStatus=syncBikaSelection;
 $('bika-favorites-refresh').onclick=()=>run(loadBikaFavoritesView,$('bika-favorites-refresh'));
 $('bika-favorites-filter').onsubmit=event=>{event.preventDefault();renderBikaFavorites();};
+if(typeof dropdown!=='undefined')dropdown.filterMenu($('bika-favorites-filter-open'),[{select:$('bika-favorites-sort')},{select:$('bika-favorites-local')}]);
 $('bika-favorites-keyword').oninput=renderBikaFavorites;
 $('bika-favorites-local').onchange=()=>{bikaFavorites.page=1;run(loadBikaFavorites);};
 $('bika-favorites-sort').onchange=()=>{bikaFavorites.sort=$('bika-favorites-sort').value;bikaFavorites.page=1;run(loadBikaFavorites);};

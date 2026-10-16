@@ -117,13 +117,14 @@
         <div class="section-title"><h1>我的书库</h1><span id="library-count" class="count"></span></div>
         <button id="library-refresh" class="icon-btn" type="button" title="刷新书库" aria-label="刷新书库"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
       </div>
-      <div class="library-filters">
-        <select id="library-category" aria-label="分类"><option value="*">全部分类</option></select>
-        <select id="library-sort" aria-label="排序方式"><option value="updated">最近更新</option><option value="read">最近阅读</option><option value="title">标题</option></select>
+      <div class="library-filters fav-toolbar">
         <div class="input-icon">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           <input id="library-filter" type="search" placeholder="按标题或作者筛选" maxlength="100" aria-label="按标题或作者筛选">
         </div>
+        <select id="library-sort" hidden data-menu aria-label="排序方式"><option value="updated">最近更新</option><option value="read">最近阅读</option><option value="title">标题</option></select>
+        <select id="library-category" hidden data-menu aria-label="分类"><option value="*">全部分类</option></select>
+        <button id="library-filter-open" class="menu-trigger" type="button" aria-label="排序与筛选" aria-haspopup="listbox" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h10M11 9h7M11 13h4"/><path d="M3 17l3 3 3-3M6 20V4"/></svg><span>最近更新</span></button>
       </div>
       <div id="books" class="grid"></div>
     </section>
@@ -136,7 +137,7 @@
     </section>
     <section id="jm-favorites" class="jm-sync-view fav-view" hidden>
       <div class="page-head">
-        <div class="page-title"><h1>JM 收藏</h1><span id="jm-favorites-count" class="count"></span></div>
+        <div class="page-title"><h1>JM 收藏</h1><span id="jm-favorites-count" class="count"></span><span class="scope-picker"><select id="jm-favorites-folder" aria-label="收藏夹"><option value="0">全部收藏</option></select></span></div>
         <div class="page-actions">
           <button id="jm-sync-open" class="sync-trigger" data-state="idle" type="button" aria-haspopup="dialog" aria-controls="fav-sync-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg><span id="jm-sync-open-label">本地同步</span></button>
           <button id="jm-favorites-refresh" class="icon-btn" type="button" title="刷新收藏" aria-label="刷新收藏"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -144,12 +145,12 @@
       </div>
       <p class="page-lead">漫画详情中的「加入 JM 收藏」写入已绑定账号，不指定收藏夹。收藏浏览、本地同步和本地书库操作不修改远端收藏；本地同步保存解码后的图片，不删除已有文件。</p>
       <form id="jm-favorites-filter" class="fav-toolbar">
-        <select id="jm-favorites-folder" aria-label="收藏夹"><option value="0">全部收藏</option></select>
-        <select id="jm-favorites-order" aria-label="收藏排序"><option value="mr">收藏时间</option><option value="mp">更新时间</option></select>
-        <select id="jm-favorites-local" aria-label="本地下载状态"><option value="">全部状态</option><option value="downloaded">已下载</option><option value="missing">未下载</option></select>
         <div class="input-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="jm-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选"></div>
+        <select id="jm-favorites-sort" hidden data-menu aria-label="收藏排序"><option value="mr">收藏时间</option><option value="mp">更新时间</option></select>
+        <select id="jm-favorites-local" hidden data-menu aria-label="本地下载状态"><option value="">全部状态</option><option value="downloaded">已下载</option><option value="missing">未下载</option></select>
+        <button id="jm-favorites-filter-open" class="menu-trigger" type="button" aria-label="排序与筛选" aria-haspopup="listbox" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h10M11 9h7M11 13h4"/><path d="M3 17l3 3 3-3M6 20V4"/></svg><span>收藏时间</span></button>
         <div class="toolbar-end">
-          <button id="jm-select-page" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/></svg><span>选择本页</span></button>
+          <button id="jm-select-page" class="icon-btn select-toggle" aria-pressed="false" type="button" title="选择本页" aria-label="选择本页"><svg class="select-on" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/></svg><svg class="select-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           <button id="jm-sync-selected" class="primary" type="button" hidden>同步所选</button>
         </div>
       </form>
@@ -168,11 +169,12 @@
       </div>
       <p class="page-lead">已绑定账号的全部云端收藏，与「我的书库」独立。漫画详情中的「加入哔咔收藏」写入账号收藏，再次点击「已收藏」取消收藏，哔咔不提供收藏分组。收藏浏览、本地同步和本地书库操作不修改远端收藏；本地同步保存解码后的图片，不删除已有文件。</p>
       <form id="bika-favorites-filter" class="fav-toolbar bika-favorites-toolbar">
-        <select id="bika-favorites-sort" aria-label="收藏排序"><option value="dd">最新上架</option><option value="da">最旧上架</option><option value="ld">最多喜欢</option><option value="vd">最多观看</option></select>
-        <select id="bika-favorites-local" aria-label="本地下载状态"><option value="">全部状态</option><option value="downloaded">已下载</option><option value="missing">未下载</option></select>
         <div class="input-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="bika-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选"></div>
+        <select id="bika-favorites-sort" hidden data-menu aria-label="收藏排序"><option value="dd">最新上架</option><option value="da">最旧上架</option><option value="ld">最多喜欢</option><option value="vd">最多观看</option></select>
+        <select id="bika-favorites-local" hidden data-menu aria-label="本地下载状态"><option value="">全部状态</option><option value="downloaded">已下载</option><option value="missing">未下载</option></select>
+        <button id="bika-favorites-filter-open" class="menu-trigger" type="button" aria-label="排序与筛选" aria-haspopup="listbox" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h10M11 9h7M11 13h4"/><path d="M3 17l3 3 3-3M6 20V4"/></svg><span>最新上架</span></button>
         <div class="toolbar-end">
-          <button id="bika-select-page" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/></svg><span>选择本页</span></button>
+          <button id="bika-select-page" class="icon-btn select-toggle" aria-pressed="false" type="button" title="选择本页" aria-label="选择本页"><svg class="select-on" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m8 12 3 3 5-6"/></svg><svg class="select-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           <button id="bika-sync-selected" class="primary" type="button" hidden>同步所选</button>
         </div>
       </form>

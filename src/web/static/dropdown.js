@@ -53,9 +53,12 @@ const dropdown = (() => {
   function pick(index) {
     const entry = current?.entries[index];
     if (!entry || entry.item.disabled) return;
-    const onPick = current.onPick;
+    const {onPick, point, anchor, owner, align, opts} = current;
+    // 项自带 onPick 时由它负责（分组筛选），否则回落菜单级回调（enhance 的 select 同步）。
+    (entry.item.onPick || onPick)?.(entry.item);
+    // 粘性项（分组筛选）选完不收起：原位按新的选中态重建列表，高亮留在该项上。
+    if (entry.item.sticky && !point) { close(false); show({...opts, anchor, owner, align, index, opts}); return; }
     close(true);
-    onPick?.(entry.item);
   }
 
   function close(restoreFocus) {
@@ -103,9 +106,16 @@ const dropdown = (() => {
    * items: [{label, icon?(svg 字符串), danger?, disabled?, selected?, divider?, ...任意数据}]
    * anchor：锚定元素；point：{x,y} 指针坐标（右键菜单）；owner：展开状态与焦点归还的目标。
    */
-  function open({anchor, point, owner = anchor, items, role = 'menu', align = 'start', label, className, onPick}) {
-    if (current && owner && current.owner === owner && !point) { close(true); return; }
+  function open(options) {
+    if (current && options.owner && current.owner === options.owner && !options.point) { close(true); return; }
     close(false);
+    show({...options, opts: options});
+  }
+
+  /** 构建并展开浮层；粘性项选完按新的选中态重建，因此与 open 共用同一份参数。 */
+  function show({anchor, point, owner = anchor, items, role = 'menu', align = 'start', label, className, onPick, index = -1, opts = {}}) {
+    // items 可以是函数：粘性项选完重建时重新取值，才能反映最新选中态。
+    if (typeof items === 'function') items = items();
     const pop = document.createElement('div'), list = document.createElement('div'), id = `dd-${++uid}`;
     pop.className = 'dd-pop' + (className ? ` ${className}` : '');
     if (canPopover) pop.popover = 'manual';
@@ -113,6 +123,7 @@ const dropdown = (() => {
     if (label) list.setAttribute('aria-label', label);
     const entries = [];
     for (const item of items) {
+      if (item.heading !== undefined) { const head = document.createElement('div'); head.className = 'dd-heading'; head.setAttribute('role', 'presentation'); head.textContent = item.heading; list.append(head); continue; }
       if (item.divider) { const sep = document.createElement('div'); sep.className = 'dd-sep'; sep.setAttribute('role', 'separator'); list.append(sep); continue; }
       const el = document.createElement('div'), index = entries.length;
       el.id = `${id}-${index}`; el.className = 'dd-item' + (item.danger ? ' danger' : '');
@@ -129,14 +140,14 @@ const dropdown = (() => {
     pop.append(list);
     // 模态窗口打开时窗口外的节点不可交互，浮层挂在所在窗口内部；不放进 <label>，避免点击选项被转发给控件。
     (anchor?.closest('dialog[open]') || document.body).append(pop);
-    current = {pop, list, entries, index: -1, anchor, point, owner, align, onPick};
+    current = {pop, list, entries, index: -1, anchor, point, owner, align, items, role, label, className, onPick, opts};
     if (canPopover) pop.showPopover();
     owner?.setAttribute('aria-expanded', 'true');
     place();
     if (typeof scrollAreas !== 'undefined') scrollAreas.attach(list);
     list.addEventListener('keydown', onKey);
     list.addEventListener('focusout', event => { if (current?.pop === pop && !current.ownerPress && !pop.contains(event.relatedTarget)) close(false); });
-    const selected = entries.findIndex(entry => entry.item.selected);
+    const selected = index >= 0 && index < entries.length ? index : entries.findIndex(entry => entry.item.selected);
     activate(selected >= 0 ? selected : -1, true);
     list.focus({preventScroll: true});
   }
@@ -203,6 +214,36 @@ const dropdown = (() => {
   addEventListener('resize', () => close(false));
   addEventListener('blur', () => close(false));
 
-  document.querySelectorAll('select').forEach(enhance);
-  return {enhance, open, close};
+  /**
+   * 分组筛选菜单：把若干隐藏的原生 <select> 合并到一枚触发按钮下。
+   * groups：[{select, default?}]，首项视为排序，当前值写在按钮文字上；其余项偏离 default 时计入徽标。
+   * 每组以 select 的 aria-label 为标题，组内互斥；选中后派发 change，菜单保持展开并刷新勾选。
+   * 返回 sync()：脚本改动 select 值后调用以刷新按钮。
+   */
+  function filterMenu(trigger, groups) {
+    const items = () => groups.flatMap(({select}) => [
+      {heading: select.getAttribute('aria-label') || ''},
+      ...[...select.options].map(option => {
+        const value = option.value;
+        return {label: option.textContent, value, disabled: option.disabled, selected: option.selected, sticky: true,
+          onPick: () => { if (select.value === value) return; select.value = value; select.dispatchEvent(new Event('change', {bubbles: true})); }};
+      }),
+    ]);
+    const label = trigger.querySelector('span'), [sort, ...rest] = groups;
+    const sync = () => {
+      if (sort && label) label.textContent = sort.select.options[sort.select.selectedIndex]?.textContent || '';
+      const active = rest.filter(({select, default: initial = ''}) => select.value !== initial).length;
+      trigger.dataset.state = active ? 'filtered' : '';
+      let badge = trigger.querySelector('.menu-count');
+      if (!badge) { badge = document.createElement('span'); badge.className = 'menu-count'; trigger.append(badge); }
+      badge.textContent = active ? String(active) : '';
+    };
+    trigger.addEventListener('click', () => open({anchor: trigger, owner: trigger, role: 'listbox', label: trigger.getAttribute('aria-label') || '筛选', className: 'dd-filter-pop', items}));
+    for (const {select} of groups) select.addEventListener('change', sync);
+    sync();
+    return {sync};
+  }
+
+  document.querySelectorAll('select:not([data-menu])').forEach(enhance);
+  return {enhance, open, close, filterMenu};
 })();

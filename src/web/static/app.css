@@ -300,7 +300,6 @@ body[data-modal-depth]:not([data-modal-depth="1"]) :is(header,main,.tabbar,#to-t
 .section-title h1{margin:4px 0 6px}
 .section-title .muted{font-size:13px}
 .library-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.library-filters .dd-select{min-width:150px;max-width:260px}
 .input-icon{position:relative;display:flex;align-items:center;flex:1;min-width:180px;max-width:420px}
 .input-icon svg{position:absolute;left:12px;width:16px;height:16px;color:var(--muted);pointer-events:none}
 .input-icon input{width:100%;padding-left:36px}
@@ -392,7 +391,6 @@ label>.dd-select,.inline-form .dd-select,.jm-settings-grid .dd-select{display:fl
 .dd-trigger:hover svg{color:var(--text)}
 .dd-trigger[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
 .dd-trigger[aria-expanded="true"] svg{transform:rotate(180deg);color:var(--accent)}
-.fav-toolbar .dd-trigger,.library-filters .dd-trigger{border-radius:999px;padding-left:16px;padding-right:12px}
 .dd-pop{position:fixed;inset:auto;z-index:10000;margin:0;padding:0;border:0;display:flex;flex-direction:column;min-width:168px;max-width:min(380px,calc(100vw - 24px));overflow:hidden;border-radius:14px;background:var(--surface);color:var(--text);font-size:14px;line-height:1.5;box-shadow:0 0 0 1px var(--hairline),0 18px 44px -14px #00000066,0 6px 16px -8px #00000033;transform-origin:50% 0;animation:dd-in .18s cubic-bezier(.32,.72,0,1)}
 .dd-pop[data-side="top"]{transform-origin:50% 100%;animation-name:dd-in-up}
 .dd-pop[popover]:not(:popover-open){display:none}
@@ -786,8 +784,29 @@ button.danger-soft:hover{border-color:var(--danger)}
 .jm-detail-failure>strong{color:var(--danger)}
 .jm-detail-failure p{margin:8px 0 0}
 .fav-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+/* 排序与下载状态合并进一枚胶囊：菜单里分组标题 + 勾选，工具栏只留搜索、筛选、选择本页。 */
+.menu-trigger{gap:7px;padding:9px 14px;border-radius:999px;background:var(--panel);font-size:14px;font-weight:500}
+.menu-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menu-trigger .menu-count{flex:0 0 auto;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-size:11px;font-weight:700;line-height:18px;text-align:center;font-variant-numeric:tabular-nums}
+.menu-trigger .menu-count:empty{display:none}
+/* 选择本页 ⇄ 取消选择：同一按钮换图标，旋转淡入。 */
+.select-toggle{position:relative}
+.select-toggle svg{transition:opacity .18s,transform .22s cubic-bezier(.32,.72,0,1)}
+.select-toggle .select-off{position:absolute;opacity:0;transform:rotate(-90deg) scale(.6)}
+.select-toggle[aria-pressed=true] .select-on{opacity:0;transform:rotate(90deg) scale(.6)}
+.select-toggle[aria-pressed=true] .select-off{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.select-toggle svg{transition:none}}
+.menu-trigger[data-state=filtered]{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));color:var(--text)}
+.menu-trigger[aria-expanded=true]{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.dd-heading{padding:9px 10px 4px 12px;color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.04em}
+.dd-filter-pop .dd-list{padding-top:2px}
+.dd-filter-pop .dd-heading:first-child{padding-top:5px}
+/* 收藏夹是页面级范围而非筛选条件，跟标题同行、比数量徽标更轻。 */
+.scope-picker{display:inline-flex;min-width:0;max-width:min(240px,40vw);font-size:13.5px}
+.scope-picker .dd-trigger{padding:5px 9px 5px 12px;border-radius:999px;font-weight:500;color:var(--muted);background:transparent}
+.scope-picker .dd-trigger:hover{color:var(--text);background:var(--panel)}
+.scope-picker .dd-trigger svg{width:14px;height:14px}
 .fav-toolbar select,.fav-toolbar input{max-width:100%;min-width:0;border-radius:999px;background:var(--panel)}
-.fav-toolbar .dd-select{max-width:100%;min-width:140px}
 .fav-toolbar .input-icon{flex:1 1 220px;max-width:340px}
 .toolbar-end{display:flex;gap:8px;margin-left:auto}
 .toolbar-end button{border-radius:999px}

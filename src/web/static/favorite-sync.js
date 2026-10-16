@@ -118,11 +118,12 @@ function localStatusSignature(source,id){const local=favSync[source]?.local?.[id
 function syncSelectionBar(source,view){
   const selected=$(`${source}-sync-selected`);selected.hidden=!view.selected.size;selected.textContent=`同步所选（${view.selected.size}）`;selected.disabled=favSync[source].active;
   $(`${source}-favorites-books`).classList?.toggle('selecting',view.selected.size>0);
-  $(`${source}-select-page`).disabled=!view.items.length;
+  // 有选中项时按钮变为 X，点击清空选择；无选中项时为「选择本页」。
+  const toggle=$(`${source}-select-page`),selecting=view.selected.size>0,label=selecting?'取消选择':'选择本页';
+  toggle.disabled=!selecting&&!view.items.length;toggle.title=label;toggle.setAttribute('aria-label',label);toggle.setAttribute('aria-pressed',String(selecting));
 }
 function toggleSyncPage(view,ids,render){
-  const all=ids.every(id=>view.selected.has(id));
-  for(const id of ids){if(all)view.selected.delete(id);else view.selected.add(id);}
+  if(view.selected.size)view.selected.clear();else for(const id of ids)view.selected.add(id);
   render();
 }
 async function startFavSync(source,albumIds){

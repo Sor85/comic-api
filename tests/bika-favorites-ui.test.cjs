@@ -194,9 +194,11 @@ test('收藏卡片可选择并批量或单本同步到本地，换页清空选�
   const check=first.querySelectorAll('.select-mark')[0].children[0];check.checked=true;check.onchange();
   assert.equal(JSON.stringify([...h.view.selected]),JSON.stringify([detail.id]));assert.equal(h.roots['bika-sync-selected'].hidden,false);
   assert.equal(h.roots['bika-sync-selected'].textContent,'同步所选（1）');assert.ok(books.classes.has('selecting'));
-  h.roots['bika-select-page'].onclick();assert.equal(h.view.selected.size,2);
+  // 有选中项时按钮为「取消选择」（X），点击清空；无选中项时为「选择本页」。
+  assert.equal(h.roots['bika-select-page']['aria-label'],'取消选择');assert.equal(h.roots['bika-select-page']['aria-pressed'],'true');
   h.roots['bika-select-page'].onclick();assert.equal(h.view.selected.size,0);
-  h.roots['bika-select-page'].onclick();await h.roots['bika-sync-selected'].onclick();
+  assert.equal(h.roots['bika-select-page']['aria-label'],'选择本页');assert.equal(h.roots['bika-select-page']['aria-pressed'],'false');
+  h.roots['bika-select-page'].onclick();assert.equal(h.view.selected.size,2);await h.roots['bika-sync-selected'].onclick();
   assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:'bika',ids:items.map(item=>item.id)}));
   await first.querySelectorAll('.card-sync')[0].onclick();
   assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:'bika',ids:[detail.id]}));
