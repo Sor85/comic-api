@@ -414,7 +414,7 @@ def test_local_check_api(tmp_path):
         assert response.status_code == 202 and response.json()["mode"] == "check_local"
         assert wait_for_run(client)["local_albums"] == 1
         html = client.get("/").text
-        assert 'id="fav-sync-check-local"' in html and "漫画名 / 章节名 / 图片" in html
+        assert 'id="fav-sync-check-local"' in html and "「检查本地漫画」可识别，无需补 ID" in html
         assert client.post("/api/jm/sync/run", json={"album_ids": ["101"]}).status_code == 202
         assert wait_for_run(client)["skipped"] == 4 and not plugin.requests
         assert client.delete("/api/sources/jm/account").status_code == 200

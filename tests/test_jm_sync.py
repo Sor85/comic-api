@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -514,14 +515,15 @@ def test_sync_api_and_static_ui(jm_client):
 def test_directory_switch_warning_is_visible_before_changing_settings(jm_client):
     html = jm_client.get("/").text
     start = html.index('<div id="fav-sync-switch-note"')
-    notice = html[start:html.index("</div>", start)]
+    notice = html[start:html.index('<section class="form-section">', start)]
     assert 'role="note"' in notice and 'aria-labelledby="fav-sync-switch-title"' in notice
-    assert "hidden" not in notice
+    assert "hidden" not in notice.split(">", 1)[0]
+    assert "保存即同步一次" in notice and "旧目录未登记时会计为冲突并重复下载" in notice
+    steps = re.findall(r"<li>.*?<span>([^<]+)</span></li>", notice)
+    assert steps == ["关闭定时同步", "保存新规则", "检查本地漫画", "重新开启同步"]
     assert "每次保存设置都会立即同步一次" in notice and "不会等待下一个周期" in notice
-    assert "包括仅修改目录规则或下载目录" in notice and "之后按同步计划运行" in notice
-    assert "检查本地漫画”登记" in notice and "未登记的原文件不会被覆盖" in notice
-    assert "消耗流量和时间" in notice
-    assert "关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步" in notice
+    assert "包括仅修改目录规则或下载目录" in notice
+    assert "未登记的原文件不会被覆盖" in notice and "消耗流量和时间" in notice
     assert "运行中的任务完成或停止后才能修改设置" in notice
     assert start < html.index('<select name="directory_rule">')
     assert "更换或解除账号绑定后，定时同步自动关闭" in html

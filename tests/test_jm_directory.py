@@ -185,7 +185,7 @@ def test_directory_rule_labels_match_between_ui_and_api(jm_client):
     assert select.count("<option ") == len(rules)
     for rule in rules:
         assert f'<option value="{rule["value"]}">{rule["label"]}</option>' in select
-    assert "无 ID 规则" in html and "Bd_Aauthoroname_Pindextitle 规则" in html
+    assert "<strong>无 ID 规则</strong>" in html and "对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle" in html
 
 
 def test_plain_rule_setting_and_ui_option(jm_client):
