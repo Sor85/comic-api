@@ -327,7 +327,7 @@ async function openSyncSettings(){
       const label=node('label',undefined,'jm-check folder-chip'),input=node('input');input.type='checkbox';input.name='folder_ids';input.value=folder.id;input.checked=s.folder_ids.includes(folder.id);
       label.append(input,node('span',folder.name));return label;
     }));
-    if(!folders.size)$('fav-sync-folders').append(node('span','没有已加载的自建收藏夹；当前范围为全部收藏。','muted'));
+    if(!folders.size)$('fav-sync-folders').append(node('span','暂无自建收藏夹，范围为全部收藏。','muted'));
   }
   updateSyncPreview();$('fav-sync-settings').showModal();
 }

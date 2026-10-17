@@ -308,15 +308,23 @@
     </div>
     <form id="fav-sync-form" class="modal-form settings-form">
       <div class="modal-body" data-scroll-area>
-        <div id="fav-sync-switch-note" class="callout warn fav-sync-switch-note" role="note" aria-labelledby="fav-sync-switch-title">
-          <span class="callout-icon" role="presentation"><svg viewBox="0 0 24 24" focusable="false"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
-          <span class="callout-body">
-            <strong id="fav-sync-switch-title">目录规则切换说明</strong>
-            <span class="callout-p">定时同步开启时，每次保存设置都会立即同步一次，包括仅修改目录规则或下载目录；不会等待下一个周期，之后按同步计划运行。</span>
-            <span class="callout-p">旧漫画尚未通过“检查本地漫画”登记时，可能先重复下载图片，再因目标文件已存在而报告冲突。未登记的原文件不会被覆盖，但会消耗流量和时间。</span>
-            <span class="callout-p"><strong>安全切换顺序：</strong>关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步。</span>
-            <span class="callout-p">运行中的任务完成或停止后才能修改设置。</span>
-          </span>
+        <div id="fav-sync-switch-note" class="switch-guide" role="note" aria-labelledby="fav-sync-switch-title">
+          <div class="switch-guide-head">
+            <span class="switch-guide-icon" role="presentation"><svg viewBox="0 0 24 24" focusable="false"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+            <span class="switch-guide-title"><strong id="fav-sync-switch-title">更换目录规则</strong><span>保存即同步一次，旧目录未登记时会计为冲突并重复下载。</span></span>
+          </div>
+          <ol class="switch-steps">
+            <li><span class="step-badge" aria-hidden="true">1</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h10a2 2 0 0 1 2 2v10"/><path d="M15 18H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2"/></svg><span>关闭定时同步</span></li>
+            <li><span class="step-badge" aria-hidden="true">2</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><polyline points="9 13 12 16 16 11"/></svg><span>保存新规则</span></li>
+            <li><span class="step-badge" aria-hidden="true">3</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><line x1="14.5" y1="14.5" x2="20" y2="20"/><path d="M7 10h6"/></svg><span>检查本地漫画</span></li>
+            <li><span class="step-badge" aria-hidden="true">4</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg><span>重新开启同步</span></li>
+          </ol>
+          <details class="hint-details">
+            <summary>详细说明</summary>
+            <p>定时同步开启时，每次保存设置都会立即同步一次，包括仅修改目录规则或下载目录，不会等待下一个周期。</p>
+            <p>“检查本地漫画”核对目录并登记已有图片，跳过已完成的部分。未登记的原文件不会被覆盖，但会消耗流量和时间。</p>
+            <p>运行中的任务完成或停止后才能修改设置。</p>
+          </details>
         </div>
         <section class="form-section">
           <h3>计划</h3>
@@ -333,26 +341,35 @@
             <label>图片格式<select name="image_format"><option value="original">保留图片格式</option><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="webp">WebP</option></select></label>
             <label>JPEG / WebP 质量（1–100）<input name="quality" type="number" min="1" max="100" required></label>
           </div>
-          <p class="field-hint">限速只作用于收藏同步图片，不限制在线阅读和现有 PDF 任务。图片先解码再转换；显式转换格式时，动图仅保存首帧。PNG 不使用质量参数。</p>
+          <p class="field-hint">限速只作用于同步任务，不影响在线阅读与 PDF。转换格式时动图仅保存首帧，PNG 不使用质量参数。</p>
         </section>
         <section class="form-section">
           <h3>保存位置</h3>
           <label>服务器下载目录
             <span class="input-action"><input name="download_dir" maxlength="2048" required><button id="fav-directory-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>选择服务器目录</span></button></span>
           </label>
-          <p class="field-hint">目录位于运行服务的机器，不是当前浏览器所在设备。可选根目录由 <span id="fav-sync-roots-env">JM_DOWNLOAD_ROOTS</span> 控制，Docker 目录必须挂载持久化卷；可在所选根目录下填写新子目录。</p>
+          <p class="field-hint">目录在服务器上，不是本机。可选根目录由 <span id="fav-sync-roots-env">JM_DOWNLOAD_ROOTS</span> 决定；Docker 需挂载持久化卷。</p>
           <label>目录层级<select name="directory_rule"><option value="Bd_Aauthoroname_Pindextitle">【作者】原标题 / 第N話 章节标题</option><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option></select></label>
           <p id="fav-directory-preview" class="jm-path path-preview"></p>
           <details class="hint-details">
             <summary>目录规则说明</summary>
-            <p data-source="jm">“【作者】原标题 / 第N話 章节标题”对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle 规则：漫画目录为“【第一作者】原标题”，章节目录为“第N話 完整章节标题”。不附加 ID，不合并多位作者，不去重标题原有的“第N話”。本地检查按相同规则核对目录。章节目录名超过 255 字节时按 JMComic 的做法截短：整条保存路径保留前 100 个字符；截短后缺少“第N話”时改为只把章节目录名截短到 255 字节。漫画目录名超过 255 字节时截短到 255 字节。本地检查同时识别 JMComic 在其他保存路径下截短的章节目录。</p>
-            <p>已有“漫画名 / 章节名 / 图片”目录可通过“检查本地漫画”识别，无需补上 ID；下载目录应设为所有漫画文件夹的上一级。目录层级只控制新下载的文件，不会重命名已检查的漫画。</p>
-            <p>“漫画标题 / 第N話 章节标题”是无 ID 规则，输出为“漫画标题/第1話 章节标题/图片”，不附加 ID，也不使用“001 -”。目录名不超过 255 字节时保留完整标题，超过时截短到 255 字节；目录已关联其他漫画时报告冲突。</p>
+            <ul class="rule-points">
+              <li data-source="jm"><strong>【作者】原标题</strong>：对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle，章节为「第N話 完整标题」，不附加 ID、不合并作者。</li>
+              <li><strong>超长目录名</strong>：超过 255 字节时截短，规则与 JMComic 一致，本地检查按同样规则识别。</li>
+              <li><strong>无 ID 规则</strong>：输出「漫画标题/第1話 章节标题/图片」，不附加 ID；目录已关联其他漫画时报冲突。</li>
+              <li><strong>已有目录</strong>：「检查本地漫画」可识别，无需补 ID；层级只影响新下载，不改名已检查的漫画。</li>
+            </ul>
           </details>
-          <p class="field-hint">已完成图片会校验并跳过，失败图片可在下次同步重试。变更目录或层级规则不会移动、清理旧文件；格式或质量变更可能替换本工具已记录的同路径图片。同步只写入下载目录，不自动加入书库。</p>
+          <p class="field-hint">已完成图片会校验并跳过，失败图片下次重试。改目录或层级不会移动旧文件；改格式或质量可能替换同路径图片。同步只写下载目录，不加入书库。</p>
         </section>
         <section id="fav-sync-scope-section" class="form-section" data-source="jm">
-          <fieldset class="jm-folder-options"><legend>同步范围</legend><p class="field-hint">未勾选收藏夹时同步全部收藏。单本及所选同步不受此范围限制。</p><div id="fav-sync-folders"></div></fieldset>
+          <h3>同步范围</h3>
+          <div class="group">
+            <div class="group-row stacked">
+              <span class="row-text"><strong>收藏夹</strong><span>不勾选任何收藏夹时同步全部收藏；单本与所选同步不受此限制。</span></span>
+              <div id="fav-sync-folders"></div>
+            </div>
+          </div>
         </section>
       </div>
       <div class="modal-foot">

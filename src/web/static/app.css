@@ -864,6 +864,20 @@ button.danger-soft:hover{border-color:var(--danger)}
 .fav-sync-dialog .dd-trigger[aria-expanded="true"]{background:var(--surface)}
 .fav-sync-dialog input:focus,.fav-sync-dialog select:focus{border-color:var(--accent);background:var(--surface)}
 .fav-sync-switch-note{margin:0}
+/* Directory-rule change guide: one-line rationale plus a four-step order. */
+.switch-guide{display:flex;flex-direction:column;gap:12px;padding:14px 16px;border-radius:16px;background:color-mix(in srgb,var(--warn) 9%,var(--surface));font-size:15px;line-height:1.5}
+.switch-guide-head{display:flex;gap:10px;min-width:0;color:color-mix(in srgb,var(--text) 82%,var(--warn))}
+.switch-guide-icon{flex:0 0 auto;display:flex;padding-top:2px;color:var(--warn)}
+.switch-guide-icon svg{width:18px;height:18px}
+.switch-guide-title{display:flex;flex-direction:column;gap:3px;min-width:0}
+.switch-guide-title strong{font-size:15px;font-weight:600;color:var(--text)}
+.switch-guide-title>span{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.switch-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0;padding:0;list-style:none}
+.switch-steps li{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:12px;background:var(--surface);font-size:12.5px;font-weight:500;color:var(--text);position:relative}
+.switch-steps li>svg{width:18px;height:18px;color:var(--warn)}
+.switch-steps li>span:last-child{overflow-wrap:anywhere}
+.switch-steps li:not(:last-child)::after{content:"";position:absolute;top:19px;right:-6px;width:4px;height:4px;border-top:1.5px solid color-mix(in srgb,var(--warn) 55%,transparent);border-right:1.5px solid color-mix(in srgb,var(--warn) 55%,transparent);transform:rotate(45deg)}
+.step-badge{position:absolute;top:8px;right:9px;font-size:11px;font-weight:600;color:color-mix(in srgb,var(--text) 45%,transparent);font-variant-numeric:tabular-nums}
 .callout-body{display:flex;flex-direction:column;min-width:0}
 .callout-p{display:block;margin-top:6px}
 .jm-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
@@ -884,10 +898,10 @@ button.danger-soft:hover{border-color:var(--danger)}
 .hint-details{font-size:12.5px;line-height:1.6;color:var(--muted)}
 .hint-details summary{width:max-content;color:var(--accent);font-weight:500}
 .hint-details p{margin:8px 0 0}
-.jm-folder-options{border:0;padding:0;margin:0;min-width:0}
-.jm-folder-options legend{padding:0 0 4px 4px;font-size:13px;font-weight:600;letter-spacing:.3px;color:var(--muted)}
-.jm-folder-options .field-hint{margin:0 0 10px 4px}
-#fav-sync-folders{display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow:auto}
+.rule-points{display:flex;flex-direction:column;gap:6px;margin:8px 0 0;padding-left:16px}
+.rule-points li{overflow-wrap:anywhere}
+.rule-points strong{color:var(--text);font-weight:600}
+#fav-sync-folders{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;max-height:180px;overflow:auto}
 #fav-sync-folders>.muted{font-size:13px}
 .folder-chip{position:relative;padding:6px 14px;border-radius:999px;background:var(--group);font-size:13px;color:var(--text);transition:background-color .15s,color .15s}
 .folder-chip input{position:absolute;inset:0;width:100%!important;height:100%;margin:0;opacity:0}
@@ -957,6 +971,8 @@ button.danger-soft:hover{border-color:var(--danger)}
 .cron-actions .ghost:hover{background:color-mix(in srgb,var(--text) 8%,var(--group))}
 @media(max-width:700px){
   .jm-settings-grid,.site-auth-fields{grid-template-columns:1fr}
+  .switch-steps{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .switch-steps li::after{display:none}
   .page-title h1{font-size:24px}
   .sync-glyph{width:40px;height:40px;border-radius:13px}
   .sync-trigger{padding:9px 12px}
