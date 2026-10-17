@@ -5,7 +5,6 @@ from src.services.favorite_sync import FavoriteSync
 class BikaSync(FavoriteSync):
     source = "bika"
     label = "哔咔"
-    category = "哔咔收藏"
     roots_env = "BIKA_DOWNLOAD_ROOTS"
     default_root = "bika-favorites"
     id_pattern = r"[0-9a-f]{24}"

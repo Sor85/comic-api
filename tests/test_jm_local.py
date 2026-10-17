@@ -64,7 +64,7 @@ def test_existing_favorites_are_verified_without_downloading_or_modifying(tmp_pa
         assert not state["downloaded"] and not state["received_bytes"] and not plugin.requests
         assert len(imported(sync)) == 4
         assert snapshot(directory) == before and sync.next_run_at == next_run
-        assert [b["id"] for b in sync.store.books()] == ["101"]
+        assert not sync.store.books()
         # A restart and changed output settings do not transcode imported, user-owned images.
         restarted = JmSync(Store(tmp_path), sync.service)
         restarted.save_settings(SyncSettings(**dict(sync.settings(), directory_rule="author", image_format="webp", quality=75)))
@@ -382,11 +382,10 @@ def test_changed_upstream_image_keys_are_not_skipped(tmp_path):
     asyncio.run(scenario())
 
 
-def test_check_can_leave_local_library_unchanged(tmp_path):
+def test_check_does_not_add_matched_album_to_library(tmp_path):
     async def scenario():
         sync, plugin = make_sync(tmp_path)
         existing_album(sync, plugin)
-        sync.save_settings(SyncSettings(**dict(sync.settings(), add_to_library=False)))
         sync.launch(check_local=True)
         await sync.task
         assert sync.current["local_albums"] == 1 and not sync.store.books()

@@ -91,8 +91,7 @@ async def _full_sync(tmp_path):
     root = Path(sync.settings()["download_dir"])
     assert root == (tmp_path / "bika-favorites").resolve()
     assert (root / f"哔咔漫画 d [{A}]" / "001 - 第1话 [1]" / "00001.png").is_file()
-    books = {book["id"]: book for book in sync.store.books()}
-    assert set(books) == {A, B} and books[A]["library_category"] == "哔咔收藏"
+    assert sync.store.books() == []
     with sync.store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM bika_sync_files").fetchone()[0] == 8
         assert db.execute("SELECT COUNT(*) FROM jm_sync_files").fetchone()[0] == 0
@@ -106,7 +105,7 @@ def test_local_check_matches_hex_id_directories_and_skips_downloads(tmp_path):
 
 
 async def _local_check(tmp_path):
-    sync, plugin = make_bika_sync(tmp_path, add_to_library=False)
+    sync, plugin = make_bika_sync(tmp_path)
     root = Path(sync.settings()["download_dir"])
     book = plugin.detail(A)
     for index, chapter in enumerate(book["chapters"], 1):
@@ -233,7 +232,7 @@ def test_repair_keeps_source_named_pages_and_downloads_gaps_with_source_names(tm
 
 
 async def _repair_source_names(tmp_path):
-    sync, plugin = make_bika_sync(tmp_path, add_to_library=False)
+    sync, plugin = make_bika_sync(tmp_path)
     plugin.pages = lambda comic_id, chapter_id: [f"https://storage.invalid/static/{comic_id}/{name}-{chapter_id}.png" for name in ("first", "second")]
     root = Path(sync.settings()["download_dir"])
     book = plugin.detail(A)

@@ -44,7 +44,6 @@ class BaseSyncSettings(BaseModel):
     quality: int = Field(default=90, ge=1, le=100)
     directory_rule: Literal["id", "title", "title_plain", "author"] = "title"
     retries: int = Field(default=2, ge=0, le=5)
-    add_to_library: bool = True
 
     @field_validator("cron")
     @classmethod
@@ -55,7 +54,6 @@ class BaseSyncSettings(BaseModel):
 class FavoriteSync:
     source = ""
     label = ""
-    category = ""
     settings_model = BaseSyncSettings
     roots_env = ""
     default_root = ""
@@ -481,11 +479,6 @@ class FavoriteSync:
                 self._schedule_next()
             self.wake.set()
 
-    def _save_book(self, album_id, book):
-        with self.store.connect() as db:
-            row = db.execute("SELECT category FROM library WHERE source=? AND comic_id=?", (self.source, album_id)).fetchone()
-        self.store.save_book(self.source, album_id, book, row[0] if row else self.category)
-
     async def _chapter_data(self, config, album_id, chapter):
         chapter_id = numeric_id(chapter["id"], self.source)
         return await self.service.get_chapter_images(self.source, album_id, chapter_id), chapter
@@ -540,8 +533,6 @@ class FavoriteSync:
         state["local_images"] += len(records)
         if len(state["local_results"]) < 100:
             state["local_results"].append({"id": album_id, "title": book["title"], "path": str(directory), "images": len(records)})
-        if config["add_to_library"]:
-            self._save_book(album_id, book)
         return records
 
     @staticmethod
@@ -596,8 +587,6 @@ class FavoriteSync:
         state.update(title=album_id, chapter="", page=0, pages=0)
         book = await self.service.get_comic_detail(self.source, album_id)
         state["title"] = book["title"]
-        if config["add_to_library"]:
-            self._save_book(album_id, book)
         chapters = book.get("chapters", [])
         if not chapters:
             raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", self.source)

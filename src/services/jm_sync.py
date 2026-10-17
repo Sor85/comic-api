@@ -24,7 +24,6 @@ class SyncSettings(BaseSyncSettings):
 class JmSync(FavoriteSync):
     source = "jm"
     label = "禁漫"
-    category = "JM 收藏"
     settings_model = SyncSettings
     roots_env = "JM_DOWNLOAD_ROOTS"
     default_root = "jm-favorites"

@@ -370,7 +370,7 @@ $('fav-sync-settings-open').onclick=()=>run(openSyncSettings,$('fav-sync-setting
 $('fav-sync-form').onsubmit=event=>{
   event.preventDefault();
   const source=favSync.source,values={};
-  for(const key of ['enabled','add_to_library'])values[key]=syncField(key).checked;
+  for(const key of ['enabled'])values[key]=syncField(key).checked;
   for(const key of ['speed_limit_kbps','quality','retries'])values[key]=Number(syncField(key).value);
   for(const key of ['cron','download_dir','image_format','directory_rule'])values[key]=syncField(key).value;
   if(FAV_SYNC[source].folders)values.folder_ids=[...$('fav-sync-folders').querySelectorAll('input:checked')].map(input=>input.value);

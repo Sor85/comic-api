@@ -349,16 +349,10 @@
             <p>已有“漫画名 / 章节名 / 图片”目录可通过“检查本地漫画”识别，无需补上 ID；下载目录应设为所有漫画文件夹的上一级。目录层级只控制新下载的文件，不会重命名已检查的漫画。</p>
             <p>“漫画标题 / 第N話 章节标题”是无 ID 规则，输出为“漫画标题/第1話 章节标题/图片”，不附加 ID，也不使用“001 -”。目录名不超过 255 字节时保留完整标题，超过时截短到 255 字节；目录已关联其他漫画时报告冲突。</p>
           </details>
+          <p class="field-hint">已完成图片会校验并跳过，失败图片可在下次同步重试。变更目录或层级规则不会移动、清理旧文件；格式或质量变更可能替换本工具已记录的同路径图片。同步只写入下载目录，不自动加入书库。</p>
         </section>
         <section id="fav-sync-scope-section" class="form-section" data-source="jm">
           <fieldset class="jm-folder-options"><legend>同步范围</legend><p class="field-hint">未勾选收藏夹时同步全部收藏。单本及所选同步不受此范围限制。</p><div id="fav-sync-folders"></div></fieldset>
-        </section>
-        <section class="form-section">
-          <h3>书库</h3>
-          <div class="group">
-            <label class="group-row jm-check"><span class="row-text"><strong>同步添加到本地书库</strong><span>保留已有分类</span></span><input name="add_to_library" type="checkbox"></label>
-          </div>
-          <p class="field-hint">已完成图片会校验并跳过，失败图片可在下次同步重试。变更目录或层级规则不会移动、清理旧文件；格式或质量变更可能替换本工具已记录的同路径图片。</p>
         </section>
       </div>
       <div class="modal-foot">
