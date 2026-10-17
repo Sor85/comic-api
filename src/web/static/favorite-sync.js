@@ -25,7 +25,7 @@ function renderSyncSchedule(){
   $('fav-sync-scope').textContent=s.folder_ids?.length?`${s.folder_ids.length} 个指定收藏夹`:'全部收藏';
   $('fav-sync-dir').textContent=s.download_dir||'—';
   if(favSync[source].paused||sourcePlugin(source)?.enabled===false){schedule.replaceChildren(node('span',`${FAV_SYNC[source].label} 图源已关闭，定时同步暂停；重新启用后按原计划恢复。`,'schedule-state paused'));return;}
-  const parts=[node('span',s.enabled?`定时同步 · 每 ${s.interval_minutes} 分钟`:'定时同步关闭','schedule-state'+(s.enabled?' on':''))];
+  const parts=[node('span',s.enabled?`定时同步 · ${favSync[source].options?.schedule||s.cron}`:'定时同步关闭','schedule-state'+(s.enabled?' on':''))];
   if(s.enabled&&favSync[source].nextRun)parts.push(node('span',`下次 ${jmDate(favSync[source].nextRun)}`));
   schedule.replaceChildren(...parts);
 }
@@ -292,7 +292,7 @@ function renderSyncDialog(data,status,mode){
   $('fav-sync-cancel').hidden=!data.active;$('fav-sync-cancel').disabled=data.current?.status==='cancelling';
   const chip=$('fav-sync-chip');chip.hidden=!data.active;chip.lastElementChild.textContent=status;
   $('fav-sync-dialog').dataset.state=mode;
-  $('fav-sync-save').disabled=data.active;
+  $('fav-sync-save').disabled=$('fav-cron-open').disabled=data.active;
   renderSyncSchedule();
 }
 function openFavSync(source){
@@ -317,6 +317,7 @@ async function openSyncSettings(){
     const field=syncField(name);if(!field||name==='folder_ids')continue;
     if(field.type==='checkbox')field.checked=value;else field.value=value;
   }
+  $('fav-cron-summary').textContent=`${o.schedule} · ${s.cron}`;
   $('fav-sync-settings-message').textContent=favSync[source].active?'同步进行中，停止后才能修改设置。':'';
   $('fav-sync-folders').replaceChildren();
   if(config.folders){
@@ -370,12 +371,13 @@ $('fav-sync-form').onsubmit=event=>{
   event.preventDefault();
   const source=favSync.source,values={};
   for(const key of ['enabled','add_to_library'])values[key]=syncField(key).checked;
-  for(const key of ['interval_minutes','speed_limit_kbps','quality','retries'])values[key]=Number(syncField(key).value);
-  for(const key of ['download_dir','image_format','directory_rule'])values[key]=syncField(key).value;
+  for(const key of ['speed_limit_kbps','quality','retries'])values[key]=Number(syncField(key).value);
+  for(const key of ['cron','download_dir','image_format','directory_rule'])values[key]=syncField(key).value;
   if(FAV_SYNC[source].folders)values.folder_ids=[...$('fav-sync-folders').querySelectorAll('input:checked')].map(input=>input.value);
   run(async()=>{const data=await api(`/api/${source}/sync/settings`,write('PUT',values));favSync[source].settings=data.settings;favSync[source].options=data;$('fav-sync-settings').close();toast('同步设置已保存');await loadSyncStatus(source);},event.submitter);
 };
 for(const name of ['download_dir','directory_rule','image_format'])syncField(name).addEventListener('input',updateSyncPreview);
+$('fav-cron-open').onclick=event=>cronEditor.open(event.currentTarget,syncField('cron').value,({expression,description})=>{syncField('cron').value=expression;$('fav-cron-summary').textContent=`${description} · ${expression}`;});
 $('fav-directory-open').onclick=()=>run(async()=>{
   $('fav-directory-dialog').showModal();
   $('fav-directory-roots').replaceChildren(...(favSync[favSync.source].options?.roots||[]).map(root=>button(root,()=>browseSyncDirectory(root),'small root-chip')));

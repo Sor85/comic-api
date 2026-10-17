@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from src.auth import AuthManager, AuthUpdate, BasicAuthMiddleware
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
+from src.services import cron
 from src.services.bika_sync import BikaSync
 from src.services.downloads import DownloadManager, pdf_password_for
 from src.services.favorites_library_sync import FavoritesLibrarySettings, FavoritesLibrarySync
@@ -311,6 +312,13 @@ def create_app(store=None, sources=None):
         if "remove_favorite" not in service.source("bika").capabilities:
             raise ComicApiError("当前哔咔插件不支持取消收藏", 400, "unsupported", "bika")
         return await service.call("bika", "remove_favorite", comic_id)
+
+    @app.get("/api/cron/preview")
+    async def cron_preview(expression: str = Query(..., max_length=200)):
+        try:
+            return cron.preview(expression)
+        except cron.CronError as exc:
+            raise ComicApiError(str(exc), 422, "invalid_cron") from None
 
     def sync_routes(sync):
         prefix = f"/api/{sync.source}/sync"

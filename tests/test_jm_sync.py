@@ -518,7 +518,7 @@ def test_directory_switch_warning_is_visible_before_changing_settings(jm_client)
     assert 'role="note"' in notice and 'aria-labelledby="fav-sync-switch-title"' in notice
     assert "hidden" not in notice
     assert "每次保存设置都会立即同步一次" in notice and "不会等待下一个周期" in notice
-    assert "包括仅修改目录规则或下载目录" in notice and "之后按设定间隔运行" in notice
+    assert "包括仅修改目录规则或下载目录" in notice and "之后按同步计划运行" in notice
     assert "检查本地漫画”登记" in notice and "未登记的原文件不会被覆盖" in notice
     assert "消耗流量和时间" in notice
     assert "关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步" in notice
@@ -535,3 +535,18 @@ def test_active_sync_blocks_login_and_logout(jm_client):
     assert client.post("/api/sources/jm/login", json={"account": "new", "password": "secret"}).status_code == 409
     assert client.post("/api/jm/sync/cancel").status_code == 200
     assert wait_for_run(client)["status"] == "cancelled"
+
+
+def test_legacy_interval_migrates_to_cron_and_schedules_next_run(tmp_path):
+    from datetime import datetime
+    sync, _ = make_sync(tmp_path)
+    saved = sync.store.settings(sync.settings_key)
+    saved.pop("cron")
+    sync.store.save_settings(sync.settings_key, dict(saved, interval_minutes=360))
+    assert sync.settings()["cron"] == "0 */6 * * *"
+    assert sync.options()["schedule"] == "每 6 小时整点"
+    sync.save_settings(SyncSettings(**dict(sync.settings(), cron="30 3 * * *")))
+    sync._schedule_next()
+    run = datetime.fromtimestamp(sync.next_run_at)
+    assert (run.hour, run.minute) == (3, 30) and 0 < sync.next_run_at - time.time() <= 86400
+    assert sync.store.settings(sync.clock_key)["next_run_at"] == sync.next_run_at

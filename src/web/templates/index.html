@@ -29,6 +29,7 @@
   <script src="/static/number-input.js?v=29" defer></script>
   <script src="/static/site-settings.js?v=29" defer></script>
   <script src="/static/app.js?v=29" defer></script>
+  <script src="/static/cron-editor.js?v=29" defer></script>
   <script src="/static/favorite-sync.js?v=29" defer></script>
   <script src="/static/jm-sync.js?v=29" defer></script>
   <script src="/static/bika-favorites.js?v=29" defer></script>
@@ -311,7 +312,7 @@
           <span class="callout-icon" role="presentation"><svg viewBox="0 0 24 24" focusable="false"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
           <span class="callout-body">
             <strong id="fav-sync-switch-title">目录规则切换说明</strong>
-            <span class="callout-p">定时同步开启时，每次保存设置都会立即同步一次，包括仅修改目录规则或下载目录；不会等待下一个周期，之后按设定间隔运行。</span>
+            <span class="callout-p">定时同步开启时，每次保存设置都会立即同步一次，包括仅修改目录规则或下载目录；不会等待下一个周期，之后按同步计划运行。</span>
             <span class="callout-p">旧漫画尚未通过“检查本地漫画”登记时，可能先重复下载图片，再因目标文件已存在而报告冲突。未登记的原文件不会被覆盖，但会消耗流量和时间。</span>
             <span class="callout-p"><strong>安全切换顺序：</strong>关闭定时同步并保存 → 保存新目录规则 → 完成本地检查并查看结果 → 再开启定时同步。</span>
             <span class="callout-p">运行中的任务完成或停止后才能修改设置。</span>
@@ -320,8 +321,8 @@
         <section class="form-section">
           <h3>计划</h3>
           <div class="group">
-            <label class="group-row jm-check"><span class="row-text"><strong>定时同步</strong><span>按下方间隔自动同步收藏图片</span></span><input type="checkbox" name="enabled"></label>
-            <label class="group-row inline-field"><span class="row-text"><strong>同步间隔</strong><span>分钟，5–10080</span></span><input name="interval_minutes" type="number" min="5" max="10080" required></label>
+            <label class="group-row jm-check"><span class="row-text"><strong>定时同步</strong><span>按下方计划自动同步收藏图片</span></span><input type="checkbox" name="enabled"></label>
+            <div class="group-row cron-row"><span class="row-text"><strong>同步计划</strong><span id="fav-cron-summary"></span></span><input type="hidden" name="cron"><button id="fav-cron-open" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="fav-cron-pop"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg><span>编辑计划</span></button></div>
           </div>
         </section>
         <section class="form-section">
@@ -365,6 +366,26 @@
         <button id="fav-sync-save" class="primary" type="submit">保存设置</button>
       </div>
     </form>
+    <div id="fav-cron-pop" class="cron-pop" popover="manual" role="dialog" aria-labelledby="fav-cron-pop-title" tabindex="-1">
+      <div class="cron-head"><strong id="fav-cron-pop-title">同步计划</strong><span id="fav-cron-tz" class="cron-tz"></span></div>
+      <div id="fav-cron-modes" class="cron-modes" role="radiogroup" aria-label="同步频率"></div>
+      <div class="cron-body">
+        <p class="cron-sentence" data-cron="minutes">每<input class="cron-num" name="every_minutes" type="text" inputmode="numeric" maxlength="2" autocomplete="off" data-min="5" data-max="59" aria-label="间隔分钟">分钟运行一次</p>
+        <p class="cron-sentence" data-cron="hours">每<input class="cron-num" name="every_hours" type="text" inputmode="numeric" maxlength="2" autocomplete="off" data-min="1" data-max="23" aria-label="间隔小时">小时，第<input class="cron-num" name="at_minute" type="text" inputmode="numeric" maxlength="2" autocomplete="off" data-min="0" data-max="59" aria-label="运行分钟">分运行</p>
+        <div id="fav-cron-days" class="cron-days" data-cron="weekly" role="group" aria-label="运行星期"></div>
+        <p class="cron-sentence" data-cron="daily weekly monthly"><span data-cron="daily">每天</span><span data-cron="weekly">所选日期</span><span data-cron="monthly">每月<input class="cron-num" name="day" type="text" inputmode="numeric" maxlength="2" autocomplete="off" data-min="1" data-max="31" aria-label="日期">日</span><span class="cron-time"><input class="cron-num" name="hour" type="text" inputmode="numeric" maxlength="2" autocomplete="off" data-min="0" data-max="23" aria-label="小时"><span aria-hidden="true">:</span><input class="cron-num" name="minute" type="text" inputmode="numeric" maxlength="2" autocomplete="off" data-min="0" data-max="59" aria-label="分钟"></span>运行</p>
+        <div class="cron-custom" data-cron="custom">
+          <input id="fav-cron-expression" class="cron-expression" maxlength="200" spellcheck="false" autocomplete="off" placeholder="分 时 日 月 周" aria-label="Cron 表达式">
+          <span class="cron-hint">5 个字段依次为分、时、日、月、周，支持 * , - /；相邻两次至少间隔 5 分钟。</span>
+        </div>
+      </div>
+      <div id="fav-cron-summary-card" class="cron-summary" role="status">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>
+        <span class="cron-summary-text"><strong id="fav-cron-description"></strong><span id="fav-cron-message"></span></span>
+        <button id="fav-cron-code" class="cron-code" type="button" data-tip-text="编辑 Cron 表达式" aria-label="编辑 Cron 表达式"></button>
+      </div>
+      <div class="cron-actions"><button id="fav-cron-cancel" type="button" class="ghost">取消</button><button id="fav-cron-apply" type="button" class="primary">确定</button></div>
+    </div>
   </dialog>
   <dialog id="fav-directory-dialog" class="modal fav-sync-dialog" aria-labelledby="fav-directory-title">
     <div class="modal-head">

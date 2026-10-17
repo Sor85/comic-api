@@ -17,9 +17,12 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote, urlparse
 
-from pydantic import BaseModel, ConfigDict, Field
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.errors import ComicApiError, DownloadCancelled
+from src.services import cron
 from src.services.jm_local import LocalLibrary, local_file_valid
 from src.services.jm_naming import JM_DIRECTORY_RULE, chapter_directory, validate_name
 from src.services.local_images import (
@@ -34,7 +37,7 @@ LOCAL_FAILURES = {"local_incomplete", "local_ambiguous", "local_invalid_image", 
 class BaseSyncSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
-    interval_minutes: int = Field(default=60, ge=5, le=10080)
+    cron: str = Field(default=cron.DEFAULT, max_length=200)
     download_dir: str = Field(default="", max_length=2048)
     speed_limit_kbps: int = Field(default=0, ge=0, le=1048576)
     image_format: Literal["original", "jpeg", "png", "webp"] = "original"
@@ -42,6 +45,11 @@ class BaseSyncSettings(BaseModel):
     directory_rule: Literal["id", "title", "title_plain", "author"] = "title"
     retries: int = Field(default=2, ge=0, le=5)
     add_to_library: bool = True
+
+    @field_validator("cron")
+    @classmethod
+    def valid_cron(cls, value):
+        return cron.validate(value)
 
 
 class FavoriteSync:
@@ -182,12 +190,16 @@ class FavoriteSync:
     def settings(self):
         saved = self.store.settings(self.settings_key)
         values = {key: value for key, value in saved.items() if key in self.settings_model.model_fields}
+        if "cron" not in values and "interval_minutes" in saved:
+            values["cron"] = cron.from_interval(saved["interval_minutes"])
         config = self.settings_model(**values).model_dump()
         config["download_dir"] = config["download_dir"] or str(self.paths.roots[0])
         return config
 
     def options(self):
-        return {"settings": self.settings(), "roots": [str(root) for root in self.paths.roots], "roots_env": self.roots_env,
+        config = self.settings()
+        return {"settings": config, "schedule": cron.describe(config["cron"]), "timezone": cron.timezone_label(),
+                "roots": [str(root) for root in self.paths.roots], "roots_env": self.roots_env,
                 "directory_rules": [{"value": key, "label": value} for key, value in self.directory_rules.items()],
                 "formats": [{"value": key, "label": value} for key, value in FORMATS.items()]}
 
@@ -298,7 +310,7 @@ class FavoriteSync:
                 pass
 
     def _schedule_next(self):
-        self.next_run_at = time.time() + self.settings()["interval_minutes"] * 60
+        self.next_run_at = cron.next_after(self.settings()["cron"], datetime.now()).timestamp()
         self.store.save_settings(self.clock_key, {"next_run_at": self.next_run_at})
 
     @staticmethod

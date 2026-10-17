@@ -185,7 +185,8 @@ docker compose up -d
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET / PUT | `/api/{s}/sync/settings` | 同步设置：`enabled`、`interval_minutes`、`download_dir`、`speed_limit_kbps`、`image_format`、`quality`、`directory_rule`、`retries`、`add_to_library`；JM 另有 `folder_ids` |
+| GET / PUT | `/api/{s}/sync/settings` | 同步设置：`enabled`、`cron`（5 字段 Cron 表达式，服务器时区，相邻运行至少间隔 5 分钟；旧版 `interval_minutes` 自动换算）、`download_dir`、`speed_limit_kbps`、`image_format`、`quality`、`directory_rule`、`retries`、`add_to_library`；JM 另有 `folder_ids` |
+| GET | `/api/cron/preview?expression=` | 校验 Cron 表达式，返回规范化表达式、中文说明、服务器时区和接下来 5 次运行时间 |
 | GET | `/api/{s}/sync/directories` | 浏览允许范围内的服务器目录：`path` |
 | GET | `/api/{s}/sync` | 当前任务、下次执行时间与最近记录 |
 | POST | `/api/{s}/sync/run` | 立即同步；`{"album_ids":[...]}` 指定漫画（最多 200 本） |
