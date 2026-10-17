@@ -61,13 +61,17 @@ test('详情标签可搜索，分类保持独立；长列表可展开且上游�
   const box=h.context.renderComicLabels({source:'copy',id:'book',tags:labels,categories:['分类']});
   assert.equal(box.children.length,2);
   assert.match(box.children[0].textContent,/<script>alert\(1\)<\/script>/);
-  assert.equal(box.children[1].querySelectorAll('button').length,0);
-  const buttons=box.children[0].querySelectorAll('button');
+  assert.equal(box.children[1].querySelectorAll('a').length,0);
+  const buttons=box.children[0].querySelectorAll('a');
   assert.equal(buttons[12].hidden,true);
-  await buttons.at(-1).onclick();
+  // Links carry the same search as a click, so the browser can open it in a new tab.
+  const tagHref=new URL(buttons[1].href,'http://test').searchParams;
+  assert.equal(tagHref.get('q'),'标签1');assert.equal(tagHref.get('mode'),'tag');
+  assert.equal(tagHref.get('tag_value'),'value1');assert.equal(tagHref.get('source'),'copy');
+  await box.children[0].querySelectorAll('button').at(-1).onclick();
   assert.equal(buttons[12].hidden,false);
   h.roots['detail-dialog'].open=true;
-  await buttons[1].onclick();
+  await buttons[1].onclick({button:0,preventDefault(){}});
   assert.equal(h.roots['detail-dialog'].open,false);
   assert.equal(h.state.search.mode,'tag');
   assert.equal(h.state.search.source,'copy');
@@ -179,7 +183,8 @@ test('点击作者清除标签与分类，在全部图源重新搜索并保留UR
   h.state.search.page=4;h.state.tab='library';h.roots['detail-dialog'].open=true;h.roots['reader-dialog'].open=true;
   let closedReader=false;h.context.closeReader=()=>{closedReader=true;h.roots['reader-dialog'].open=false;};
   const author='作者 A&B / 名称',box=h.context.renderComicAuthors({authors:[author]});
-  await box.querySelectorAll('button')[0].onclick();
+  assert.equal(new URL(box.querySelectorAll('a')[0].href,'http://test').searchParams.get('q'),author);
+  await box.querySelectorAll('a')[0].onclick({button:0,preventDefault(){}});
   assert.equal(closedReader,true);assert.equal(h.roots['detail-dialog'].open,false);assert.equal(h.state.detailRequest,1);
   assert.equal(h.state.tab,'browse');assert.equal(h.state.search.keyword,author);
   assert.equal(h.state.search.mode,'keyword');assert.equal(h.state.search.source,'');
@@ -196,9 +201,9 @@ test('作者兼容数组与旧字符串，多作者分别点击，未知作者�
   const h=harness();
   assert.deepEqual(plain(h.context.comicAuthors({authors:[' A/B ',{name:'Bob'},'bob',7,null,{name:5}],author:'旧作者'})),['A/B','Bob']);
   assert.deepEqual(plain(h.context.comicAuthors({author:'Alice / Bob、Alice'})),['Alice','Bob']);
-  for(const author of ['',null,'佚名','unknown','N/A'])assert.equal(h.context.renderComicAuthors({author}).querySelectorAll('button').length,0);
+  for(const author of ['',null,'佚名','unknown','N/A'])assert.equal(h.context.renderComicAuthors({author}).querySelectorAll('a').length,0);
   const root=h.context.renderComicAuthors({authors:['<script>alert(1)</script>','作者二']});
-  assert.equal(root.querySelectorAll('button').length,2);assert.match(root.textContent,/<script>/);
+  assert.equal(root.querySelectorAll('a').length,2);assert.match(root.textContent,/<script>/);
 });
 
 test('合并数量、全部图源计数与原始源计数分别展示，分页依据原始返回数',async()=>{

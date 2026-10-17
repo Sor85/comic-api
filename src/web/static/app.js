@@ -54,6 +54,16 @@ const svgIcon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[nam
 function node(tag, text, className) {const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;}
 function button(text, action, className) {const n=node('button',text,className);n.type='button';n.onclick=()=>run(action,n);return n;}
 function iconBtn(name, label, action, className) {const n=node('button',undefined,(className?className+' ':'')+'icon-btn');n.type='button';n.title=label;n.setAttribute('aria-label',label);n.innerHTML=svgIcon(name);n.onclick=()=>run(action,n);return n;}
+// Author and tag chips are real links, so the browser's own context menu can open the search in a new tab.
+// A plain left click stays in the app: modified and middle clicks are left to the browser.
+function searchLink(text, href, action, className) {
+  const n=node('a',text,className);n.href=href;
+  n.onclick=event=>{
+    if(event&&(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey))return;
+    event?.preventDefault();return run(action);
+  };
+  return n;
+}
 function labelBtn(icon, text, action, className) {const n=button('',action,className);n.innerHTML=svgIcon(icon);n.append(node('span',text));return n;}
 async function run(action, control) {if(control)control.disabled=true;try{return await action();}catch(e){if(e.name!=='AbortError')toast(e.message,{tone:'error'});}finally{if(control)control.disabled=false;}}
 

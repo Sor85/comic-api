@@ -24,13 +24,18 @@ function searchParams(search){
   }
   return params;
 }
+function tagSearchHref(detail,tag){
+  const params=searchParams({keyword:tag.label,source:detail.source,mode:'tag',tag_value:tag.value});
+  params.set('q',params.get('keyword'));params.delete('keyword');
+  return '?'+params;
+}
 function renderComicLabels(detail){
   const root=node('div',undefined,'comic-labels');
   const add=(title,labels,searchable)=>{
     if(!labels.length)return;
     const group=node('div',undefined,'comic-label-group'),list=node('div',undefined,'tags');
     group.append(node('span',title,'comic-label-title'),list);
-    const entries=labels.map(entry=>searchable?button(entry.label,()=>searchComicTag(detail,entry),'tag tag-link'):node('span',entry.label,'tag'));
+    const entries=labels.map(entry=>searchable?searchLink(entry.label,tagSearchHref(detail,entry),()=>searchComicTag(detail,entry),'tag tag-link'):node('span',entry.label,'tag'));
     entries.forEach((entry,index)=>{entry.hidden=index>=12;list.append(entry);});
     if(entries.length>12){
       let expanded=false;

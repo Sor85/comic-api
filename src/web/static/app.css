@@ -481,6 +481,7 @@ button.source-toggle svg{width:44px;height:28px;stroke:none}
 .comic-label-title{flex:0 0 2em;color:var(--muted);font-size:12px}
 .comic-labels .tags{min-width:0}
 .comic-labels .tag{white-space:normal;text-align:left;overflow-wrap:anywhere;max-width:100%;line-height:1.6}
+.comic-labels .tag-link{display:inline-flex;align-items:center;text-decoration:none}
 .comic-labels .tag-link:hover,.comic-labels .tag-link:focus-visible{color:var(--accent);border-color:var(--accent)}
 .tags{display:flex;flex-wrap:wrap;gap:6px}
 .tag{font-size:12px;padding:1px 10px;border-radius:999px;background:color-mix(in srgb,var(--soft2) 80%,transparent);color:color-mix(in srgb,var(--text) 80%,var(--muted));border:1px solid var(--line)}

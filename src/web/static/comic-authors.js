@@ -23,7 +23,7 @@ function renderComicAuthors(item){
   const root=node('span',undefined,'comic-authors'),authors=comicAuthors(item);
   if(!authors.length){root.append(node('span','佚名'));return root;}
   for(const author of authors){
-    const link=button(author,()=>searchComicAuthor(author),'author-link');
+    const link=searchLink(author,'?q='+encodeURIComponent(author),()=>searchComicAuthor(author),'author-link');
     link.title=`搜索作者：${author}`;link.setAttribute('aria-label',link.title);root.append(link);
   }
   return root;
