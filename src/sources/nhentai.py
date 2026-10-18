@@ -19,6 +19,7 @@ from src.clients.base import BaseClient
 from src.errors import ComicApiError, DownloadCancelled
 from src.metadata import comic_page_count
 from src.sources import SourcePlugin
+from src.sources._nhentai_tags import JM_TAG_QUERIES
 
 API_BASE = "https://nhentai.net/api/v2"
 USER_AGENT = "comic-api/1.0 (+https://github.com/Sor85/comic-api)"
@@ -182,7 +183,7 @@ class NhentaiPlugin(SourcePlugin):
             name = str(keyword or "").strip().replace('"', "")
             if not name:
                 return []
-            query = f'tag:"{name}"'
+            query = JM_TAG_QUERIES.get(name.casefold(), f'tag:"{name}"')
         return self._items(self._api("GET", "search", query=query, sort=sort or "date", page=page))
 
     def detail(self, comic_id):

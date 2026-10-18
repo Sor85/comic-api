@@ -9,7 +9,9 @@ from PIL import Image
 
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
-from src.sources.nhentai import NhentaiPlugin
+from src.sources import SourcePlugin
+from src.sources._nhentai_tags import JM_TAG_QUERIES
+from src.sources.nhentai import TAG_VALUE, NhentaiPlugin
 from src.storage import Store
 
 CDN = {"image_servers": ["https://i1.nh.test", "https://i2.nh.test"],
@@ -111,6 +113,68 @@ def test_tag_search_accepts_typed_values_and_plain_names(plugin):
     plugin.search_tag('weird" OR name')
     queries = [call[2]["query"] for call in plugin.calls if call[1].endswith("/search")]
     assert queries == ['tag:"big breasts"', 'tag:"plain name"', 'artist:"some artist"', 'tag:"weird OR name"']
+
+
+@pytest.mark.parametrize("keyword,query", list(JM_TAG_QUERIES.items()))
+def test_tag_search_maps_verified_jm_aliases_without_extra_requests(plugin, keyword, query):
+    plugin.search_tag(f" {keyword} ", page=3, sort="popular")
+    searches = [call for call in plugin.calls if call[1].endswith("/search")]
+    assert len(searches) == 1
+    assert searches[0][2] == {"query": query, "sort": "popular", "page": 3}
+    assert TAG_VALUE.fullmatch(query)
+    assert all(call[1].endswith(("/search", "/cdn")) for call in plugin.calls)
+
+
+@pytest.mark.parametrize("keyword,query", [
+    ("女性向", 'tag:"josei"'), ("全彩", 'tag:"full color"'),
+    ("女僕", 'tag:"maid"'), ("女仆", 'tag:"maid"'),
+    ("眼鏡", 'tag:"glasses"'), ("眼镜", 'tag:"glasses"'),
+    ("NTR", 'tag:"netorare"'), ("nTr", 'tag:"netorare"'), ("YAOI", 'tag:"yaoi"'),
+])
+def test_tag_search_recognizes_jm_script_variants_and_ascii_case(plugin, keyword, query):
+    plugin.search_tag(keyword)
+    assert plugin.calls[0][2]["query"] == query
+
+
+@pytest.mark.parametrize("keyword", ["JM独有标签", "純愛", "纯爱", "催眠", "女性向作品", "josei", "full color"])
+def test_tag_search_does_not_guess_unmapped_or_partial_aliases(plugin, keyword):
+    plugin.search_tag(keyword)
+    assert plugin.calls[0][2]["query"] == f'tag:"{keyword}"'
+
+
+def test_tag_aliases_do_not_override_native_queries_or_keyword_search(plugin):
+    plugin.search_tag("女性向", tag_value='artist:"some artist"')
+    plugin.search_tag('tag:"女性向"')
+    plugin.search_tag('language:"chinese"')
+    plugin.search("女性向")
+    queries = [call[2]["query"] for call in plugin.calls if call[1].endswith("/search")]
+    assert queries == ['artist:"some artist"', 'tag:"女性向"', 'language:"chinese"', "女性向"]
+
+
+def test_jm_alias_mapping_applies_to_single_source_and_aggregate_api(plugin, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("DATA_DIR", str(plugin.store.root))
+    from main import create_app
+
+    class JmSearchPlugin(SourcePlugin):
+        id = "jm"
+        capabilities = ["search", "tag_search"]
+
+        def search_tag(self, keyword, page=1):
+            assert keyword == "女性向" and page == 2
+            return [{"id": "1", "title": "JM result"}]
+
+    with TestClient(create_app(plugin.store, {"jm": JmSearchPlugin(plugin.store), "nhentai": plugin})) as client:
+        single = client.get("/api/search", params={"keyword": "女性向", "mode": "tag", "source": "nhentai", "page": 2})
+        assert single.status_code == 200
+        assert [item["id"] for item in single.json()["items"]] == ["5", "6"]
+        aggregate = client.get("/api/search", params={"keyword": "女性向", "mode": "tag", "page": 2})
+        assert aggregate.status_code == 200
+        assert set(aggregate.json()["all_results"]) == {"jm", "nhentai"}
+        assert aggregate.json()["errors"] == {}
+    searches = [call for call in plugin.calls if call[1].endswith("/search")]
+    assert [call[2] for call in searches] == [{"query": 'tag:"josei"', "sort": "date", "page": 2}] * 2
 
 
 def test_browse_actions(plugin):
