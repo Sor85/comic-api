@@ -1179,7 +1179,9 @@ function configureAccount(){
 }
 
 /* ---------- reader ---------- */
-function saveProgress(){const r=state.reader;if(!r||!r.images.length)return;recordReading(r);}
+// Opening the reader alone leaves history untouched; recording starts with the first page turn of the session.
+function saveProgress(){const r=state.reader;if(!r||!r.images.length||!state.readerTurned)return;recordReading(r);}
+function markPageTurn(){state.readerTurned=true;}
 function readerMessage(text,loading){const box=node('div',undefined,'reader-message');if(loading)box.append(node('span',undefined,'spinner'));box.append(node('p',text));return box;}
 function syncPageStatus(){
   const r=state.reader,slider=$('page-slider');if(!r)return;const n=r.images.length;
@@ -1192,7 +1194,7 @@ function fillChapterSelect(book,chapterId){
   select.value=chapterId;select.hidden=book.chapters.length<2;
 }
 // showModal() focuses the first toolbar button (back), which mobile browsers ring and which pins the toolbar open; hand focus to the pages instead.
-function showReaderDialog(){const dlg=$('reader-dialog');if(dlg.open)return;dlg.showModal();$('reader-pages').focus({preventScroll:true});}
+function showReaderDialog(){const dlg=$('reader-dialog');if(dlg.open)return;state.readerTurned=false;dlg.showModal();$('reader-pages').focus({preventScroll:true});}
 // Continue reading straight into the reader: load the comic behind the scenes without opening its detail page.
 async function resumeComic(item){
   if(sourcePlugin(item.source)?.enabled===false){toast('图源已关闭，重新启用入口位于「设置 → 图源管理」');return;}
@@ -1270,7 +1272,7 @@ function renderReader(){
     for(const near of [r.index+1,r.index-1]){const el=container.children[near];if(el?.classList.contains('ph'))mount(el);}
     container.children[r.index]?.scrollIntoView({block:'start'});
     // Wait for the target page to load before observing, so restoring does not overwrite saved progress.
-    let restored=false;const restore=()=>{if(restored||state.reader!==r||$('reader-mode').value!=='scroll')return;restored=true;state.readerQuietUntil=Date.now()+600;container.children[r.index]?.scrollIntoView({block:'start'});state.observer=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top);if(visible.length){r.index=Number(visible[0].target.dataset.index);syncPageStatus();saveProgress();}},{root:container,rootMargin:'0px 0px -70% 0px',threshold:0});pages().forEach(n=>state.observer.observe(n));};
+    let restored=false;const restore=()=>{if(restored||state.reader!==r||$('reader-mode').value!=='scroll')return;restored=true;state.readerQuietUntil=Date.now()+600;container.children[r.index]?.scrollIntoView({block:'start'});state.observer=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>a.boundingClientRect.top-b.boundingClientRect.top);if(visible.length){const index=Number(visible[0].target.dataset.index);if(index!==r.index)markPageTurn();r.index=index;syncPageStatus();saveProgress();}},{root:container,rootMargin:'0px 0px -70% 0px',threshold:0});pages().forEach(n=>state.observer.observe(n));};
     const img=container.children[r.index]?.querySelector('img');
     if(img){img.addEventListener('load',restore,{once:true});img.addEventListener('error',restore,{once:true});if(img.complete)restore();}else restore();
   }
@@ -1323,9 +1325,9 @@ $('reader-pages').addEventListener('scroll',()=>{
   if(dy>24){dlg.classList.remove('ui-open','ui-pinned');}
   else if(dy<-36){dlg.classList.add('ui-open');}
 },{passive:true});
-function gotoPage(index){const r=state.reader;if(!r||index<0||index>=r.images.length)return;const from=r.index;r.index=index;if($('reader-mode').value==='page')renderReader();else{const el=$('reader-pages').children[index];if(el?.classList.contains('ph')){state.readerQuietUntil=Date.now()+900;}el?.scrollIntoView({block:'start',behavior:Math.abs(index-from)>3?'auto':'smooth'});syncPageStatus();saveProgress();}syncReaderProgress();}
+function gotoPage(index){const r=state.reader;if(!r||index<0||index>=r.images.length)return;const from=r.index;if(index!==from)markPageTurn();r.index=index;if($('reader-mode').value==='page')renderReader();else{const el=$('reader-pages').children[index];if(el?.classList.contains('ph')){state.readerQuietUntil=Date.now()+900;}el?.scrollIntoView({block:'start',behavior:Math.abs(index-from)>3?'auto':'smooth'});syncPageStatus();saveProgress();}syncReaderProgress();}
 function movePage(delta){const r=state.reader;if(!r)return;const index=r.index+delta;if(index<0||index>=r.images.length){moveChapter(delta,true);return;}gotoPage(index);}
-function moveChapter(delta,turn){const r=state.reader,book=r?.book||state.detail;if(!book)return;const chapters=book.chapters,current=r?r.chapterId:$('reader-chapter').value,index=chapters.findIndex(c=>String(c.id)===current);if(chapters[index+delta])run(()=>openReader(String(chapters[index+delta].id),turn?(delta>0?0:-1):undefined));else toast(delta>0?'已经是最后一章了':'已经是第一章了');}
+function moveChapter(delta,turn){const r=state.reader,book=r?.book||state.detail;if(!book)return;const chapters=book.chapters,current=r?r.chapterId:$('reader-chapter').value,index=chapters.findIndex(c=>String(c.id)===current);if(chapters[index+delta]){if(turn)markPageTurn();run(()=>openReader(String(chapters[index+delta].id),turn?(delta>0?0:-1):undefined));}else toast(delta>0?'已经是最后一章了':'已经是第一章了');}
 function closeReader(silent){
   saveProgress();state.readerAbort?.abort();++state.readerRequest;state.observer?.disconnect();state.mounter?.disconnect();state.reader=null;
   if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
