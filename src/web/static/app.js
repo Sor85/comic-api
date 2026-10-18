@@ -307,7 +307,7 @@ function upsertReading(entry){setReading([entry,...readingItems().filter(h=>read
 async function loadReading(){
   const data=await api('/api/reading'),local=new Map([...readingQueue.pending.values()].map(job=>[readingKey(job.entry),job.entry]));
   setReading([...local.values(),...(data.items||[]).filter(h=>!local.has(readingKey(h)))]);
-  renderContinue();filterBooks();
+  renderContinue();filterBooks();refreshCardStates();
 }
 async function fetchComicReading(item){
   await flushReading();
@@ -679,7 +679,7 @@ function syncComicMarks(box,item){
   box.replaceChildren(...marks.map(([icon,title,kind])=>{const mark=node('span',undefined,`cover-mark ${kind}`);mark.innerHTML=svgIcon(icon);mark.title=title;mark.setAttribute('role','img');mark.setAttribute('aria-label',title);return mark;}));
   box.hidden=!marks.length;
 }
-function refreshResultMarks(){for(const el of $('results')?.children||[])el.syncMarks?.();}
+function refreshCardStates(){for(const el of document.querySelectorAll('.card'))el.syncState?.();}
 // Favorite marks come from the locally recorded favorites tables only; failures leave the cards unmarked.
 async function loadResultFavorites(items,request){
   const wanted={};
@@ -698,25 +698,27 @@ async function loadResultFavorites(items,request){
       for(const id of data.ids||[])known.add(String(id));
     }
   }));
-  if(request===state.browseRequest)refreshResultMarks();
+  if(request===state.browseRequest)refreshCardStates();
 }
 function setFavoriteMark(source,id,favorited){
   const known=state.favoriteIds[source]??=new Set();
   if(favorited)known.add(String(id));else known.delete(String(id));
-  refreshResultMarks();
+  refreshCardStates();
 }
 function card(item,{showSource=true,library=false,history=null,marks=false}={}){
   const el=node('article',undefined,'card'+(history?' card-history':'')+(library?' card-fixed card-library':''));
   // Only the play control resumes reading; the rest of the card always opens the detail page.
   const open=button('',()=>openComic(item),'card-open');open.title=item.title||'';
-  const cover=coverBox(item);
+  const cover=coverBox(item),syncs=[];
   if(showSource&&item.source)cover.append(node('span',sourceName(item.source),'cover-source'));
-  if(marks){const box=node('span',undefined,'cover-marks');el.syncMarks=()=>syncComicMarks(box,item);el.syncMarks();cover.append(box);}
+  if(marks){const box=node('span',undefined,'cover-marks');syncs.push(()=>syncComicMarks(box,item));cover.append(box);}
   if(history){
     const bar=node('i',undefined,'cover-progress');bar.style.setProperty('--p',history.total?Math.min(1,(history.index+1)/history.total):0);
     cover.append(bar);
   }else{
-    const last=readingLast(item);if(last?.chapterName)cover.append(node('span',`读至 ${last.chapterName}`,'cover-tag'));
+    // Reading history loads independently of the cards, so the tag is refreshed once it arrives.
+    const tag=node('span',undefined,'cover-tag');cover.append(tag);
+    syncs.push(()=>{const last=readingLast(item);tag.textContent=last?.chapterName?`读至 ${last.chapterName}`:'';tag.hidden=!last?.chapterName;});
   }
   const info=node('div',undefined,'card-info');
   info.append(node('h3',item.title||'未命名'));
@@ -737,6 +739,7 @@ function card(item,{showSource=true,library=false,history=null,marks=false}={}){
   }
   if(item.variants?.length>1)el.append(renderComicVariants(item.variants));
   if(library)el.append(libraryActions(item,el));
+  if(syncs.length){el.syncState=()=>syncs.forEach(sync=>sync());el.syncState();}
   return el;
 }
 function renderComicVariants(variants){
@@ -777,7 +780,7 @@ function bookCategories(item){return item.library_categories||[item.library_cate
 async function loadLibrary() {
   const data=await api('/api/library');state.books=data.items;state.categories=data.categories||[];
   options($('library-category'),[{value:'*',label:'全部分类'},{value:'',label:'未分类'},...state.categories.map(v=>({value:v,label:v}))],$('library-category').value);
-  $('library-count').textContent=state.books.length?String(state.books.length):'';refreshResultMarks();
+  $('library-count').textContent=state.books.length?String(state.books.length):'';refreshCardStates();
   state.libraryMenu?.sync();
   filterBooks();
 }
@@ -1331,7 +1334,7 @@ function moveChapter(delta,turn){const r=state.reader,book=r?.book||state.detail
 function closeReader(silent){
   saveProgress();state.readerAbort?.abort();++state.readerRequest;state.observer?.disconnect();state.mounter?.disconnect();state.reader=null;
   if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
-  $('reader-dialog').close();$('reader-pages').replaceChildren();flushReading();renderContinue();
+  $('reader-dialog').close();$('reader-pages').replaceChildren();flushReading();renderContinue();refreshCardStates();
   if(!silent&&state.detail&&$('detail-dialog').open){const scroller=$('detail-scroll'),top=scroller.scrollTop;renderDetail();scroller.scrollTop=top;}
 }
 

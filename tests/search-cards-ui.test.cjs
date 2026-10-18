@@ -77,10 +77,11 @@ test('历史卡片显示阅读进度，只有播放按钮直接进入阅读页�
 test('结果卡片标识书库与云收藏，合并卡片检查所有版本，收藏状态变更后刷新',async()=>{
   const h=harness(),calls=[],results={children:[]};
   Object.assign(h.context,{
-    $:id=>id==='results'?results:undefined,inLibrary:item=>item.source==='jm'&&item.id==='1',
+    inLibrary:item=>item.source==='jm'&&item.id==='1',
     sourcePlugin:id=>({id,enabled:true,capabilities:['favorites'],account:{authenticated:id==='bika'}}),
     enc:encodeURIComponent,URLSearchParams,api:async path=>{calls.push(path);return {ids:['b2']};},
   });
+  h.context.document.querySelectorAll=selector=>selector==='.card'?results.children:[];
   h.context.state.favoriteIds={};h.context.state.browseRequest=7;
   vm.runInContext(app.slice(app.indexOf('// Result cards mark'),app.indexOf('function card(')),h.context);
   const bika={id:'b2',source:'bika',title:'夏日'},plain=h.context.card({...book,id:'9'},{marks:true});
@@ -93,6 +94,19 @@ test('结果卡片标识书库与云收藏，合并卡片检查所有版本，�
   assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/bika\/sync\/favorite-ids\?ids=b2$/);
   assert.deepEqual(marks(merged),['library','favorite']);assert.match(merged.querySelectorAll('.favorite')[0].title,/哔咔收藏/);
   h.context.setFavoriteMark('bika','b2',false);assert.deepEqual(marks(merged),['library']);
+});
+
+test('阅读记录晚于卡片加载时，刷新后补上读至标签',()=>{
+  const h=harness(),cards=[];let reading=null;
+  Object.assign(h.context,{readingLast:()=>reading});
+  h.context.document.querySelectorAll=selector=>selector==='.card'?cards:[];
+  vm.runInContext(app.slice(app.indexOf('function refreshCardStates('),app.indexOf('// Favorite marks come from')),h.context);
+  const card=h.context.card(book);cards.push(card);
+  const tag=()=>card.querySelectorAll('.cover-tag')[0];
+  assert.ok(tag().hidden);assert.equal(tag().textContent,'');
+  reading={chapterName:'第 1 章'};h.context.refreshCardStates();
+  assert.ok(!tag().hidden);assert.equal(tag().textContent,'读至 第 1 章');
+  assert.equal(h.context.card(book,{history:{chapterName:'',index:0,total:1}}).querySelectorAll('.cover-tag').length,0);
 });
 
 test('新增作者脚本在主脚本前加载，交互样式声明排版基线且不改鼠标样式',()=>{
