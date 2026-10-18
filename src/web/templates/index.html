@@ -187,12 +187,13 @@
   </main>
   <dialog id="settings-dialog" class="modal site-settings-dialog" aria-labelledby="settings-title">
     <div class="modal-head">
-      <div class="modal-title"><h2 id="settings-title">设置</h2><p>站点访问与图源配置保存在服务器，对所有浏览器生效</p></div>
+      <div class="modal-title"><h2 id="settings-title">设置</h2><p>站点访问与图源配置保存在服务器，对所有浏览器生效；浏览偏好仅保存在当前浏览器</p></div>
       <button class="icon-btn ghost" data-close="settings-dialog" type="button" title="关闭设置" aria-label="关闭设置" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="settings-tabs" role="tablist" aria-label="设置分类">
       <button id="settings-tab-auth" data-settings-pane="auth" role="tab" aria-selected="true" aria-controls="settings-pane-auth" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><span>站点鉴权</span></button>
       <button id="settings-tab-sources" data-settings-pane="sources" role="tab" aria-selected="false" aria-controls="settings-pane-sources" tabindex="-1" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></svg><span>图源管理</span></button>
+      <button id="settings-tab-browse" data-settings-pane="browse" role="tab" aria-selected="false" aria-controls="settings-pane-browse" tabindex="-1" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l2 2"/><path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/></svg><span>浏览偏好</span></button>
     </div>
     <div class="site-settings-body modal-body" data-scroll-area>
       <section id="settings-pane-auth" class="settings-pane" role="tabpanel" aria-labelledby="site-auth-title">
@@ -251,6 +252,15 @@
         <div id="source-list" class="group source-list"></div>
         <div class="tip-sources" hidden>
           <div id="tip-sources"><p>每个图源独立请求，某个图源不可用时不影响其他图源。关闭图源后停止使用并取消该源下载，账号、书库和已完成文件保留。</p><p class="health-legend"><i class="health-dot ok"></i>圆点表示最近一次连通检测结果，关闭的图源不检测。</p></div>
+        </div>
+      </section>
+      <section id="settings-pane-browse" class="settings-pane" role="tabpanel" aria-labelledby="settings-browse-title" hidden>
+        <div class="pane-intro"><h3 id="settings-browse-title">浏览偏好</h3><p>仅保存在当前浏览器</p></div>
+        <div class="group">
+          <div class="group-row">
+            <div class="row-text"><strong>最近搜索恢复页码</strong><span>点击最近搜索时回到上次浏览的位置，包括结果页中切换的图源、筛选、排序与页码；在搜索框中重新搜索从第 1 页开始</span></div>
+            <button id="recent-page-toggle" class="source-toggle" type="button" role="switch" aria-checked="true" aria-label="最近搜索恢复页码"></button>
+          </div>
         </div>
       </section>
     </div>

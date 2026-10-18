@@ -5,7 +5,7 @@ const state = {
   sources: [], tab: 'browse', books: [], categories: [], detail: null, detailItem: null, reader: null,
   discover: {source: '', action: 'latest', page: 1, name: '', sort: '', mode: 'day'}, search: null, searchCounts: null, view: 'home',
   health: {}, healthDots: {}, chapterDesc: readLocal('comic:chapter-desc') === true,
-  chapterPreviews: readLocal('comic:chapter-previews') === true,
+  chapterPreviews: readLocal('comic:chapter-previews') === true, recentPage: readLocal('comic:recent-page') !== false,
   searchMode: 'keyword', searchDeduplicate: false, searchCategories: {}, searchCategoryRequests: {},
   browseRequest: 0, shelfRequest: 0, detailRequest: 0, readerRequest: 0, resultItems: [], resultShown: 0, activeTasks: 0,
   reading: [], readingIndex: new Map(), readingLoaded: false, favoriteIds: {},
@@ -290,15 +290,39 @@ function browseAction(action,sourceId){
 /* ---------- recent searches & reading history ---------- */
 function readRecent(){
   const list=readLocal('comic:recent');if(!Array.isArray(list))return [];
-  return list.map(item=>typeof item==='string'?{keyword:item,mode:'keyword'}:item).filter(item=>item&&typeof item.keyword==='string').slice(0,10).map(item=>({keyword:item.keyword.slice(0,200),mode:item.mode==='tag'?'tag':'keyword',source:typeof item.source==='string'?item.source:'',tag_value:typeof item.tag_value==='string'?item.tag_value:'',category:typeof item.category==='string'?item.category:'',deduplicate:item.deduplicate===true}));
+  return list.map(item=>typeof item==='string'?{keyword:item,mode:'keyword'}:item).filter(item=>item&&typeof item.keyword==='string').slice(0,10).map(item=>({...recentEntry({...item,keyword:item.keyword.slice(0,200)}),page:Math.min(1000,Math.max(1,parseInt(item.page,10)||1)),sort:typeof item.sort==='string'?item.sort.slice(0,200):''}));
 }
+function recentEntry(search){
+  const text=value=>typeof value==='string'?value:'';
+  return {keyword:search.keyword,mode:search.mode==='tag'?'tag':'keyword',source:text(search.source),tag_value:text(search.tag_value),category:text(search.category),deduplicate:search.deduplicate===true,page:search.page||1,sort:text(search.sort)};
+}
+// A recent entry is identified by its query and filters; page and sort record where browsing left off.
+function recentKey(item){return JSON.stringify([item.keyword,item.mode,item.source,item.tag_value,item.category,item.deduplicate]);}
 function addRecent(search){
-  const entry={keyword:search.keyword,mode:search.mode,source:search.source,tag_value:search.tag_value||'',category:search.category||'',deduplicate:search.deduplicate===true};
-  saveLocal('comic:recent',[entry,...readRecent().filter(item=>JSON.stringify(item)!==JSON.stringify(entry))].slice(0,10));
+  const entry=recentEntry(search);search.recent=recentKey(entry);
+  saveLocal('comic:recent',[entry,...readRecent().filter(item=>recentKey(item)!==search.recent)].slice(0,10));
+}
+// Writes where a search left off back onto the recent entry it was started from, including filters switched
+// on the results page; searches opened from a URL fall back to the entry with identical filters.
+function saveRecentPage(search){
+  const list=readRecent(),from=search.recent||recentKey(recentEntry(search)),index=list.findIndex(item=>recentKey(item)===from);
+  if(index<0)return;
+  const entry=recentEntry(search),key=recentKey(entry);search.recent=key;
+  if(JSON.stringify(list[index])===JSON.stringify(entry))return;
+  list[index]=entry;saveLocal('comic:recent',list.filter((item,i)=>i===index||recentKey(item)!==key));
 }
 function renderRecent(){
   const list=readRecent();$('recent').hidden=!list.length;
-  $('recent-list').replaceChildren(...list.map(item=>button((item.mode==='tag'?'标签 · ':'')+item.keyword,()=>startSearch(item.keyword,item.source,item),'recent-chip')));
+  $('recent-list').replaceChildren(...list.map(item=>{
+    const resume=state.recentPage&&item.page>1,chip=button((item.mode==='tag'?'标签 · ':'')+item.keyword,()=>startSearch(item.keyword,item.source,resume?item:{...item,page:1,sort:''}),'recent-chip');
+    if(resume)chip.title=`上次浏览至第 ${item.page} 页`;
+    return chip;
+  }));
+}
+function syncRecentPageToggle(){
+  const toggle=$('recent-page-toggle'),on=state.recentPage;
+  toggle.setAttribute('aria-checked',String(on));toggle.classList.toggle('on',on);
+  toggle.innerHTML=svgIcon(on?'toggle-right':'toggle-left');toggle.append(node('span',on?'已开启':'已关闭'));
 }
 function readHistory(){return readingItems().filter(h=>h.in_history).map(h=>({source:h.source,id:h.id,title:h.title,cover:h.cover,author:h.author,chapterId:h.chapter_id,chapterName:h.chapter_name,index:h.page,total:h.total,updatedAt:h.updated_at}));}
 function readingItems(){return state.reading||[];}
@@ -609,6 +633,7 @@ async function loadSearch(){
     if(!s.source)state.searchCounts={key:searchKey(s),total:data.items.length,counts:Object.fromEntries(Object.entries(data.all_results||{}).map(([k,v])=>[k,v.length])),errors:data.errors||{}};
     renderFilters();
     showResults(data.items,s.page>1?'已经到最后一页了':'没有找到相关漫画','换个关键词，或切换到其他图源试试');
+    if(state.recentPage&&(data.items.length||s.page===1))saveRecentPage(s);
     loadResultFavorites(data.items,request);
     $('results-meta').textContent=`${scope} · 第 ${s.page} 页 · ${data.items.length} 部`+(data.duplicate_count?` · 合并 ${data.duplicate_count} 项重复结果`:'');
     renderPager(data.raw_count??data.items.length);
@@ -623,7 +648,7 @@ async function loadSearch(){
 function startSearch(keyword,source='',filters={}){
   keyword=keyword.trim().slice(0,200);if(!keyword)return;
   if(state.tab!=='browse')showTab('browse');
-  state.search={keyword,source,page:1,sort:'',mode:filters.mode||state.searchMode||'keyword',tag_value:filters.tag_value||'',category:filters.category||'',deduplicate:filters.deduplicate??state.searchDeduplicate??false};
+  state.search={keyword,source,page:filters.page||1,sort:filters.sort||'',mode:filters.mode||state.searchMode||'keyword',tag_value:filters.tag_value||'',category:filters.category||'',deduplicate:filters.deduplicate??state.searchDeduplicate??false};
   normalizeSearch();
   $('keyword').value=keyword;syncClear();addRecent(state.search);renderRecent();
   return openResults();
@@ -1359,6 +1384,8 @@ $('discover-again').onclick=()=>run(loadDiscover,$('discover-again'));
 $('results-more-btn').onclick=showMoreResults;
 new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)&&!$('results-more').hidden)showMoreResults();},{rootMargin:'800px 0px'}).observe($('results-more'));
 $('recent-clear').onclick=()=>{saveLocal('comic:recent',[]);renderRecent();};
+$('recent-page-toggle').onclick=()=>{state.recentPage=!state.recentPage;saveLocal('comic:recent-page',state.recentPage);syncRecentPageToggle();renderRecent();};
+syncRecentPageToggle();
 $('history-clear').onclick=()=>run(async()=>{if(!await ask({title:'清除阅读记录',message:'清空「继续阅读」列表？各章节的阅读进度会保留。',ok:'清除',danger:true}))return;await flushReading();await api('/api/reading/history',{method:'DELETE'});setReading(readingItems().map(h=>({...h,in_history:false})));renderContinue();});
 {const row=$('continue-row'),shelf=row.parentElement;shelf.append(state.continueScroller=scrollerFor(row));}
 window.addEventListener('resize',()=>document.querySelectorAll('.scroller').forEach(s=>s.syncArrows?.()),{passive:true});
