@@ -88,7 +88,7 @@ class AggregatorService:
 
     async def search_source(self, source, keyword, page=1, sort="", mode="keyword", tag_value="", category=""):
         plugin = self.source(source)
-        capability = "tag_search" if mode == "tag" else "search"
+        capability = {"tag": "tag_search", "author": "author_search"}.get(mode, "search")
         if capability not in plugin.capabilities:
             raise ComicApiError("图源不支持此搜索方式", 422, "unsupported", source)
         sorts = plugin.tag_sorts if mode == "tag" else plugin.search_sorts
@@ -100,14 +100,15 @@ class AggregatorService:
         kwargs = {key: value for key, value in {"sort": sort, "category": category}.items() if value}
         if mode == "tag" and tag_value:
             kwargs["tag_value"] = tag_value
-        result = await self.call(source, "search_tag" if mode == "tag" else "search", keyword, page, **kwargs)
+        method = {"tag": "search_tag", "author": "search_author"}.get(mode, "search")
+        result = await self.call(source, method, keyword, page, **kwargs)
         items = [dict(item, source=source) for item in result]
-        return items if mode == "tag" else self.rank_results(keyword, items)
+        return self.rank_results(keyword, items) if mode == "keyword" else items
 
     async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword",
                                deduplicate: bool = False) -> Dict[str, Any]:
         """Search registered sources independently and retain partial failures."""
-        capability = "tag_search" if mode == "tag" else "search"
+        capability = {"tag": "tag_search", "author": "author_search"}.get(mode, "search")
         keys = [key for key, plugin in self.sources.items() if self.is_enabled(key) and capability in plugin.capabilities]
         results = await asyncio.gather(*(self.search_source(key, keyword, page, mode=mode) for key in keys), return_exceptions=True)
         all_results, errors, candidates = {}, {}, []

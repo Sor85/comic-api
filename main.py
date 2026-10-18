@@ -396,7 +396,7 @@ def create_app(store=None, sources=None):
     @app.get("/api/search")
     async def search(keyword: str = Query(min_length=1, max_length=200), source: str = "",
                      page: int = Query(1, ge=1, le=1000), sort: str = Query(default="", max_length=64),
-                     mode: Literal["keyword", "tag"] = "keyword",
+                     mode: Literal["keyword", "tag", "author"] = "keyword",
                      tag_value: str = Query(default="", max_length=200),
                      category: str = Query(default="", max_length=200), deduplicate: bool = False):
         keyword, tag_value, category = keyword.strip(), tag_value.strip(), category.strip()

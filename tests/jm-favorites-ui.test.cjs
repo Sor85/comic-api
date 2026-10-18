@@ -72,7 +72,7 @@ test('详情中的每位作者有独立搜索按钮，搜索时关闭详情',asy
   h.context.renderDetail();await flush();
   const links=h.roots['detail-body'].querySelectorAll('.author-link');
   assert.equal(links.length,2);await links[1].onclick();
-  assert.equal(searches[0][0],'作者二');assert.equal(searches[0][2].mode,'keyword');
+  assert.equal(searches[0][0],'作者二');assert.equal(searches[0][2].mode,'author');
   assert.equal(h.roots['detail-dialog'].open,false);assert.equal(h.state.detailRequest,1);
 });
 

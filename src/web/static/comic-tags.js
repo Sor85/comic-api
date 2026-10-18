@@ -15,7 +15,7 @@ function searchKey(search){return JSON.stringify([search.keyword,search.mode||'k
 function searchParams(search){
   const params=new URLSearchParams({keyword:search.keyword,page:search.page||1});
   if(search.deduplicate===true)params.set('deduplicate','true');
-  if(search.mode==='tag')params.set('mode','tag');
+  if(['tag','author'].includes(search.mode))params.set('mode',search.mode);
   if(search.source){
     params.set('source',search.source);
     if(search.sort)params.set('sort',search.sort);

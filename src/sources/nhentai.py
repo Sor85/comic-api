@@ -42,7 +42,7 @@ def _natural_key(name):
 class NhentaiPlugin(SourcePlugin):
     id = "nhentai"
     name = "nhentai"
-    capabilities = ["search", "tag_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login"]
+    capabilities = ["search", "tag_search", "author_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login"]
     login_fields = [{"name": "api_key", "label": "API Key", "type": "password"}]
     login_hint = ("API Key 在 nhentai 网站「账号设置 → API Keys」生成（nhentai.net/user/settings#apikeys）。"
                   "未绑定时可搜索、浏览和阅读；绑定后请求限额更高，并可通过官方归档接口下载 PDF。")
@@ -185,6 +185,12 @@ class NhentaiPlugin(SourcePlugin):
                 return []
             query = JM_TAG_QUERIES.get(name.casefold(), f'tag:"{name}"')
         return self._items(self._api("GET", "search", query=query, sort=sort or "date", page=page))
+
+    def search_author(self, keyword, page=1, sort=""):
+        name = str(keyword or "").strip().replace('"', "")
+        if not name:
+            return []
+        return self._items(self._api("GET", "search", query=f'artist:"{name}"', sort=sort or "date", page=page))
 
     def detail(self, comic_id):
         data = self._gallery(comic_id)

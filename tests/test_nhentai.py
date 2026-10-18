@@ -106,6 +106,39 @@ def test_search_and_list_mapping(plugin):
     assert plugin.search("  ") == []
 
 
+def test_author_search_uses_artist_scope_not_title_or_jm_tag_mapping(plugin):
+    plugin.search_author('some artist', page=3, sort='popular')
+    plugin.search_author('女性向')
+    plugin.search_author('weird" OR name')
+    count = len(plugin.calls)
+    assert plugin.search_author('  ') == plugin.search_author('""') == []
+    assert len(plugin.calls) == count
+    queries = [call[2] for call in plugin.calls if call[1].endswith('/search')]
+    assert queries == [
+        {'query': 'artist:"some artist"', 'sort': 'popular', 'page': 3},
+        {'query': 'artist:"女性向"', 'sort': 'date', 'page': 1},
+        {'query': 'artist:"weird OR name"', 'sort': 'date', 'page': 1}]
+    assert 'author_search' in plugin.manifest()['capabilities']
+
+
+def test_author_api_dispatches_to_nhentai_artist_search(plugin, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv('DATA_DIR', str(plugin.store.root))
+    from main import create_app
+
+    with TestClient(create_app(plugin.store, {'nhentai': plugin})) as client:
+        for scope in ({'source': 'nhentai', 'sort': 'popular'}, {}):
+            response = client.get('/api/search', params={
+                'keyword': 'some artist', 'mode': 'author', 'page': 2, **scope})
+            assert response.status_code == 200
+            assert [item['id'] for item in response.json()['items']] == ['5', '6']
+    searches = [call[2] for call in plugin.calls if call[1].endswith('/search')]
+    assert searches == [
+        {'query': 'artist:"some artist"', 'sort': 'popular', 'page': 2},
+        {'query': 'artist:"some artist"', 'sort': 'date', 'page': 2}]
+
+
 def test_tag_search_accepts_typed_values_and_plain_names(plugin):
     plugin.search_tag("big breasts", tag_value='tag:"big breasts"')
     plugin.search_tag("plain name")

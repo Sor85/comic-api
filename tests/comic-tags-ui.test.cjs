@@ -23,7 +23,7 @@ class Element {
 function harness() {
   const ids=['search-mode','keyword','filters','results-title','results-meta','browse-status','results','recent','recent-list','detail-dialog','reader-dialog'];
   const roots=Object.fromEntries(ids.map(id=>[id,new Element('div')]));
-  const sources=['jm','bika','copy'].map(id=>({id,name:id,capabilities:['search','tag_search',...(id==='bika'?['search_categories']:[])],search_sorts:id==='bika'?[{value:'dd',label:'最新'}]:[],tag_sorts:id==='copy'?[{value:'-popular',label:'热门'}]:[]}));
+  const sources=['jm','bika','copy','nhentai'].map(id=>({id,name:id,capabilities:['search','tag_search',...(id!=='copy'?['author_search']:[]),...(id==='bika'?['search_categories']:[])],search_sorts:id==='bika'?[{value:'dd',label:'最新'}]:[],tag_sorts:id==='copy'?[{value:'-popular',label:'热门'}]:[]}));
   const state={sources,search:null,searchMode:'keyword',searchCategories:{},searchCategoryRequests:{},searchCounts:null,view:'results',tab:'browse',detailRequest:0,discover:{}};
   const storage=new Map(),calls=[];
   const context=vm.createContext({state,loadResultFavorites(){},document:{getElementById:id=>roots[id],createElement:tag=>new Element(tag)},
@@ -178,23 +178,41 @@ test('延迟返回的哔咔分类目录不会覆盖已切换的图源界面',asy
   assert.equal(h.state.searchCategories.bika.items[0].label,'延迟分类');
 });
 
-test('点击作者清除标签与分类，在全部图源重新搜索并保留URL和历史',async()=>{
+test('点击作者清除标签与分类，使用独立作者搜索并保留URL和历史',async()=>{
   const h=harness();h.context.startSearch('科幻','bika',{mode:'tag',category:'全彩',tag_value:'科幻'});
   h.state.search.page=4;h.state.tab='library';h.roots['detail-dialog'].open=true;h.roots['reader-dialog'].open=true;
   let closedReader=false;h.context.closeReader=()=>{closedReader=true;h.roots['reader-dialog'].open=false;};
   const author='作者 A&B / 名称',box=h.context.renderComicAuthors({authors:[author]});
-  assert.equal(new URL(box.querySelectorAll('a')[0].href,'http://test').searchParams.get('q'),author);
+  const href=new URL(box.querySelectorAll('a')[0].href,'http://test').searchParams;
+  assert.equal(href.get('q'),author);assert.equal(href.get('mode'),'author');
+  box.querySelectorAll('a')[0].onclick({button:0,ctrlKey:true,preventDefault(){throw new Error('Modified clicks belong to the browser');}});
+  assert.equal(h.state.search.mode,'tag');
   await box.querySelectorAll('a')[0].onclick({button:0,preventDefault(){}});
   assert.equal(closedReader,true);assert.equal(h.roots['detail-dialog'].open,false);assert.equal(h.state.detailRequest,1);
   assert.equal(h.state.tab,'browse');assert.equal(h.state.search.keyword,author);
-  assert.equal(h.state.search.mode,'keyword');assert.equal(h.state.search.source,'');
+  assert.equal(h.state.search.mode,'author');assert.equal(h.state.search.source,'');
   assert.equal(h.state.search.page,1);assert.equal(h.state.search.category,'');assert.equal(h.state.search.tag_value,'');
   await h.context.loadSearch();
   const query=new URL(h.calls.at(-1),'http://test').searchParams;
-  assert.equal(query.get('keyword'),author);assert.equal(query.has('mode'),false);assert.equal(query.has('source'),false);
+  assert.equal(query.get('keyword'),author);assert.equal(query.get('mode'),'author');assert.equal(query.has('source'),false);
+  assert.match(h.roots['results-title'].textContent,/作者/);
   const fresh=harness();fresh.context.location.search=h.context.viewURL();fresh.context.initBrowse();await flush();
-  assert.equal(fresh.state.search.keyword,author);assert.equal(fresh.state.search.mode,'keyword');
-  assert.equal(h.context.readRecent()[0].keyword,author);
+  assert.equal(fresh.state.search.keyword,author);assert.equal(fresh.state.search.mode,'author');
+  assert.equal(h.context.readRecent()[0].keyword,author);assert.equal(h.context.readRecent()[0].mode,'author');
+  assert.match(h.roots['recent-list'].textContent,/作者 · /);
+});
+
+test('作者搜索仅显示支持的图源，切换搜索方式清理筛选与页码',async()=>{
+  const h=harness();h.context.startSearch('作者','copy',{mode:'author',tag_value:'旧标签',sort:'-popular',page:3});
+  assert.equal(h.state.search.source,'');assert.equal(h.state.search.page,1);assert.equal(h.state.search.tag_value,'');
+  await h.context.loadSearch();
+  const sources=h.roots.filters.children[0].querySelectorAll('button').map(button=>button.textContent);
+  assert.deepEqual(sources,['全部0','jm0','bika0','nhentai0']);
+  assert.equal(h.roots.keyword.attributes['aria-label'],'搜索漫画作者');
+  assert.notEqual(h.context.searchKey({keyword:'作者',mode:'author'}),h.context.searchKey({keyword:'作者',mode:'keyword'}));
+  const keyword=h.roots['search-mode'].querySelectorAll('button').find(button=>button.textContent==='关键词');
+  keyword.onclick();await flush();
+  assert.equal(h.state.search.mode,'keyword');assert.equal(new URL(h.calls.at(-1),'http://test').searchParams.has('mode'),false);
 });
 
 test('作者兼容数组与旧字符串，多作者分别点击，未知作者不生成按钮',()=>{
@@ -239,7 +257,7 @@ test('去重开关保留搜索方式和筛选，作者搜索沿用当前选择�
   const query=new URL(h.calls.filter(path=>path.startsWith('/api/search?')).at(-1),'http://test').searchParams;
   assert.equal(query.get('deduplicate'),'true');assert.equal(query.get('mode'),'tag');
   assert.equal(query.get('category'),'全彩');assert.equal(query.get('tag_value'),'原始标签');
-  h.context.searchComicAuthor('作者');assert.equal(h.state.search.deduplicate,true);assert.equal(h.state.search.mode,'keyword');
+  h.context.searchComicAuthor('作者');assert.equal(h.state.search.deduplicate,true);assert.equal(h.state.search.mode,'author');
   h.context.startSearch('测试','',{deduplicate:false});assert.equal(h.state.search.deduplicate,false);
 });
 

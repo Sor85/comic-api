@@ -41,7 +41,7 @@ test('普通卡片与书库卡片的作者按钮不嵌套，点击作者不打�
     assert.ok(card.querySelectorAll('button').every(button=>button.querySelectorAll('button').length===0));
     await authors[1].onclick();
     assert.equal(h.opened.length,0);assert.equal(h.searches[0][0],'作者二');
-    assert.equal(h.searches[0][1],'');assert.equal(h.searches[0][2].mode,'keyword');
+    assert.equal(h.searches[0][1],'');assert.equal(h.searches[0][2].mode,'author');
     await card.querySelectorAll('.card-open')[0].onclick();
     assert.equal(h.opened[0][0].id,'1');
   }

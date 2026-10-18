@@ -585,6 +585,15 @@ class JmClient(BaseClient):
             raise ComicApiError("禁漫标签搜索响应格式无效", 502, "invalid_response", "jm")
         return self._parse_jm_comics(data.get("items", []) or data.get("content", []))
 
+    def search_author(self, author: str, page: int = 1) -> List[Dict[str, Any]]:
+        res = self.jm_request("/search", method="GET", params={
+            "search_query": author, "main_tag": "2", "page": str(page)
+        })
+        data = res.get("data", res) if isinstance(res, dict) else res
+        if not isinstance(data, dict):
+            raise ComicApiError("禁漫作者搜索响应格式无效", 502, "invalid_response", "jm")
+        return self._parse_jm_comics(data.get("items", []) or data.get("content", []))
+
     def get_comic_detail(self, comic_id: str) -> Dict[str, Any]:
         """获取漫画详情"""
         res = self.jm_request("/album", method="GET", params={"id": comic_id})

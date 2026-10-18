@@ -90,7 +90,7 @@ docker compose up -d
 
 ## 数据与功能
 
-- **混合搜索**：各图源结果统一展示并标注来源，按标题匹配度排序；支持关键词／标签搜索、作者搜索、哔咔分类筛选与可选的结果去重。作者与可搜索标签可在新标签页打开。搜索与发现结果卡片显示书库、JM／哔咔云收藏状态，以及「读至」已读章节标签；合并卡片按各原始版本判断书库与收藏状态。云收藏标识依据当前账号在服务器本地登记的收藏记录，不额外实时查询上游。
+- **混合搜索**：各图源结果统一展示并标注来源，关键词搜索按标题匹配度排序；支持关键词／标签／作者三种搜索方式、哔咔分类筛选与可选的结果去重。点击作者以作者模式搜索 JM、哔咔、nhentai，不再执行普通关键词搜索；JM 使用作者筛选 `main_tag=2`，哔咔使用作者参数 `a`（需要登录），nhentai 使用 `artist:"作者名"`，标签与作者搜索保留各图源原始顺序。作者与可搜索标签可在新标签页打开。搜索与发现结果卡片显示书库、JM／哔咔云收藏状态，以及「读至」已读章节标签；合并卡片按各原始版本判断书库与收藏状态。云收藏标识依据当前账号在服务器本地登记的收藏记录，不额外实时查询上游。
 - **最近搜索**：搜索条件与上次浏览的结果页码保存在当前浏览器，默认恢复上次页码；「设置 → 浏览偏好 → 最近搜索恢复页码」可关闭页码恢复。在搜索框重新提交同一条件、关闭恢复开关或旧记录缺少页码时，从第 1 页开始。
 - **图片代理**：封面与章节图片经 `/api/image/proxy` 中转并缓存到磁盘，带 SSRF 防护；支持 `HTTP(S)_PROXY`、系统代理与 Fake-IP 透明代理。
 - **书库**：收藏、分类、筛选与手动检查章节更新；JM／哔咔云收藏可定时增补到书库。
@@ -119,7 +119,7 @@ docker compose up -d
 - `search(keyword, page)`：漫画列表，每项含 `id/title/cover/author`。
 - `detail(comic_id)`：漫画详情及 `chapters: [{id, name, order}]`。
 - `pages(comic_id, chapter_id)`：有序图片 URL 列表。
-- 可选 `search_tag`、`browse`、`login/logout/account_status`、`settings_fields/save_settings`、`download_archive`。
+- 可选 `search_tag`、`search_author`、`browse`、`login/logout/account_status`、`settings_fields/save_settings`、`download_archive`；声明 `author_search` 能力后参与作者搜索，`search_author(keyword, page, sort)` 沿用 `search_sorts`（未声明排序时可省略 `sort`）。
 
 参考 `src/sources/copy.py`（游客）、`src/sources/bika.py`（账号）和 `src/sources/nhentai.py`（官方 API）。
 
@@ -144,7 +144,7 @@ docker compose up -d
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/search` | `keyword` 必填；`source` 省略时聚合；`page`、`sort`、`mode=keyword\|tag`、`tag_value`、`category`、`deduplicate` |
+| GET | `/api/search` | `keyword` 必填；`source` 省略时聚合；`page`、`sort`、`mode=keyword\|tag\|author`、`tag_value`、`category`、`deduplicate` |
 | GET | `/api/{source}/{action}` | `action` 为 `latest/category/leaderboard/random`；`page`、`sort`、`mode`（榜单周期）、`name`（分类） |
 | GET | `/api/comic/{source}/{comic_id}` | 漫画详情与章节 |
 | GET | `/api/chapter/{source}/{comic_id}/{chapter_id}` | 章节图片代理地址列表 |

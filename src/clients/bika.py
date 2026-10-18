@@ -395,6 +395,13 @@ class BikaClient(BaseClient):
             params["c"] = category
         return self._parse_comics_list(self.bika_request("comics", method="GET", params=params))
 
+    def search_author(self, author: str, page: int = 1, sort: str = "dd", category: str = ""):
+        self.ensure_authenticated()
+        params = {"page": str(page), "a": author, "s": sort or "dd"}
+        if category:
+            params["c"] = category
+        return self._parse_comics_list(self.bika_request("comics", method="GET", params=params))
+
     def search_categories(self):
         self.ensure_authenticated()
         response = self.bika_request("categories", method="GET")

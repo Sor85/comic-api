@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class BikaPlugin(SourcePlugin):
     id = "bika"
     name = "哔咔漫画"
-    capabilities = ["search", "tag_search", "search_categories", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
+    capabilities = ["search", "tag_search", "author_search", "search_categories", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": name, "label": name} for name in
@@ -50,6 +50,9 @@ class BikaPlugin(SourcePlugin):
 
     def search_tag(self, keyword, page=1, sort="", tag_value="", category=""):
         return self.client.search_tag(tag_value or keyword, page, sort or "dd", category)
+
+    def search_author(self, keyword, page=1, sort="", category=""):
+        return self.client.search_author(keyword, page, sort or "dd", category)
 
     def search_categories(self):
         return self.client.search_categories()

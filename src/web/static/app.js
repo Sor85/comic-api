@@ -263,7 +263,7 @@ function initBrowse(){
   if(tab&&Object.hasOwn(TAB_LABELS,tab)&&tab!=='browse'){setView('home');showTab(tab,false);syncHistory(false);return;}
   const q=(params.get('q')||'').trim().slice(0,200),src=params.get('source'),action=params.get('browse');
   if(q){
-    state.search={keyword:q,source:sourcePlugin(src)?src:'',page:Math.min(1000,Math.max(1,parseInt(params.get('page'),10)||1)),sort:params.get('sort')||'',mode:params.get('mode')==='tag'?'tag':'keyword',tag_value:(params.get('tag_value')||'').slice(0,200),category:(params.get('category')||'').slice(0,200),deduplicate:['true','1'].includes(params.get('deduplicate'))};
+    state.search={keyword:q,source:sourcePlugin(src)?src:'',page:Math.min(1000,Math.max(1,parseInt(params.get('page'),10)||1)),sort:params.get('sort')||'',mode:['tag','author'].includes(params.get('mode'))?params.get('mode'):'keyword',tag_value:(params.get('tag_value')||'').slice(0,200),category:(params.get('category')||'').slice(0,200),deduplicate:['true','1'].includes(params.get('deduplicate'))};
     normalizeSearch();
     $('keyword').value=q;syncClear();setView('results');syncHistory(false);run(loadSearch);return;
   }
@@ -294,7 +294,7 @@ function readRecent(){
 }
 function recentEntry(search){
   const text=value=>typeof value==='string'?value:'';
-  return {keyword:search.keyword,mode:search.mode==='tag'?'tag':'keyword',source:text(search.source),tag_value:text(search.tag_value),category:text(search.category),deduplicate:search.deduplicate===true,page:search.page||1,sort:text(search.sort)};
+  return {keyword:search.keyword,mode:['tag','author'].includes(search.mode)?search.mode:'keyword',source:text(search.source),tag_value:text(search.tag_value),category:text(search.category),deduplicate:search.deduplicate===true,page:search.page||1,sort:text(search.sort)};
 }
 // A recent entry is identified by its query and filters; page and sort record where browsing left off.
 function recentKey(item){return JSON.stringify([item.keyword,item.mode,item.source,item.tag_value,item.category,item.deduplicate]);}
@@ -314,7 +314,7 @@ function saveRecentPage(search){
 function renderRecent(){
   const list=readRecent();$('recent').hidden=!list.length;
   $('recent-list').replaceChildren(...list.map(item=>{
-    const resume=state.recentPage&&item.page>1,chip=button((item.mode==='tag'?'标签 · ':'')+item.keyword,()=>startSearch(item.keyword,item.source,resume?item:{...item,page:1,sort:''}),'recent-chip');
+    const resume=state.recentPage&&item.page>1,chip=button((item.mode==='tag'?'标签 · ':item.mode==='author'?'作者 · ':'')+item.keyword,()=>startSearch(item.keyword,item.source,resume?item:{...item,page:1,sort:''}),'recent-chip');
     if(resume)chip.title=`上次浏览至第 ${item.page} 页`;
     return chip;
   }));
@@ -485,7 +485,7 @@ function chipGroup(label,values,selected,onpick){
 }
 function syncSearchMode(){
   const mode=state.search?.mode||state.searchMode||'keyword';state.searchMode=mode;
-  $('search-mode').replaceChildren(chipGroup('搜索方式',[{value:'keyword',label:'关键词'},{value:'tag',label:'标签'}],mode,value=>{
+  $('search-mode').replaceChildren(chipGroup('搜索方式',[{value:'keyword',label:'关键词'},{value:'tag',label:'标签'},{value:'author',label:'作者'}],mode,value=>{
     state.searchMode=value;
     if(state.search){Object.assign(state.search,{mode:value,page:1,sort:'',tag_value:''});run(loadSearch);}
     else syncSearchMode();
@@ -499,13 +499,13 @@ function syncSearchMode(){
   toggle.textContent='';toggle.append(node('i',undefined,'dedup-switch'),node('span',`结果去重：${deduplicate?'开启':'关闭'}`));
   toggle.setAttribute('role','switch');toggle.setAttribute('aria-label','结果去重');toggle.setAttribute('aria-checked',String(deduplicate));
   toggle.title='仅合并本页高置信度重复作品，保留所有版本入口';$('search-mode').append(toggle);
-  $('keyword').placeholder=mode==='tag'?'输入标签名称；拷贝使用题材…':'搜索漫画、作者…';
-  $('keyword').setAttribute('aria-label',mode==='tag'?'搜索漫画标签':'搜索漫画');
+  $('keyword').placeholder=mode==='tag'?'输入标签名称；拷贝使用题材…':mode==='author'?'搜索作者名称…':'搜索漫画、作者…';
+  $('keyword').setAttribute('aria-label',mode==='tag'?'搜索漫画标签':mode==='author'?'搜索漫画作者':'搜索漫画');
 }
 function normalizeSearch(){
   const s=state.search;if(!s)return;
-  s.mode=s.mode==='tag'?'tag':'keyword';s.deduplicate=s.deduplicate===true;
-  if(s.source&&(sourcePlugin(s.source)?.enabled===false||!(sourcePlugin(s.source)?.capabilities||[]).includes(s.mode==='tag'?'tag_search':'search'))){s.source='';s.tag_value='';s.category='';s.sort='';s.page=1;}
+  s.mode=['tag','author'].includes(s.mode)?s.mode:'keyword';s.deduplicate=s.deduplicate===true;
+  if(s.source&&(sourcePlugin(s.source)?.enabled===false||!(sourcePlugin(s.source)?.capabilities||[]).includes({tag:'tag_search',author:'author_search'}[s.mode]||'search'))){s.source='';s.tag_value='';s.category='';s.sort='';s.page=1;}
   if(s.mode!=='tag'||!s.source)s.tag_value='';
   if(!(sourcePlugin(s.source)?.capabilities||[]).includes('search_categories'))s.category='';
   s.sort=pick(sourcePlugin(s.source)?.[s.mode==='tag'?'tag_sorts':'search_sorts']||[],s.sort);
@@ -537,7 +537,7 @@ function renderFilters(){
   const box=$('filters');box.replaceChildren();
   const s=state.search,d=state.discover;
   if(s){
-    const searchable=activeSources().filter(p=>(p.capabilities||[]).includes(s.mode==='tag'?'tag_search':'search'));
+    const searchable=activeSources().filter(p=>(p.capabilities||[]).includes({tag:'tag_search',author:'author_search'}[s.mode]||'search'));
     const c=!s.category&&!s.tag_value&&state.searchCounts?.key===searchKey(s)?state.searchCounts:null;
     if(searchable.length>1)box.append(chipGroup('图源',[
       {value:'',label:'全部',count:c?c.total??Object.values(c.counts).reduce((a,b)=>a+b,0):undefined,hint:s.deduplicate?'本页合并后的作品数':'本页图源原始结果数'},
@@ -620,9 +620,9 @@ async function loadSearch(){
   const s=state.search;if(!s)return;
   normalizeSearch();
   syncHistory(false);
-  if(!activeSources().some(p=>p.capabilities.includes(s.mode==='tag'?'tag_search':'search'))){showNoEnabledSources();return;}
+  if(!activeSources().some(p=>p.capabilities.includes({tag:'tag_search',author:'author_search'}[s.mode]||'search'))){showNoEnabledSources();return;}
   const scope=s.source?sourceName(s.source):'全部图源';
-  $('results-title').textContent=`${s.mode==='tag'?'标签 · ':''}“${s.keyword}”`;
+  $('results-title').textContent=`${s.mode==='tag'?'标签 · ':s.mode==='author'?'作者 · ':''}“${s.keyword}”`;
   $('results-meta').textContent=`${scope} · 搜索中…`;
   renderFilters();
   const request=beginResults();

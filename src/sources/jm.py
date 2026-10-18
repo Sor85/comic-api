@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class JmPlugin(SourcePlugin):
     id = "jm"
     name = "禁漫天堂"
-    capabilities = ["search", "tag_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
+    capabilities = ["search", "tag_search", "author_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": v, "label": n} for v, n in

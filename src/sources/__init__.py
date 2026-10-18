@@ -44,6 +44,9 @@ class SourcePlugin:
     def search(self, keyword, page=1):
         return self.client.search(keyword, page)
 
+    def search_author(self, keyword, page=1):
+        return self.client.search_author(keyword, page)
+
     def detail(self, comic_id):
         return self.client.get_comic_detail(comic_id)
 

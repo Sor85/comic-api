@@ -23,7 +23,7 @@ function renderComicAuthors(item){
   const root=node('span',undefined,'comic-authors'),authors=comicAuthors(item);
   if(!authors.length){root.append(node('span','佚名'));return root;}
   for(const author of authors){
-    const link=searchLink(author,'?q='+encodeURIComponent(author),()=>searchComicAuthor(author),'author-link');
+    const link=searchLink(author,'?q='+encodeURIComponent(author)+'&mode=author',()=>searchComicAuthor(author),'author-link');
     link.title=`搜索作者：${author}`;link.setAttribute('aria-label',link.title);root.append(link);
   }
   return root;
@@ -31,5 +31,5 @@ function renderComicAuthors(item){
 function searchComicAuthor(author){
   if($('reader-dialog').open)closeReader(true);
   ++state.detailRequest;if($('detail-dialog').open)$('detail-dialog').close();
-  return startSearch(author,'',{mode:'keyword'});
+  return startSearch(author,'',{mode:'author'});
 }

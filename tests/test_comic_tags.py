@@ -53,6 +53,36 @@ def test_jm_tag_search_uses_tag_scope_and_bypasses_id_shortcut(tag):
     assert len(calls) == 1 and calls[0][0] == '/search'
 
 
+@pytest.mark.parametrize('author', ['123456', 'jm作者', 'A&B / 中文'])
+def test_jm_author_search_uses_author_scope_and_never_id_shortcut(author):
+    client, calls = jm_client({'data': {'content': [{'id': '1', 'name': '标题'}]}})
+    for page in (1, 3):
+        assert client.search_author(author, page)[0]['id'] == '1'
+        assert calls[-1] == ('/search', {'method': 'GET', 'params': {
+            'main_tag': '2', 'search_query': author, 'page': str(page)}})
+    assert len(calls) == 2
+
+
+def test_jm_author_search_rejects_invalid_response():
+    client, _ = jm_client({'data': []})
+    with pytest.raises(ComicApiError) as error:
+        client.search_author('作者')
+    assert error.value.code == 'invalid_response'
+
+
+def test_bika_author_search_uses_native_author_filter_with_sort_and_category():
+    client, calls = bika_client({'data': {'comics': {'docs': [{'_id': '1', 'title': '标题'}]}}})
+    assert client.search_author('作者 A&B / 名称', 3, 'vd', '全彩')[0]['id'] == '1'
+    assert calls == [('comics', {'method': 'GET', 'params': {
+        'page': '3', 'a': '作者 A&B / 名称', 's': 'vd', 'c': '全彩'}})]
+    client.search_author('作者')
+    assert calls[-1][1]['params'] == {'page': '1', 'a': '作者', 's': 'dd'}
+    client.ensure_authenticated = lambda: (_ for _ in ()).throw(ComicApiError('需要登录', 401, 'login_required'))
+    with pytest.raises(ComicApiError):
+        client.search_author('作者')
+    assert len(calls) == 2
+
+
 def test_jm_detail_and_id_search_keep_tags():
     client, _ = jm_client({'data': {'id': '123', 'name': '标题', 'author': [], 'tags': ['全彩'], 'series': []}})
     assert client.get_comic_detail('123')['tags'] == [{'label': '全彩', 'value': '全彩'}]
@@ -148,6 +178,8 @@ class SearchPlugin(SourcePlugin):
         super().__init__(store)
         self.id = self.name = source
         self.calls = []
+        if source != 'copy':
+            self.capabilities = [*self.capabilities, 'author_search']
         if source == 'bika':
             self.capabilities = [*self.capabilities, 'search_categories']
 
@@ -160,6 +192,12 @@ class SearchPlugin(SourcePlugin):
         if self.id == 'copy' and keyword == '部分失败':
             raise ComicApiError('未知题材', 422, 'unknown_tag')
         return [{'id': '1', 'title': '非标签同名标题'}, {'id': '2', 'title': keyword}]
+
+    def search_author(self, keyword, page=1, **kwargs):
+        self.calls.append(('author', keyword, page, kwargs))
+        if self.id == 'bika' and keyword == '部分失败':
+            raise ComicApiError('需要登录', 401, 'login_required')
+        return [{'id': '1', 'title': '非作者同名标题'}, {'id': '2', 'title': keyword}]
 
     def search_categories(self):
         return [{'label': '全彩', 'value': '全彩'}]
@@ -186,6 +224,29 @@ def test_tag_api_keeps_native_order_and_passes_filters(search_api):
     assert plugins['bika'].calls[-1] == ('keyword', '科幻', 1, {'category': '全彩'})
 
 
+def test_author_api_keeps_native_order_and_passes_filters(search_api):
+    client, plugins = search_api
+    response = client.get('/api/search', params={'keyword': '作者', 'mode': 'author', 'source': 'bika',
+                                                'category': '全彩', 'sort': 'dd', 'page': 3})
+    assert response.status_code == 200
+    assert [item['id'] for item in response.json()['items']] == ['1', '2']
+    assert plugins['bika'].calls == [('author', '作者', 3, {'category': '全彩', 'sort': 'dd'})]
+    assert client.get('/api/search', params={'keyword': '作者', 'mode': 'author', 'source': 'copy'}).status_code == 422
+    assert plugins['copy'].calls == []
+
+
+def test_aggregate_author_search_excludes_unsupported_sources_and_keeps_partial_errors(search_api):
+    client, plugins = search_api
+    response = client.get('/api/search', params={'keyword': '部分失败', 'mode': 'author', 'page': 2})
+    assert response.status_code == 200
+    data = response.json()
+    assert list(data['all_results']) == ['jm', 'bika']
+    assert [item['id'] for item in data['items']] == ['1', '2']
+    assert data['errors']['bika']['code'] == 'login_required'
+    assert plugins['jm'].calls == [('author', '部分失败', 2, {})]
+    assert plugins['copy'].calls == []
+
+
 def test_aggregate_tag_search_preserves_partial_errors(search_api):
     client, plugins = search_api
     response = client.get('/api/search', params={'keyword': '部分失败', 'mode': 'tag'}).json()
@@ -199,6 +260,9 @@ def test_aggregate_tag_search_preserves_partial_errors(search_api):
     {'mode': 'tag', 'tag_value': 'value'}, {'category': '全彩'},
     {'source': 'jm', 'category': '全彩'}, {'source': 'copy', 'category': '全彩'},
     {'source': 'bika', 'mode': 'tag', 'sort': 'dd'}, {'source': 'bika', 'sort': 'vd'},
+    {'source': 'jm', 'mode': 'author', 'tag_value': '旧标签'},
+    {'source': 'bika', 'mode': 'author', 'sort': 'vd'},
+    {'mode': 'author', 'category': '全彩'},
 ])
 def test_invalid_filter_combinations_fail_before_upstream(search_api, params):
     client, plugins = search_api
