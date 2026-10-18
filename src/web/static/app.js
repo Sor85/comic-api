@@ -8,7 +8,7 @@ const state = {
   chapterPreviews: readLocal('comic:chapter-previews') === true,
   searchMode: 'keyword', searchDeduplicate: false, searchCategories: {}, searchCategoryRequests: {},
   browseRequest: 0, shelfRequest: 0, detailRequest: 0, readerRequest: 0, resultItems: [], resultShown: 0, activeTasks: 0,
-  reading: [], readingIndex: new Map(), readingLoaded: false,
+  reading: [], readingIndex: new Map(), readingLoaded: false, favoriteIds: {},
 };
 const BROWSE_ACTIONS = {latest: '最新更新', category: '分类浏览', leaderboard: '排行榜', random: '随机推荐'};
 const BROWSE_ORDER = ['latest', 'category', 'leaderboard', 'random'];
@@ -157,6 +157,8 @@ async function loadSources() {
   if(request!==state.sourceRequest)return;
   const changed=state.browseReady&&(sources.length!==state.sources.length||sources.some(p=>(p.enabled!==false)!==(sourcePlugin(p.id)?.enabled!==false)));
   state.sources=sources;state.searchCategories={};
+  // Cloud favorite marks belong to the bound account; the source list carries no identity, so refetch on every reload.
+  state.favoriteIds={};if(state.resultItems.length)loadResultFavorites(state.resultItems,state.browseRequest);
   renderSourceList();syncSourceNavigation();
   if(state.settingsSource)renderSourceSettings();
   if(!state.browseReady){initBrowse();endBooting();}
@@ -559,7 +561,7 @@ function showResults(items,emptyTitle,emptyHint){
 }
 function showMoreResults(){
   const exp=expectedSource(),next=state.resultItems.slice(state.resultShown,state.resultShown+RESULT_CHUNK);
-  $('results').append(...next.map(item=>card(item,{showSource:!!item.source&&item.source!==exp})));
+  $('results').append(...next.map(item=>card(item,{showSource:!!item.source&&item.source!==exp,marks:true})));
   state.resultShown+=next.length;
   const left=state.resultItems.length-state.resultShown;
   $('results-more').hidden=left<=0;$('results-more-btn').textContent=`显示更多（还有 ${left} 部）`;
@@ -586,6 +588,7 @@ async function loadDiscover(){
     if(request!==state.browseRequest)return;
     const items=data.data||[];
     showResults(items,d.page>1?'已经到最后一页了':'此图源暂无内容',d.page>1?'':'换个分类或图源看看');
+    loadResultFavorites(items,request);
     renderPager(items.length);
   }catch(e){if(request===state.browseRequest&&e.name!=='AbortError'){$('results').replaceChildren();showError($('browse-status'),e,loadDiscover);}}
 }
@@ -606,6 +609,7 @@ async function loadSearch(){
     if(!s.source)state.searchCounts={key:searchKey(s),total:data.items.length,counts:Object.fromEntries(Object.entries(data.all_results||{}).map(([k,v])=>[k,v.length])),errors:data.errors||{}};
     renderFilters();
     showResults(data.items,s.page>1?'已经到最后一页了':'没有找到相关漫画','换个关键词，或切换到其他图源试试');
+    loadResultFavorites(data.items,request);
     $('results-meta').textContent=`${scope} · 第 ${s.page} 页 · ${data.items.length} 部`+(data.duplicate_count?` · 合并 ${data.duplicate_count} 项重复结果`:'');
     renderPager(data.raw_count??data.items.length);
     const errors=Object.entries(data.errors||{}),status=$('browse-status');
@@ -663,12 +667,51 @@ function showTab(tab,updateHistory=true,dismissSettings=true) {
   if(tab==='jm-favorites')run(loadJmFavoritesView);
   if(tab==='bika-favorites')run(loadBikaFavoritesView);
 }
-function card(item,{showSource=true,library=false,history=null}={}){
+// Result cards mark works already in the library or in a cloud favorites list; merged cards check every version.
+const FAVORITE_LABELS={jm:'JM 收藏',bika:'哔咔收藏'};
+function comicVersions(item){return item.variants?.length?item.variants:[item];}
+function isFavorited(item){return state.favoriteIds[item.source]?.has(String(item.id))===true;}
+function syncComicMarks(box,item){
+  const versions=comicVersions(item),favorites=[...new Set(versions.filter(isFavorited).map(v=>FAVORITE_LABELS[v.source]))];
+  const marks=[];
+  if(versions.some(inLibrary))marks.push(['bookmark','已加入本地书库','library']);
+  if(favorites.length)marks.push(['star',`已在${favorites.join('、')}中（按本地记录的收藏列表）`,'favorite']);
+  box.replaceChildren(...marks.map(([icon,title,kind])=>{const mark=node('span',undefined,`cover-mark ${kind}`);mark.innerHTML=svgIcon(icon);mark.title=title;mark.setAttribute('role','img');mark.setAttribute('aria-label',title);return mark;}));
+  box.hidden=!marks.length;
+}
+function refreshResultMarks(){for(const el of $('results')?.children||[])el.syncMarks?.();}
+// Favorite marks come from the locally recorded favorites tables only; failures leave the cards unmarked.
+async function loadResultFavorites(items,request){
+  const wanted={};
+  for(const item of items)for(const v of comicVersions(item)){
+    const p=sourcePlugin(v.source);
+    if(!FAVORITE_LABELS[v.source]||p?.enabled===false||!(p?.capabilities||[]).includes('favorites')||!(p.account?.authenticated||p.account?.configured))continue;
+    (wanted[v.source]??=new Set()).add(String(v.id));
+  }
+  await Promise.all(Object.entries(wanted).map(async([source,ids])=>{
+    const list=[...ids];
+    for(let i=0;i<list.length;i+=200){
+      const chunk=list.slice(i,i+200);
+      let data;try{data=await api(`/api/${enc(source)}/sync/favorite-ids?`+new URLSearchParams({ids:chunk.join(',')}),{cache:'no-store'});}catch{return;}
+      const known=state.favoriteIds[source]??=new Set();
+      for(const id of chunk)known.delete(id);
+      for(const id of data.ids||[])known.add(String(id));
+    }
+  }));
+  if(request===state.browseRequest)refreshResultMarks();
+}
+function setFavoriteMark(source,id,favorited){
+  const known=state.favoriteIds[source]??=new Set();
+  if(favorited)known.add(String(id));else known.delete(String(id));
+  refreshResultMarks();
+}
+function card(item,{showSource=true,library=false,history=null,marks=false}={}){
   const el=node('article',undefined,'card'+(history?' card-history':'')+(library?' card-fixed card-library':''));
   // Only the play control resumes reading; the rest of the card always opens the detail page.
   const open=button('',()=>openComic(item),'card-open');open.title=item.title||'';
   const cover=coverBox(item);
   if(showSource&&item.source)cover.append(node('span',sourceName(item.source),'cover-source'));
+  if(marks){const box=node('span',undefined,'cover-marks');el.syncMarks=()=>syncComicMarks(box,item);el.syncMarks();cover.append(box);}
   if(history){
     const bar=node('i',undefined,'cover-progress');bar.style.setProperty('--p',history.total?Math.min(1,(history.index+1)/history.total):0);
     cover.append(bar);
@@ -734,7 +777,7 @@ function bookCategories(item){return item.library_categories||[item.library_cate
 async function loadLibrary() {
   const data=await api('/api/library');state.books=data.items;state.categories=data.categories||[];
   options($('library-category'),[{value:'*',label:'全部分类'},{value:'',label:'未分类'},...state.categories.map(v=>({value:v,label:v}))],$('library-category').value);
-  $('library-count').textContent=state.books.length?String(state.books.length):'';
+  $('library-count').textContent=state.books.length?String(state.books.length):'';refreshResultMarks();
   state.libraryMenu?.sync();
   filterBooks();
 }
@@ -937,7 +980,7 @@ function cloudFavoriteButton(detail){
     try{
       const data=await api(path,{method:remove?'DELETE':'POST'});
       if(!data.success||data.favorited!==!remove)throw new Error(`${source==='jm'?'禁漫':'哔咔'}未确认${remove?'取消':'加入'}收藏`);
-      confirmed=!remove;loaded=true;
+      confirmed=!remove;loaded=true;setFavoriteMark(source,detail.id,confirmed);
       toast(remove?(data.already_favorited?`已从${space}${name}中取消`:`漫画不在${space}${name}中`):(data.already_favorited?`漫画已在${space}${name}中`:`已加入${space}${name}`));
       if(state.tab===`${source}-favorites`)await (source==='jm'?loadJmFavorites():loadBikaFavorites()).catch(report);
     }catch(error){confirmed=null;loaded=false;report(error);}
@@ -948,7 +991,7 @@ function cloudFavoriteButton(detail){
     try{
       const data=await api(path,{cache:'no-store'});
       if(data.favorited!==null&&typeof data.favorited!=='boolean')throw new Error('本地收藏表未返回有效状态');
-      confirmed=data.favorited;loaded=true;
+      confirmed=data.favorited;loaded=true;if(confirmed!==null)setFavoriteMark(source,detail.id,confirmed);
     }catch(error){confirmed=null;loaded=false;report(error);}
     finally{control.disabled=false;sync(false);}
   };

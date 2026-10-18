@@ -123,3 +123,29 @@ def test_catalog_api_validates_filter(tmp_path):
         assert response.json()["complete"] is False
         assert client.get("/api/bika/sync/catalog", params={"local": "broken"}).status_code == 422
         assert client.post("/api/bika/sync/catalog/refresh", params={"sort": "dd"}).status_code == 202
+
+
+def test_favorited_ids_reads_local_table_and_keeps_requested_form(tmp_path):
+    store = Store(tmp_path)
+    owner = store.account_owner("reader")
+    store.record_bika_favorites(owner, [A, B], complete=True)
+    store.set_bika_favorite(owner, B, False)
+    store.record_jm_favorites(owner, ["123"])
+    assert store.favorited_ids("bika", owner, [A.upper(), B, C, "bad"]) == [A.upper()]
+    assert store.favorited_ids("jm", owner, ["0123", "123", "x"]) == ["0123", "123"]
+    assert store.favorited_ids("bika", store.account_owner("other"), [A]) == []
+    assert store.favorited_ids("bika", None, [A]) == []
+
+
+def test_favorited_ids_api_needs_no_upstream_and_limits_batch(tmp_path):
+    store = Store(tmp_path)
+    plugin = CatalogPlugin(store)
+    with TestClient(create_app(store, {"bika": plugin})) as client:
+        store.record_bika_favorites(store.account_owner("bika-account"), [A])
+        response = client.get("/api/bika/sync/favorite-ids", params={"ids": f"{A},{B}"})
+        assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+        assert response.json() == {"ids": [A]} and not plugin.favorite_calls
+        too_many = ",".join(f"{value:024x}" for value in range(201))
+        assert client.get("/api/bika/sync/favorite-ids", params={"ids": too_many}).status_code == 422
+        store.save_account("bika", {})
+        assert client.get("/api/bika/sync/favorite-ids", params={"ids": A}).json() == {"ids": []}

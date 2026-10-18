@@ -26,7 +26,7 @@ function harness() {
   const sources=['jm','bika','copy'].map(id=>({id,name:id,capabilities:['search','tag_search',...(id==='bika'?['search_categories']:[])],search_sorts:id==='bika'?[{value:'dd',label:'最新'}]:[],tag_sorts:id==='copy'?[{value:'-popular',label:'热门'}]:[]}));
   const state={sources,search:null,searchMode:'keyword',searchCategories:{},searchCategoryRequests:{},searchCounts:null,view:'results',tab:'browse',detailRequest:0,discover:{}};
   const storage=new Map(),calls=[];
-  const context=vm.createContext({state,document:{getElementById:id=>roots[id],createElement:tag=>new Element(tag)},
+  const context=vm.createContext({state,loadResultFavorites(){},document:{getElementById:id=>roots[id],createElement:tag=>new Element(tag)},
     $:id=>roots[id],enc:encodeURIComponent,URLSearchParams,location:{pathname:'/',search:''},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},
     api:async path=>{calls.push(path);return path.includes('search-categories')?{categories:[{label:'全彩',value:'全彩'},{label:'新分类',value:'新分类'}]}:{items:[],all_results:{},errors:{}};},

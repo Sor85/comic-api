@@ -361,6 +361,15 @@ def create_app(store=None, sources=None):
             data = await asyncio.to_thread(sync.local_status, album_ids)
             return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
+        @app.get(f"{prefix}/favorite-ids", name=f"{sync.source}_favorited_ids")
+        async def favorited_ids(ids: str = Query("", max_length=8000)):
+            # Reads only the locally recorded favorites, so search results can be marked without upstream calls.
+            album_ids = list(dict.fromkeys(value for value in ids.split(",") if value))
+            if len(album_ids) > 200:
+                raise ComicApiError("单次最多查询 200 本漫画", 422, "invalid_request", sync.source)
+            data = await asyncio.to_thread(sync.store.favorited_ids, sync.source, sync.owner(), album_ids)
+            return JSONResponse({"ids": data}, headers={"Cache-Control": "no-store"})
+
         @app.get(f"{prefix}/catalog", name=f"{sync.source}_favorite_catalog")
         async def favorite_catalog(local: str = Query("", pattern=r"^(|downloaded|missing)$"),
                                    page: int = Query(1, ge=1, le=10000)):

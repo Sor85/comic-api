@@ -12,6 +12,7 @@ class Element {
   set innerHTML(value) { assert.equal(value,'<svg></svg>'); }
   setAttribute(name,value) { this.attributes[name]=String(value); }
   append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.text='';this.children=children; }
   querySelectorAll(selector) {
     return this.children.flatMap(child=>[...(selector===child.tagName||selector.startsWith('.')&&child.className.split(' ').includes(selector.slice(1))?[child]:[]),...child.querySelectorAll(selector)]);
   }
@@ -71,6 +72,27 @@ test('历史卡片显示阅读进度，只有播放按钮直接进入阅读页�
   assert.equal(card.querySelectorAll('.card-open')[0].querySelectorAll('.cover-play').length,0);
   await play[0].onclick();assert.equal(h.resumed[0].id,'1');assert.equal(h.opened.length,1);
   assert.equal(h.context.card(book).querySelectorAll('.cover-play').length,0);
+});
+
+test('结果卡片标识书库与云收藏，合并卡片检查所有版本，收藏状态变更后刷新',async()=>{
+  const h=harness(),calls=[],results={children:[]};
+  Object.assign(h.context,{
+    $:id=>id==='results'?results:undefined,inLibrary:item=>item.source==='jm'&&item.id==='1',
+    sourcePlugin:id=>({id,enabled:true,capabilities:['favorites'],account:{authenticated:id==='bika'}}),
+    enc:encodeURIComponent,URLSearchParams,api:async path=>{calls.push(path);return {ids:['b2']};},
+  });
+  h.context.state.favoriteIds={};h.context.state.browseRequest=7;
+  vm.runInContext(app.slice(app.indexOf('// Result cards mark'),app.indexOf('function card(')),h.context);
+  const bika={id:'b2',source:'bika',title:'夏日'},plain=h.context.card({...book,id:'9'},{marks:true});
+  const merged=h.context.card({...book,variants:[book,bika]},{marks:true});
+  results.children.push(plain,merged);
+  const marks=card=>card.querySelectorAll('.cover-mark').map(mark=>{assert.equal(mark.textContent,'');assert.equal(mark.attributes['aria-label'],mark.title);return mark.className.split(' ')[1];});
+  assert.deepEqual(marks(merged),['library']);assert.ok(plain.querySelectorAll('.cover-marks')[0].hidden);
+  assert.equal(h.context.card(book).querySelectorAll('.cover-marks').length,0);
+  await h.context.loadResultFavorites([{...book,variants:[book,bika]}],7);
+  assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/bika\/sync\/favorite-ids\?ids=b2$/);
+  assert.deepEqual(marks(merged),['library','favorite']);assert.match(merged.querySelectorAll('.favorite')[0].title,/哔咔收藏/);
+  h.context.setFavoriteMark('bika','b2',false);assert.deepEqual(marks(merged),['library']);
 });
 
 test('新增作者脚本在主脚本前加载，交互样式声明排版基线且不改鼠标样式',()=>{

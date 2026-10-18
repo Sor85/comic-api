@@ -34,7 +34,7 @@ function harness(){
   const state={tab:'browse',sources:[{id:'bika',capabilities:['favorites','add_favorite'],account:{authenticated:true}}]};
   const roots={},calls=[],toasts=[],bindings=[],tabs=[];
   const root=id=>roots[id]||(roots[id]=new Element('div'));
-  const context=vm.createContext({state,document:{createElement:tag=>new Element(tag)},$:root,enc:encodeURIComponent,URLSearchParams,
+  const context=vm.createContext({state,setFavoriteMark(){},document:{createElement:tag=>new Element(tag)},$:root,enc:encodeURIComponent,URLSearchParams,
     location:{search:'',origin:'http://host'},URL,appReady:Promise.resolve(),sourcePlugin:id=>state.sources.find(source=>source.id===id),
     svgIcon:name=>`<svg>${name}</svg>`,run:async(action,control)=>{if(control)control.disabled=true;try{return await action();}finally{if(control)control.disabled=false;}},
     api:async(path,options)=>{calls.push({path,options});return options?.method==='POST'?{success:true,favorited:true,already_favorited:false}:{favorited:null};},

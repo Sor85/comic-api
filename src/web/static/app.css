@@ -221,6 +221,12 @@ body[data-modal-depth]:not([data-modal-depth="1"]) :is(header,main,.tabbar,#to-t
 .cover img.broken{visibility:hidden}
 .card-open:hover .cover{transform:translateY(-4px);box-shadow:0 3px 6px #00000022,0 16px 36px #00000040,0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
 .cover-source{position:absolute;top:8px;left:8px;z-index:2;padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:600;color:#fff;background:#0009;backdrop-filter:blur(4px);letter-spacing:.3px}
+.cover-marks{position:absolute;top:8px;right:8px;z-index:2;display:flex;gap:4px;pointer-events:none}
+.cover-marks[hidden]{display:none}
+.cover-mark{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;color:#fff;background:#0009;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);pointer-events:auto}
+.cover-mark svg{width:13px;height:13px;flex:none;fill:currentColor;stroke:none}
+.cover-mark.library{background:color-mix(in srgb,var(--accent) 82%,#000)}
+.cover-mark.favorite svg{color:#fbbf24}
 .cover-tag{position:absolute;left:8px;right:8px;bottom:8px;z-index:2;padding:3px 8px;border-radius:7px;font-size:11px;color:#fff;background:#000000a6;backdrop-filter:blur(4px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cover-progress{position:absolute;left:0;right:0;bottom:0;z-index:2;height:4px;background:#0000008c}
 .cover-progress::after{content:"";position:absolute;inset:0;background:var(--accent);transform:scaleX(var(--p,0));transform-origin:left}

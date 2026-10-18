@@ -25,7 +25,7 @@ function harness() {
   const state={tab:'browse',books:[],sources:[{id:'jm',capabilities:['favorites','add_favorite'],account:{authenticated:true}}]};
   const calls=[],toasts=[],bindings=[],roots={'detail-body':new Element('div'),'detail-title':new Element('div')};
   let refreshes=0;const asks=[];
-  const context=vm.createContext({state,asks,ask:async options=>{asks.push(options);return context.confirmAnswer!==false;},document:{createElement:tag=>new Element(tag)},$:id=>roots[id],enc:encodeURIComponent,
+  const context=vm.createContext({state,asks,setFavoriteMark(){},ask:async options=>{asks.push(options);return context.confirmAnswer!==false;},document:{createElement:tag=>new Element(tag)},$:id=>roots[id],enc:encodeURIComponent,
     sourcePlugin:id=>state.sources.find(source=>source.id===id),sourceName:id=>id,svgIcon:name=>`<svg>${name}</svg>`,
     api:async(path,options)=>{calls.push({path,options});return options?.method==='POST'?{success:true,favorited:true,already_favorited:false}:options?.method==='DELETE'?{success:true,favorited:false,already_favorited:true}:{comic_id:'123',favorited:false};},
     toast:(message,options)=>toasts.push({message,options}),loadJmFavorites:async()=>{refreshes++;},

@@ -22,7 +22,7 @@ function harness(){
   const state={sources,tab:'browse',view:'home',browseReady:true,health:{},healthDots:{},searchCategories:{},searchCategoryRequests:{},search:null,discover:{source:'bika',page:3},books:[{source:'bika',id:'saved'}],resultItems:[{source:'bika',id:'old'}],browseRequest:0,shelfRequest:0,detailRequest:0};
   const roots={},calls=[],toasts=[],loads=[],root=id=>roots[id]||(roots[id]=new Element('div'));
   const tabs=['jm','bika'].flatMap(source=>Array.from({length:2},()=>{const control=new Element('button');control.dataset.tab=`${source}-favorites`;return control;}));
-  const context=vm.createContext({state,$:root,enc:encodeURIComponent,URLSearchParams,AbortController,setTimeout,clearTimeout,
+  const context=vm.createContext({state,loadResultFavorites(){},$:root,enc:encodeURIComponent,URLSearchParams,AbortController,setTimeout,clearTimeout,
     document:{createElement:tag=>new Element(tag),createTextNode:text=>{const n=new Element('text');n.textContent=text;return n;},querySelectorAll:selector=>tabs.filter(tab=>selector===`[data-tab="${tab.dataset.tab}"]`)},
     svgIcon:name=>`<svg>${name}</svg>`,toast:(message,options)=>toasts.push({message,options}),sourceName:id=>id,write:(method,data)=>({method,body:JSON.stringify(data)}),
     api:async(path,options)=>{calls.push({path,options});const id=path.split('/')[3];return path==='/api/sources'?{sources:state.sources.map(p=>({...p}))}:{success:true,source:{...state.sources.find(p=>p.id===id),enabled:JSON.parse(options.body).enabled}};},

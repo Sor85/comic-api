@@ -266,6 +266,24 @@ class Store:
         return {"complete": meta is not None, "updated_at": meta["updated_at"] if meta else None,
                 "sort": meta["sort"] if meta else "", "rows": [dict(row) for row in rows]}
 
+    def favorited_ids(self, source, owner, comic_ids):
+        """The given raw IDs the local favorites table records as favorited; invalid IDs are skipped."""
+        normalize = {"jm": self._jm_comic_id, "bika": self._bika_comic_id}.get(source)
+        if not normalize:
+            raise ValueError("Unsupported favorites source")
+        wanted = {}
+        for value in comic_ids:
+            try:
+                wanted.setdefault(normalize(value), []).append(value)
+            except ValueError:
+                continue
+        if not owner or not wanted:
+            return []
+        with self.connect() as db:
+            rows = db.execute(f"""SELECT comic_id FROM {source}_favorites WHERE owner=? AND favorited=1
+                AND comic_id IN ({','.join('?' * len(wanted))})""", (owner, *wanted)).fetchall()
+        return [value for row in rows for value in wanted[row["comic_id"]]]
+
     def set_jm_favorite(self, owner, comic_id, favorited):
         if not owner:
             return
