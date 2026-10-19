@@ -301,6 +301,14 @@ async function openSyncSettings(){
   const s=libSync.settings,o=libSync.options;
   $('fav-sync-roots-env').textContent=o.roots_env||'—';
   options(syncField('directory_rule'),o.directory_rules||[],s.directory_rule);
+  syncField('directory_template').placeholder=o.default_template||'';
+  // Variable chips insert at the caret, so a template is assembled without typing the braces.
+  // The chapter index is zero-padded like the built-in rules, so directories sort in chapter order.
+  $('fav-directory-template-fields').replaceChildren(...(o.template_fields||[]).map(field=>{
+    const token=`{${field.value}${field.value==='index'?':03':''}}`;
+    const chip=button(`${field.label} ${token}`,()=>insertTemplateField(token),'small root-chip');
+    chip.onmousedown=event=>event.preventDefault();return chip;
+  }));
   for(const [name,value] of Object.entries(s)){
     const field=syncField(name);if(!field||value===undefined||name==='categories')continue;
     if(field.type==='checkbox')field.checked=value;else field.value=value;
@@ -313,9 +321,12 @@ async function openSyncSettings(){
   }));
   updateSyncPreview();$('fav-sync-settings').showModal();
 }
-// Chapter path of the sample comic under a directory rule.
-function rulePathExample(rule){
+const TEMPLATE_SAMPLE = {id:'123456',title:'漫画标题',author:'作者',category:'分类',source:'jm',chapter:'章节标题',chapter_id:'123457',index:1};
+// Chapter path of the sample comic under a directory rule; a custom rule renders its template.
+function rulePathExample(rule,template=''){
   const [comic,chapter]=['123456','123457'];
+  if(rule==='custom')return template.replaceAll('\\','/').trim().replace(/^\/+|\/+$/g,'')
+    .replace(/\{([a-z_]+)(?::0([1-9]))?\}/g,(token,name,width)=>name in TEMPLATE_SAMPLE?String(TEMPLATE_SAMPLE[name]).padStart(Number(width||0),'0'):token);
   const paths={
     id:`${comic}/${chapter}`,
     title:`漫画标题 [${comic}]/001 - 章节标题 [${chapter}]`,
@@ -326,12 +337,19 @@ function rulePathExample(rule){
 }
 function updateSyncPreview(){
   const rule=syncField('directory_rule').value,format=syncField('image_format').value;
+  $('fav-directory-template-field').hidden=rule!=='custom';
   // Library images go under one folder per source, e.g. <root>/jm/....
   const root=syncField('download_dir').value.replaceAll('\\','/').replace(/\/$/,'')+'/jm';
-  const path=rulePathExample(rule);
+  const path=rulePathExample(rule,syncField('directory_template').value);
   const extension=format==='original'?'原格式':format==='jpeg'?'jpg':format;
   $('fav-directory-preview').textContent=`目录示例：${root}/${path}/00001.${extension}`;
   syncField('quality').disabled=!['jpeg','webp'].includes(format);
+}
+function insertTemplateField(token){
+  const input=syncField('directory_template'),start=input.selectionStart??input.value.length,end=input.selectionEnd??start;
+  input.value=input.value.slice(0,start)+token+input.value.slice(end);
+  input.focus();input.setSelectionRange(start+token.length,start+token.length);
+  updateSyncPreview();
 }
 // 服务器目录窗口同时用于选择同步保存目录和迁移源目录。
 const DIRECTORY_MODES = {
@@ -379,8 +397,8 @@ function renderMigration(data){
   if(!data||!$('library-migration-dialog').open)return;
   const busy=data.active,albums=data.albums||[],source=libSync.migrationSource||data.source_dir||'';
   $('library-migration-source').textContent=source||'未选择';
-  $('library-migration-target').textContent=data.target?`${data.target.download_dir.replace(/[\\/]$/,'')}/图源ID/ · ${data.target.label}`:'—';
-  $('library-migration-example').textContent=data.target?`示例：${data.target.download_dir.replaceAll('\\','/').replace(/\/$/,'')}/jm/${rulePathExample(data.target.directory_rule)}/00001.jpg`:'';
+  $('library-migration-target').textContent=data.target?`${data.target.download_dir.replace(/[\\/]$/,'')}/图源ID/ · ${data.target.directory_rule==='custom'?'自定义模板 ':''}${data.target.label}`:'—';
+  $('library-migration-example').textContent=data.target?`示例：${data.target.download_dir.replaceAll('\\','/').replace(/\/$/,'')}/jm/${rulePathExample(data.target.directory_rule,data.target.directory_template)}/00001.jpg`:'';
   $('library-migration-state').textContent=migrationLead(data);
   $('library-migration-list').replaceChildren(...albums.map(album=>{
     const [label,tone]=MIGRATION_STATUS[album.status]||[album.status,'muted'];
@@ -432,14 +450,19 @@ $('fav-sync-form').onsubmit=event=>{
   values.enabled=syncField('enabled').checked;
   values.cron=syncField('cron').value;
   for(const key of ['speed_limit_kbps','quality','retries'])values[key]=Number(syncField(key).value);
-  for(const key of ['download_dir','image_format','directory_rule'])values[key]=syncField(key).value;
+  for(const key of ['download_dir','image_format','directory_rule','directory_template'])values[key]=syncField(key).value;
   values.categories=[...$('fav-sync-categories').querySelectorAll('input:checked')].map(input=>input.value);
   run(async()=>{
     const data=await api(`${SYNC_PATH}/settings`,write('PUT',values));
     libSync.settings=data.settings;libSync.options=data;$('fav-sync-settings').close();toast('同步设置已保存');await loadSyncStatus();
   },event.submitter);
 };
-for(const name of ['download_dir','directory_rule','image_format'])syncField(name).addEventListener('input',updateSyncPreview);
+// Only switching to the custom rule fills an empty template; clearing the field while typing stays cleared.
+syncField('directory_rule').addEventListener('input',()=>{
+  const template=syncField('directory_template');
+  if(syncField('directory_rule').value==='custom'&&!template.value.trim())template.value=libSync.options?.default_template||'';
+});
+for(const name of ['download_dir','directory_rule','directory_template','image_format'])syncField(name).addEventListener('input',updateSyncPreview);
 $('fav-cron-open').onclick=event=>cronEditor.open(event.currentTarget,syncField('cron').value,({expression,description})=>{syncField('cron').value=expression;$('fav-cron-summary').textContent=`${description} · ${expression}`;});
 $('fav-directory-open').onclick=()=>run(()=>openDirectoryPicker('sync',libSync.options?.roots,syncField('download_dir').value));
 $('fav-directory-select').onclick=()=>{

@@ -186,6 +186,7 @@ def test_directory_rule_labels_match_between_ui_and_api(jm_client):
         "漫画标题 [ID] / 章节序号 - 章节标题 [ID]",
         "漫画标题 / 第N話 章节标题",
         "作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]",
+        "自定义模板",
     ]
     html = jm_client.get("/").text
     select = html.split('<select name="directory_rule">', 1)[1].split("</select>", 1)[0]

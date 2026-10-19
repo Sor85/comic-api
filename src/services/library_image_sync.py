@@ -18,7 +18,7 @@ from src.errors import ComicApiError, DownloadCancelled
 from src.services import cron
 from src.services.favorites_library_sync import CATEGORIES
 from src.services.image_sync import DEFAULT_ROOT, ROOTS_ENV, ImageSync, ImageSyncSettings
-from src.services.local_images import DIRECTORY_RULES, FORMATS, DownloadPaths
+from src.services.local_images import DEFAULT_TEMPLATE, DIRECTORY_RULES, FORMATS, TEMPLATE_FIELDS, DownloadPaths, parse_template
 
 log = logging.getLogger("comic.library_image_sync")
 HISTORY_LIMIT = 10
@@ -79,6 +79,8 @@ class LibraryImageSync:
         return {"settings": config, "schedule": cron.describe(config["cron"]), "timezone": cron.timezone_label(),
                 "roots": [str(root) for root in self.paths.roots], "roots_env": ROOTS_ENV,
                 "directory_rules": [{"value": key, "label": value} for key, value in DIRECTORY_RULES.items()],
+                "template_fields": [{"value": key, "label": value} for key, value in TEMPLATE_FIELDS.items()],
+                "default_template": DEFAULT_TEMPLATE,
                 "formats": [{"value": key, "label": value} for key, value in FORMATS.items()],
                 "categories": categories, "books": len(books),
                 "scope_books": sum(self.in_scope(book, config["categories"]) for book in books)}
@@ -145,6 +147,13 @@ class LibraryImageSync:
             raise ComicApiError("书库同步进行中，停止后才能修改设置", 409, "sync_active", self.source)
         config = values.model_dump()
         config["download_dir"] = str(self.paths.resolve(config["download_dir"] or self.paths.roots[0]))
+        template = config["directory_template"].replace("\\", "/").strip().strip("/")
+        if config["directory_rule"] == "custom":
+            try:
+                parse_template(template)
+            except ValueError as exc:
+                raise ComicApiError(str(exc), 422, "invalid_template", self.source) from None
+        config["directory_template"] = template or DEFAULT_TEMPLATE
         self.store.save_settings(self.settings_key, config)
         self.next_run_at = 0
         self.store.save_settings(self.clock_key, {"next_run_at": 0})

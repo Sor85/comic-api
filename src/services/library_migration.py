@@ -1,8 +1,8 @@
 """Move comic directories of any layout into the library save directory under the current directory rule.
 
 A chosen source directory is scanned for library books by comic ID or title in every layout the library
-rules produce, plus the 【作者】原标题 layout of older JMComic-style downloads and single-chapter comics whose
-pages sit directly in the comic directory. A preview lists every match first; running it moves each page that
+rules produce, the saved custom template, the directory a check or sync last recorded, plus the 【作者】原标题
+layout of older JMComic-style downloads and single-chapter comics whose pages sit directly in the comic directory. A preview lists every match first; running it moves each page that
 maps to a chapter page to ``<library save dir>/<source>/<current rule path>``, registers it as a checked local
 copy and leaves broken, extra and unmatched files where they are. Nothing is overwritten.
 """
@@ -20,7 +20,7 @@ from urllib.parse import unquote, urlparse
 from src.errors import ComicApiError
 from src.services.image_sync import DEFAULT_ROOT, ROOTS_ENV
 from src.services.local_check import LocalLibrary, name_keys
-from src.services.local_images import DIRECTORY_RULES, DownloadPaths
+from src.services.local_images import DIRECTORY_RULES, DownloadPaths, id_free, parse_template
 
 log = logging.getLogger("comic.library_migration")
 STATE_KEY = "library_migration"
@@ -41,8 +41,15 @@ def original_name(title):
 class SourceTree(LocalLibrary):
     """Read-only matching over a migration source, which may use any directory rule."""
 
-    def __init__(self, store, paths, root, books, owner):
-        super().__init__(store, paths, {"download_dir": str(root), "directory_rule": ""}, books, threading.Event(), owner)
+    def __init__(self, store, paths, root, books, owner, template=""):
+        # The saved custom template is recognized even after switching back to a built-in rule.
+        try:
+            parse_template(template)
+            rule = "custom"
+        except ValueError:
+            rule = ""
+        super().__init__(store, paths, {"download_dir": str(root), "directory_rule": rule, "directory_template": template},
+                         books, threading.Event(), owner)
 
     def album(self, book):
         found = super().album(book)
@@ -100,9 +107,11 @@ class LibraryMigration:
 
     def status(self):
         config = self.library.settings()
+        custom = config["directory_rule"] == "custom"
         return {**self.state, "active": self.active, "roots": [str(root) for root in self.paths.roots],
                 "target": {"download_dir": config["download_dir"], "directory_rule": config["directory_rule"],
-                           "label": DIRECTORY_RULES[config["directory_rule"]]}}
+                           "directory_template": config["directory_template"] if custom else "",
+                           "label": config["directory_template"] if custom else DIRECTORY_RULES[config["directory_rule"]]}}
 
     def browse(self, path=""):
         return self.paths.browse(path or self.state.get("source_dir") or "")
@@ -140,7 +149,7 @@ class LibraryMigration:
 
     def _scope(self, source):
         config = self.library.settings()
-        return [str(source), config["download_dir"], config["directory_rule"]]
+        return [str(source), config["download_dir"], config["directory_rule"], config["directory_template"]]
 
     def _bases(self, source):
         """Where each source's comics are searched: ``<dir>/<source>`` when the directory is split per source."""
@@ -157,8 +166,9 @@ class LibraryMigration:
             for book in await asyncio.to_thread(self.store.books):
                 books[book["source"]].append(book)
             state["albums_total"] = sum(len(books[worker.source]) for worker, _ in bases)
+            template = self.library.settings()["directory_template"]
             for worker, base in bases:
-                tree = await asyncio.to_thread(SourceTree, self.store, self.paths, base, books[worker.source], worker)
+                tree = await asyncio.to_thread(SourceTree, self.store, self.paths, base, books[worker.source], worker, template)
                 for meta in books[worker.source]:
                     await self._preview_album(worker, tree, meta, known)
                     state["albums_done"] += 1
@@ -174,7 +184,8 @@ class LibraryMigration:
     async def _preview_album(self, worker, tree, meta, known):
         try:
             album_id = worker.normalize_id(str(meta["id"]))
-            directory = await asyncio.to_thread(tree.album, meta)
+            recorded = (await asyncio.to_thread(worker.local_status, [album_id]))["items"].get(album_id, {})
+            directory = await asyncio.to_thread(tree.album, meta) or await asyncio.to_thread(self._recorded_directory, tree, recorded)
         except ComicApiError as exc:
             if exc.code != "local_ambiguous":
                 return
@@ -187,7 +198,6 @@ class LibraryMigration:
         entry = {"source": worker.source, "id": album_id, "title": meta.get("title") or album_id,
                  "from": str(directory), "to": "", "images": 0, "status": "failed", "message": ""}
         try:
-            recorded = (await asyncio.to_thread(worker.local_status, [album_id]))["items"].get(album_id, {})
             # A complete copy recorded at this very directory still moves when the rule now names it differently.
             in_place = recorded.get("path") == str(directory)
             if recorded.get("status") == "downloaded" and in_place and directory == worker.paths.album(worker.settings(), meta):
@@ -207,6 +217,12 @@ class LibraryMigration:
             if not isinstance(exc, ComicApiError):
                 log.warning("Library migration preview failed for %s/%s", worker.source, album_id, exc_info=True)
         self.state["albums"].append(entry)
+
+    @staticmethod
+    def _recorded_directory(tree, recorded):
+        """The comic directory a check or sync recorded inside the scanned tree, whatever rule named it."""
+        path = Path(recorded["path"]) if recorded.get("path") else None
+        return path if path and path != tree.root and path.is_relative_to(tree.root) and path.is_dir() else None
 
     async def _plan(self, worker, tree, album_id, directory):
         source = worker.source
@@ -245,7 +261,7 @@ class LibraryMigration:
                 moves.append(dict(record, chapter_id=chapter_id, page=page, image_key=urlparse(url).path, target=str(target)))
         if not moves:
             raise ComicApiError("源目录中没有可与章节页码对应的图片", 409, "local_incomplete", source)
-        if config["directory_rule"] == "title_plain":
+        if id_free(config):
             worker._guard_plain_directory(album_id, worker.paths.album(config, book))
         notes = []
         if missing_chapters or missing_pages:

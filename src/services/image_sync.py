@@ -21,7 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from src.errors import ComicApiError, DownloadCancelled
 from src.services import cron
 from src.services.local_check import LocalLibrary, local_file_valid
-from src.services.local_images import DownloadPaths, file_digest, receive_image, write_atomic
+from src.services.local_images import (DEFAULT_TEMPLATE, MAX_TEMPLATE_LENGTH, DownloadPaths, file_digest, id_free,
+                                       receive_image, write_atomic)
 
 ROOTS_ENV = "LIBRARY_DOWNLOAD_ROOTS"
 DEFAULT_ROOT = "library"
@@ -42,7 +43,9 @@ class ImageSyncSettings(BaseModel):
     speed_limit_kbps: int = Field(default=0, ge=0, le=1048576)
     image_format: Literal["original", "jpeg", "png", "webp"] = "original"
     quality: int = Field(default=90, ge=1, le=100)
-    directory_rule: Literal["id", "title", "title_plain", "author"] = "title"
+    directory_rule: Literal["id", "title", "title_plain", "author", "custom"] = "title"
+    # Used by the custom rule only; library save_settings checks it so errors name the problem.
+    directory_template: str = Field(default=DEFAULT_TEMPLATE, max_length=MAX_TEMPLATE_LENGTH * 2)
     retries: int = Field(default=2, ge=0, le=5)
     # Library categories a full sync covers; empty covers the whole library, "" stands for uncategorized books.
     categories: list[str] = Field(default_factory=list, max_length=100)
@@ -77,7 +80,8 @@ class ImageSync:
         self.files_table, self.local_table = f"{prefix}_sync_files", f"{prefix}_sync_local_files"
         self.status_table = f"{prefix}_local_status"
         self.log = logging.getLogger(f"comic.library_sync.{source}")
-        self.paths = DownloadPaths(self.store, ROOTS_ENV, DEFAULT_ROOT, self.comic_id, self.chapter_id)
+        self.paths = DownloadPaths(self.store, ROOTS_ENV, DEFAULT_ROOT, self.comic_id, self.chapter_id, source,
+                                   lambda comic_id: self.store.book_category(source, comic_id))
         self.task = None
         self.signal = threading.Event()
         self.current = None
@@ -305,8 +309,11 @@ class ImageSync:
 
     @staticmethod
     def output_scope(config):
-        return hashlib.sha256(json.dumps([config[key] for key in
-                                         ("download_dir", "directory_rule", "image_format", "quality")]).encode()).hexdigest()
+        values = [config[key] for key in ("download_dir", "directory_rule", "image_format", "quality")]
+        # Built-in rules keep their earlier scope, so their checkpoints stay valid.
+        if config["directory_rule"] == "custom":
+            values.append(config["directory_template"])
+        return hashlib.sha256(json.dumps(values).encode()).hexdigest()
 
     @staticmethod
     def file_stamp(path):
@@ -382,7 +389,7 @@ class ImageSync:
                 conflict = db.execute(f"SELECT 1 FROM {table} WHERE album_id<>? AND substr(path,1,?)=? COLLATE NOCASE LIMIT 1",
                                       (album_id, len(prefix), prefix)).fetchone()
                 if conflict:
-                    raise ComicApiError("无 ID 漫画目录已关联其他漫画，未混合写入；需改用带 ID 规则", 409, "file_conflict", self.source)
+                    raise ComicApiError("无 ID 漫画目录已关联其他漫画，未混合写入；需改用带 ID 的规则或模板", 409, "file_conflict", self.source)
 
     async def _album(self, album_id, config, identity, book):
         state = self.current
@@ -390,7 +397,7 @@ class ImageSync:
         chapters = book.get("chapters", [])
         if not chapters:
             raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", self.source)
-        if config["directory_rule"] == "title_plain":
+        if id_free(config):
             self._guard_plain_directory(album_id, self.paths.album(config, book))
         failed, errors, images = state["failed"], len(state["errors"]), 0
         files = []

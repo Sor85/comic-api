@@ -906,6 +906,8 @@ button.danger-soft:hover{border-color:var(--danger)}
 .input-action{display:flex;gap:8px;margin-top:5px}
 .input-action input{flex:1;min-width:0}
 .input-action button{flex:0 0 auto;border-radius:10px}
+.template-field{display:flex;flex-direction:column;gap:8px}
+.template-field[hidden]{display:none}
 .path-preview{margin:0;padding:10px 12px;border-radius:10px;background:var(--group)}
 .path-preview:empty{display:none}
 .hint-details{font-size:12.5px;line-height:1.6;color:var(--muted)}

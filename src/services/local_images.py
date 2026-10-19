@@ -1,4 +1,5 @@
 """Local image output for library sync. Paths are confined to administrator-owned roots."""
+import functools
 import hashlib
 import io
 import os
@@ -19,7 +20,17 @@ DIRECTORY_RULES = {
     "title": "漫画标题 [ID] / 章节序号 - 章节标题 [ID]",
     "title_plain": "漫画标题 / 第N話 章节标题",
     "author": "作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]",
+    "custom": "自定义模板",
 }
+DEFAULT_TEMPLATE = "{author}/{title} [{id}]/{index:03} - {chapter} [{chapter_id}]"
+MAX_TEMPLATE_LENGTH = 300
+MAX_TEMPLATE_LEVELS = 8
+ALBUM_FIELDS = {"id": "漫画 ID", "title": "漫画标题", "author": "作者", "category": "书库分类", "source": "图源 ID"}
+CHAPTER_FIELDS = {"chapter": "章节标题", "chapter_id": "章节 ID", "index": "章节序号"}
+TEMPLATE_FIELDS = {**ALBUM_FIELDS, **CHAPTER_FIELDS}
+# Fallback names for empty text fields, as the built-in rules use.
+FIELD_FALLBACKS = {"title": "未命名", "author": "未知作者", "category": "未分类", "chapter": "未命名"}
+TEMPLATE_TOKEN = re.compile(r"\{([^{}]*)\}")
 FORMATS = {"original": "保留图片格式", "jpeg": "JPEG", "png": "PNG", "webp": "WebP"}
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
 # Common Linux filesystems (ext4, ZFS, btrfs) cap a single name at 255 bytes.
@@ -50,6 +61,82 @@ def plain_chapter_name(chapter, index):
     if prefix and int(prefix[1]) == index:
         title = prefix[2].strip()
     return safe_name(f"第{index}話 {title}", max_bytes=MAX_NAME_BYTES)
+
+
+@functools.lru_cache(maxsize=32)
+def parse_template(text):
+    """Split a custom directory template into levels of literal and ``(field, width)`` tokens.
+
+    The last level names the chapter directory and every level before it the comic directories. Comic
+    levels must include ``{id}`` or ``{title}`` and the chapter level ``{chapter_id}`` or ``{index}``, so
+    every comic and chapter gets a directory of its own.
+    """
+    text = str(text or "").replace("\\", "/").strip().strip("/")
+    if not text:
+        raise ValueError("目录模板不能为空")
+    if len(text) > MAX_TEMPLATE_LENGTH:
+        raise ValueError(f"目录模板不能超过 {MAX_TEMPLATE_LENGTH} 个字符")
+    levels = []
+    for raw in text.split("/"):
+        tokens, position = [], 0
+        for match in TEMPLATE_TOKEN.finditer(raw):
+            tokens.append(raw[position:match.start()])
+            name, _, spec = match[1].partition(":")
+            if name not in TEMPLATE_FIELDS:
+                raise ValueError(f"目录模板包含未知变量 {match[0]}")
+            if spec and (name != "index" or not re.fullmatch(r"0[1-9]", spec)):
+                raise ValueError(f"变量格式无效：{match[0]}，仅 {{index}} 支持 :02 至 :09 补零")
+            tokens.append((name, int(spec[1:]) if spec else 0))
+            position = match.end()
+        tokens.append(raw[position:])
+        literal = "".join(token for token in tokens if isinstance(token, str))
+        if "{" in literal or "}" in literal:
+            raise ValueError("目录模板的花括号不成对")
+        if re.search(r'[<>:"|?*\x00-\x1f\x7f]', literal):
+            raise ValueError('目录模板不能包含 < > : " | ? * 等文件名禁用字符')
+        if not raw.strip(" .") and literal == raw:
+            raise ValueError("目录模板不能包含空层级或 . / .. 层级")
+        levels.append(tuple(token for token in tokens if token != ""))
+    if len(levels) < 2:
+        raise ValueError("目录模板至少需要两层：漫画目录 / 章节目录")
+    if len(levels) > MAX_TEMPLATE_LEVELS:
+        raise ValueError(f"目录模板最多 {MAX_TEMPLATE_LEVELS} 层")
+    album_fields = {token[0] for level in levels[:-1] for token in level if isinstance(token, tuple)}
+    chapter_fields = {token[0] for token in levels[-1] if isinstance(token, tuple)}
+    if album_fields & set(CHAPTER_FIELDS):
+        raise ValueError("章节变量只能用于最后一层章节目录")
+    if not album_fields & {"id", "title"}:
+        raise ValueError("漫画目录层级需包含 {id} 或 {title}")
+    if not chapter_fields & {"chapter_id", "index"}:
+        raise ValueError("章节目录需包含 {chapter_id} 或 {index}")
+    return tuple(levels)
+
+
+def custom_template(settings):
+    """Parsed levels of the custom rule, or None for built-in rules."""
+    return parse_template(settings["directory_template"]) if settings["directory_rule"] == "custom" else None
+
+
+def id_free(settings):
+    """Whether comic directories carry no ID, so a title may already belong to another comic."""
+    template = custom_template(settings)
+    if template is None:
+        return settings["directory_rule"] == "title_plain"
+    return not any(token[0] == "id" for level in template[:-1] for token in level if isinstance(token, tuple))
+
+
+def level_pattern(level, patterns):
+    """Regex for names one template level produces; ``patterns`` maps the fields captured by value."""
+    parts, seen = [], set()
+    for token in level:
+        if isinstance(token, str):
+            parts.append(re.escape(token))
+        elif token[0] in seen:
+            parts.append(f"(?P={token[0]})")
+        else:
+            seen.add(token[0])
+            parts.append(f"(?P<{token[0]}>{patterns.get(token[0], '.+?')})")
+    return re.compile("".join(parts), re.IGNORECASE)
 
 
 def mapped_directories(data_dir):
@@ -88,8 +175,10 @@ class DownloadPaths:
     followed by ``default`` under the data directory.
     """
 
-    def __init__(self, store, env, default, comic_id=str, chapter_id=str):
+    def __init__(self, store, env, default, comic_id=str, chapter_id=str, source="", category=None):
         self.env, self.comic_id, self.chapter_id = env, comic_id, chapter_id
+        # ``category(comic_id)`` names the library category for {category}; only custom templates read it.
+        self.source, self.category = source, category or (lambda comic_id: "")
         configured = os.environ.get(env, "")
         self.roots = [Path(p.strip()).expanduser().resolve() for p in configured.split(os.pathsep) if p.strip()]
         if not self.roots:
@@ -140,10 +229,34 @@ class DownloadPaths:
             raise ComicApiError("下载目录不可写，需检查路径、挂载和权限", 422, "directory_unavailable") from exc
         return path
 
+    def render(self, level, book, chapter=None, index=0):
+        """Directory name of one template level; each text value is cut like the built-in rules cut titles."""
+        parts = []
+        for token in level:
+            if isinstance(token, str):
+                parts.append(token)
+                continue
+            name, width = token
+            if name == "index":
+                parts.append(str(index).zfill(width))
+                continue
+            value = {"id": lambda: self.comic_id(book["id"]), "title": lambda: book.get("title"),
+                     "author": lambda: book.get("author"), "category": lambda: self.category(self.comic_id(book["id"])),
+                     "source": lambda: self.source, "chapter": lambda: chapter.get("name"),
+                     "chapter_id": lambda: self.chapter_id(chapter["id"])}[name]()
+            parts.append(safe_name(value, FIELD_FALLBACKS.get(name, "未命名")))
+        return safe_name("".join(parts), max_bytes=MAX_NAME_BYTES)
+
+    def album_names(self, settings, book):
+        """Comic directory levels a custom template gives ``book``, relative to the save directory."""
+        return [self.render(level, book) for level in custom_template(settings)[:-1]]
+
     def album(self, settings, book):
         album_id = self.comic_id(book["id"])
         root = self.resolve(settings["download_dir"])
         rule = settings["directory_rule"]
+        if rule == "custom":
+            return self.resolve(root.joinpath(*self.album_names(settings, book)))
         if rule == "id":
             album = album_id
         elif rule == "title_plain":
@@ -158,7 +271,9 @@ class DownloadPaths:
         chapter_id = self.chapter_id(chapter["id"])
         album = self.album(settings, book)
         rule = settings["directory_rule"]
-        if rule == "id":
+        if rule == "custom":
+            episode = self.render(custom_template(settings)[-1], book, chapter, index)
+        elif rule == "id":
             episode = chapter_id
         elif rule == "title_plain":
             episode = plain_chapter_name(chapter, index)

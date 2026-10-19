@@ -64,3 +64,23 @@ test('上游标题和错误信息作为纯文本显示', () => {
   const card = context.jmRunCard(run({status: 'partial', failed: 1, errors: [{title: payload, message: payload}]}));
   assert.ok(card.textContent.includes(payload));
 });
+
+test('自定义模板示例按变量渲染并补零，未知变量原样保留', () => {
+  const example = new vm.Script(sync.slice(sync.indexOf('const TEMPLATE_SAMPLE'), sync.indexOf('function updateSyncPreview(')) + '\nrulePathExample;');
+  const rulePathExample = example.runInNewContext({});
+  assert.equal(rulePathExample('custom', ' {category}\\{title} [{id}]/{index:03} - {chapter} [{chapter_id}]/ '), '分类/漫画标题 [123456]/001 - 章节标题 [123457]');
+  assert.equal(rulePathExample('custom', '{source}-{author}/{nope}'), 'jm-作者/{nope}');
+  assert.equal(rulePathExample('title_plain', '{id}/{index}'), '漫画标题/第1話 章节标题');
+});
+
+test('清空自定义模板时路径预览不回填默认模板', () => {
+  const fields = {directory_rule: {value: 'custom'}, image_format: {value: 'original'}, download_dir: {value: '/data/library'},
+    directory_template: {value: ''}, quality: {}};
+  const elements = {'fav-directory-template-field': {hidden: true}, 'fav-directory-preview': {}};
+  const preview = new vm.Script(sync.slice(sync.indexOf('const TEMPLATE_SAMPLE'), sync.indexOf('function insertTemplateField(')) + '\nupdateSyncPreview;');
+  const update = preview.runInNewContext({syncField: name => fields[name], $: id => elements[id],
+    libSync: {options: {default_template: '{id}/{index}'}}});
+  update();
+  assert.equal(fields.directory_template.value, '');
+  assert.equal(elements['fav-directory-template-field'].hidden, false);
+});

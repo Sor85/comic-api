@@ -356,7 +356,12 @@
             <span class="input-action"><input name="download_dir" maxlength="2048" required><button id="fav-directory-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>选择服务器目录</span></button></span>
           </label>
           <p class="field-hint">目录在服务器上，不是本机。可选根目录由 <span id="fav-sync-roots-env">LIBRARY_DOWNLOAD_ROOTS</span> 决定；Docker 需挂载持久化卷。</p>
-          <label>目录层级<select name="directory_rule"><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option></select></label>
+          <label>目录层级<select name="directory_rule"><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="custom">自定义模板</option></select></label>
+          <div id="fav-directory-template-field" class="template-field" hidden>
+            <label>目录模板<input name="directory_template" maxlength="300" spellcheck="false" autocomplete="off"></label>
+            <div id="fav-directory-template-fields" class="dir-roots" aria-label="插入变量"></div>
+            <p class="field-hint">用 / 分隔层级：最后一层为章节目录，之前各层为漫画目录。漫画目录需含 {id} 或 {title}，章节目录需含 {chapter_id} 或 {index}；{index:03} 表示补零到 3 位。</p>
+          </div>
           <p id="fav-directory-preview" class="jm-path path-preview"></p>
           <details class="hint-details">
             <summary>目录规则说明</summary>
@@ -364,6 +369,7 @@
               <li><strong>图源子目录</strong>：每个图源保存在「保存目录/图源ID」下，例如 jm、bika、nhentai、copy。</li>
               <li><strong>超长目录名</strong>：超过字节上限时截短，本地检查按同样规则识别。</li>
               <li><strong>无 ID 规则</strong>：输出「漫画标题/第1話 章节标题/图片」，不附加 ID；目录已关联其他漫画时报冲突。</li>
+              <li><strong>自定义模板</strong>：按模板逐层生成目录，可使用漫画 ID、标题、作者、书库分类、图源 ID、章节标题、章节 ID 和章节序号；不含 {id} 时按无 ID 规则处理同名冲突。{category} 取漫画所属书库分类，修改分类后新下载写入新目录。</li>
               <li><strong>已有目录</strong>：「检查本地漫画」可识别，无需补 ID；层级只影响新下载，不改名已检查的漫画。</li>
             </ul>
           </details>

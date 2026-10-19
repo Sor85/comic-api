@@ -9,7 +9,8 @@ from urllib.parse import unquote, urlparse
 from PIL import Image
 
 from src.errors import ComicApiError, DownloadCancelled
-from src.services.local_images import MAX_IMAGE_BYTES, file_digest, plain_chapter_name, safe_name
+from src.services.local_images import (MAX_IMAGE_BYTES, custom_template, file_digest, id_free, level_pattern,
+                                       plain_chapter_name, safe_name)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"}
 COVER_STEMS = {"cover", "folder", "thumb", "poster"}
@@ -46,6 +47,8 @@ class LocalLibrary:
         self.comic_id, self.chapter_id = owner.comic_id, owner.chapter_id
         self.root = paths.resolve(config["download_dir"])
         self.plain_names = config["directory_rule"] == "title_plain"
+        # A custom template is matched level by level before the generic name and ID heuristics.
+        self.config, self.layout, self.template = config, owner.paths, custom_template(config)
         if not self.root.is_dir():
             raise ComicApiError("本地检查目录不存在或不是目录", 422, "directory_unavailable", self.source)
         self.directories, self.inspected = {}, {}
@@ -79,6 +82,9 @@ class LocalLibrary:
         return candidates[0] if candidates else None
 
     def album(self, book):
+        found = self.template_album(book) if self.template else None
+        if found:
+            return found
         album_id = self.comic_id(book["id"])
         candidates = list(self.children(self.root))
         author_keys = name_keys(book.get("author") or "未知作者")
@@ -94,6 +100,45 @@ class LocalLibrary:
             raise ComicApiError("书库中存在同名漫画，本地目录缺少 ID，未自动匹配", 409, "local_ambiguous", self.source)
         return self.unique(named, "漫画标题")
 
+    def template_album(self, book):
+        """The comic directory the custom template names. Upper levels match by name; the comic level
+        matches by its {id} part when it has one, so a renamed title or author still matches."""
+        album_id = self.comic_id(book["id"])
+        names = self.layout.album_names(self.config, book)
+        directory = self.root
+        for name in names[:-1]:
+            directory = self.unique([p for p in self.children(directory) if name_keys(p.name) & name_keys(name)], "目录层级")
+            if not directory:
+                return None
+        pattern = level_pattern(self.template[-2], {"id": self.id_pattern})
+        candidates = self.children(directory)
+        if "id" in pattern.groupindex:
+            identified = [p for p in candidates if p.name.casefold() == names[-1].casefold()
+                          or (match := pattern.fullmatch(p.name)) and match["id"].lower() == album_id.lower()]
+            return self.unique(identified, "漫画 ID")
+        keys = name_keys(names[-1])
+        named = [p for p in candidates if name_keys(p.name) & keys]
+        if named and id_free(self.config) and any(self.titles[key] - {album_id} for key in name_keys(book["title"])):
+            raise ComicApiError("书库中存在同名漫画，本地目录缺少 ID，未自动匹配", 409, "local_ambiguous", self.source)
+        return self.unique(named, "漫画标题")
+
+    def template_chapter(self, candidates, chapter, index):
+        """Chapter directories the template's chapter level names: by {chapter_id}, else by {index} and title."""
+        chapter_id = self.chapter_id(chapter["id"])
+        pattern = level_pattern(self.template[-1], {"id": self.id_pattern, "chapter_id": self.chapter_pattern, "index": "[0-9]{1,6}"})
+        result = []
+        for directory in candidates:
+            match = pattern.fullmatch(directory.name)
+            if not match:
+                continue
+            if "chapter_id" in pattern.groupindex:
+                if match["chapter_id"].lower() == chapter_id.lower():
+                    result.append(directory)
+            elif int(match["index"]) == index and ("chapter" not in pattern.groupindex
+                                                   or name_keys(match["chapter"]) & name_keys(chapter.get("name"))):
+                result.append(directory)
+        return result
+
     def chapter(self, album, chapter, index):
         found = self.find_chapter(album, chapter, index)
         if found:
@@ -104,6 +149,10 @@ class LocalLibrary:
     def find_chapter(self, album, chapter, index):
         """The matched chapter directory, or None when no candidate exists; ambiguity still raises."""
         candidates = self.children(album)
+        if self.template:
+            found = self.unique(self.template_chapter(candidates, chapter, index), "章节")
+            if found:
+                return found
         chapter_id = self.chapter_id(chapter["id"])
         identified = [p for p in candidates if directory_id(p.name, self.chapter_pattern) == chapter_id.lower()]
         keys = name_keys(chapter.get("name")) | name_keys(plain_chapter_name(chapter, index))

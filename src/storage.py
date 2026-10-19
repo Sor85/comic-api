@@ -395,6 +395,16 @@ class Store:
                                updated_at=row["updated_at"]))
         return result
 
+    def book_category(self, source, comic_id):
+        """Category a directory template names: the book's own category, else its first collection by name."""
+        with self.connect() as db:
+            row = db.execute("SELECT category FROM library WHERE source=? AND comic_id=?", (source, comic_id)).fetchone()
+            if row and row[0]:
+                return row[0]
+            row = db.execute("SELECT MIN(category) FROM library_category_members WHERE source=? AND comic_id=?",
+                             (source, comic_id)).fetchone()
+        return row[0] or ""
+
     def library_categories(self):
         with self.connect() as db:
             return [row[0] for row in db.execute("""SELECT name FROM library_categories
