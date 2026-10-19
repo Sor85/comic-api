@@ -345,8 +345,6 @@ dialog[data-modal-depth]{pointer-events:none}
 .modal{width:min(560px,94vw);max-height:min(86dvh,860px)}
 .modal-wide{width:min(720px,94vw)}
 .modal-head{flex:0 0 auto;display:flex;align-items:flex-start;gap:10px;padding:20px 20px 14px 24px}
-.modal-head .back-btn{margin:-4px 0 0 -10px;width:36px;height:36px;border-radius:50%}
-.modal-head .back-btn+.modal-title{padding-top:2px}
 .modal-title{flex:1;min-width:0}
 .modal-title h2{margin:0;font-size:19px;line-height:1.4;letter-spacing:-.2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modal-title p{margin:2px 0 0;font-size:13px;line-height:1.5;color:var(--muted)}
