@@ -64,8 +64,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS app_settings (
                     name TEXT PRIMARY KEY, settings TEXT NOT NULL
                 );
-                -- jm_/bika_ sync and local status tables belong to the removed favorites sync; only the
-                -- temporary legacy migration reads them. Drop them together with that migration.
+                -- jm_/bika_ sync and local status tables belong to the removed favorites sync and are no
+                -- longer read; drop them in the next version.
                 CREATE TABLE IF NOT EXISTS jm_sync_runs (
                     id TEXT PRIMARY KEY, state TEXT NOT NULL
                 );

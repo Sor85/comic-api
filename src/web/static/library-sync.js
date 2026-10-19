@@ -1,6 +1,6 @@
 'use strict';
 /*
- * 书库本地同步：书库页头「本地同步」入口、同步模态窗口、同步设置、服务器目录选择与旧同步目录迁移。
+ * 书库本地同步：书库页头「本地同步」入口、同步模态窗口、同步设置、服务器目录选择与目录迁移。
  * JM、哔咔收藏页复用这里的卡片同步按钮、本地状态标记与按下载状态筛选的收藏目录。
  */
 const FAV_VIEWS = {
@@ -294,7 +294,7 @@ function renderSyncDialog(data,status,mode){
 }
 function openLibrarySync(){
   $('fav-sync-dialog').showModal();
-  run(()=>Promise.all([loadSyncSettings(),loadSyncStatus(),loadMigration()]));
+  run(()=>Promise.all([loadSyncSettings(),loadSyncStatus()]));
 }
 async function openSyncSettings(){
   await loadSyncSettings();await loadSyncStatus();
@@ -313,10 +313,8 @@ async function openSyncSettings(){
   }));
   updateSyncPreview();$('fav-sync-settings').showModal();
 }
-function updateSyncPreview(){
-  const rule=syncField('directory_rule').value,format=syncField('image_format').value;
-  // Library images go under one folder per source, e.g. <root>/jm/....
-  const root=syncField('download_dir').value.replaceAll('\\','/').replace(/\/$/,'')+'/jm';
+// Chapter path of the sample comic under a directory rule.
+function rulePathExample(rule){
   const [comic,chapter]=['123456','123457'];
   const paths={
     id:`${comic}/${chapter}`,
@@ -324,70 +322,98 @@ function updateSyncPreview(){
     title_plain:'漫画标题/第1話 章节标题',
     author:`作者/漫画标题 [${comic}]/001 - 章节标题 [${chapter}]`,
   };
-  const path=paths[rule]||paths.title;
+  return paths[rule]||paths.title;
+}
+function updateSyncPreview(){
+  const rule=syncField('directory_rule').value,format=syncField('image_format').value;
+  // Library images go under one folder per source, e.g. <root>/jm/....
+  const root=syncField('download_dir').value.replaceAll('\\','/').replace(/\/$/,'')+'/jm';
+  const path=rulePathExample(rule);
   const extension=format==='original'?'原格式':format==='jpeg'?'jpg':format;
   $('fav-directory-preview').textContent=`目录示例：${root}/${path}/00001.${extension}`;
   syncField('quality').disabled=!['jpeg','webp'].includes(format);
 }
+// 服务器目录窗口同时用于选择同步保存目录和迁移源目录。
+const DIRECTORY_MODES = {
+  sync:{endpoint:`${SYNC_PATH}/directories`,empty:'当前目录没有可选子目录；不存在的目录会在同步时创建。'},
+  migration:{endpoint:'/api/library/migration/directories',empty:'当前目录没有可选子目录。'},
+};
+async function openDirectoryPicker(mode,roots,path){
+  libSync.view.directoryMode=mode;
+  $('fav-directory-dialog').showModal();
+  $('fav-directory-roots').replaceChildren(...(roots||[]).map(root=>button(root,()=>browseSyncDirectory(root),'small root-chip')));
+  await browseSyncDirectory(path);
+}
 async function browseSyncDirectory(path=''){
-  const view=libSync.view,request=(view.directoryRequest||0)+1;view.directoryRequest=request;
+  const view=libSync.view,request=(view.directoryRequest||0)+1,mode=DIRECTORY_MODES[view.directoryMode]||DIRECTORY_MODES.sync;view.directoryRequest=request;
   $('fav-directory-select').disabled=true;$('fav-directory-parent').disabled=true;
   $('fav-directory-list').replaceChildren();$('fav-directory-message').textContent='正在读取目录…';
   try{
-    const data=await api(`${SYNC_PATH}/directories?`+new URLSearchParams({path}));if(request!==view.directoryRequest)return;
+    const data=await api(`${mode.endpoint}?`+new URLSearchParams({path}));if(request!==view.directoryRequest)return;
     view.directory=data.path;
     $('fav-directory-roots').replaceChildren(...data.roots.map(root=>{const control=button(root,()=>browseSyncDirectory(root),'small root-chip');control.classList.toggle('active',data.path===root||data.path.startsWith(root.replace(/[\\/]$/,'')+'/'));return control;}));
     $('fav-directory-current').textContent=data.path;
     $('fav-directory-parent').disabled=!data.parent;$('fav-directory-parent').onclick=()=>run(()=>browseSyncDirectory(data.parent));
     $('fav-directory-select').disabled=false;
     $('fav-directory-list').replaceChildren(...data.directories.map(dir=>{const row=labelBtn('folder',dir.name,()=>browseSyncDirectory(dir.path),'link-row');row.insertAdjacentHTML('beforeend',svgIcon('chevron-right'));return row;}));
-    $('fav-directory-message').textContent=data.truncated?'目录较多，仅显示前 500 项。':data.directories.length?'':'当前目录没有可选子目录；不存在的目录会在同步时创建。';
+    $('fav-directory-message').textContent=data.truncated?'目录较多，仅显示前 500 项。':data.directories.length?'':mode.empty;
   }catch(error){if(request===view.directoryRequest)$('fav-directory-message').textContent=error.message;}
 }
 
-/* ---------- 旧同步目录迁移（临时，下个版本移除） ---------- */
+/* ---------- 目录迁移：任意目录结构 → 书库当前目录规则 ---------- */
 const MIGRATION_STATUS = {ready:['待迁移','info'],migrated:['已迁移','ok'],skipped:['保留原处','muted'],failed:['未迁移','danger']};
 async function loadMigration(){
   const data=await api('/api/library/migration');libSync.migration=data;renderMigration(data);return data;
 }
+function migrationLead(data){
+  const albums=data.albums||[],count=status=>albums.filter(a=>a.status===status).length;
+  if(data.status==='previewing')return `正在扫描源目录：${data.albums_done||0} / ${data.albums_total||0} 本书库漫画`;
+  if(data.status==='running')return `正在迁移：${data.albums_done||0} / ${count('ready')+count('migrated')} 本`;
+  if(data.status==='ready')return `预览完成：${count('ready')} 本待迁移，执行前不改动任何文件。`;
+  if(data.status==='completed'&&count('migrated'))return `迁移完成：${count('migrated')} 本已迁入书库目录。`;
+  if(data.status==='completed')return albums.length?'预览完成：没有待迁移的漫画。':'源目录中没有找到书库中的漫画。';
+  if(data.status==='interrupted'||data.status==='failed')return data.error||'迁移未完成';
+  return '选择源目录并生成预览后列出每本漫画的迁移目标，确认后再移动文件。';
+}
 function renderMigration(data){
-  const show=data.pending>0||data.active||data.status==='ready';
-  $('legacy-migration-note').hidden=!show;
-  $('legacy-migration-summary').textContent=data.pending?`旧 JM、哔咔收藏同步目录中有 ${data.pending} 本已下载漫画尚未迁入书库目录。`:'旧同步目录迁移已有预览结果。';
-  if(!$('legacy-migration-dialog').open)return;
-  const busy=data.active,albums=data.albums||[];
-  const lead=data.status==='previewing'?`正在生成预览：${data.albums_done||0} / ${data.albums_total||0} 本`
-    :data.status==='running'?`正在迁移：${data.albums_done||0} / ${albums.filter(a=>a.status==='ready'||a.status==='migrated').length} 本`
-    :data.status==='ready'?`预览完成：${albums.filter(a=>a.status==='ready').length} 本待迁移，执行前不改动任何文件。`
-    :data.status==='completed'?`迁移完成：${albums.filter(a=>a.status==='migrated').length} 本已迁入书库目录。`
-    :data.status==='interrupted'||data.status==='failed'?(data.error||'迁移未完成'):'生成预览后列出每本漫画的迁移目标，确认后再移动文件。';
-  $('legacy-migration-state').textContent=lead;
-  $('legacy-migration-list').replaceChildren(...albums.map(album=>{
+  if(!data||!$('library-migration-dialog').open)return;
+  const busy=data.active,albums=data.albums||[],source=libSync.migrationSource||data.source_dir||'';
+  $('library-migration-source').textContent=source||'未选择';
+  $('library-migration-target').textContent=data.target?`${data.target.download_dir.replace(/[\\/]$/,'')}/图源ID/ · ${data.target.label}`:'—';
+  $('library-migration-example').textContent=data.target?`示例：${data.target.download_dir.replaceAll('\\','/').replace(/\/$/,'')}/jm/${rulePathExample(data.target.directory_rule)}/00001.jpg`:'';
+  $('library-migration-state').textContent=migrationLead(data);
+  $('library-migration-list').replaceChildren(...albums.map(album=>{
     const [label,tone]=MIGRATION_STATUS[album.status]||[album.status,'muted'];
     const row=node('div',undefined,'migration-row'),head=node('div',undefined,'migration-row-head');
     head.append(node('strong',`${FAV_VIEWS[album.source]?.label||album.source} · ${album.title}`),node('span',label,`status-pill ${tone}`));
-    row.append(head,node('p',`${album.from}${album.to?` → ${album.to}`:''}${album.images?` · ${album.images} 张`:''}`,'jm-path'));
+    if(album.from||album.to)row.append(head,node('p',`${album.from}${album.to?` → ${album.to}`:''}${album.images?` · ${album.images} 张`:''}`,'jm-path'));
+    else row.append(head);
     if(album.message)row.append(node('p',album.message,album.status==='failed'?'error':'muted'));
     return row;
   }));
   const leftovers=data.leftovers||[];
-  $('legacy-migration-leftovers').hidden=!leftovers.length;
-  $('legacy-migration-leftover-list').replaceChildren(...leftovers.map(item=>node('p',`${item.root}：${item.entries.join('、')}${item.more?` 等另 ${item.more} 项`:''}`,'jm-path')));
-  $('legacy-migration-preview').disabled=busy||libSync.active;
-  $('legacy-migration-run').disabled=busy||libSync.active||data.status!=='ready';
-  $('legacy-migration-run').hidden=!['ready','running'].includes(data.status);
+  $('library-migration-leftovers').hidden=!leftovers.length;
+  $('library-migration-leftover-list').replaceChildren(...leftovers.map(item=>node('p',`${item.root}：${item.entries.join('、')}${item.more?` 等另 ${item.more} 项`:''}`,'jm-path')));
+  $('library-migration-browse').disabled=busy;
+  $('library-migration-preview').disabled=busy||libSync.active||!source;
+  // A new source directory needs its own preview before anything moves.
+  const fresh=data.status==='ready'&&source===data.source_dir;
+  $('library-migration-run').disabled=busy||libSync.active||!fresh;
+  $('library-migration-run').hidden=!(fresh||data.status==='running');
 }
 async function openMigration(){
-  $('legacy-migration-dialog').showModal();
+  libSync.migrationSource='';
+  $('library-migration-dialog').showModal();
   await loadMigration();
 }
 async function previewMigration(){
-  renderMigration(await api('/api/library/migration/preview',{method:'POST'}));
+  const source_dir=libSync.migrationSource||libSync.migration?.source_dir;
+  renderMigration(libSync.migration=await api('/api/library/migration/preview',write('POST',{source_dir})));
 }
 async function runMigration(){
   const data=libSync.migration,count=(data?.albums||[]).filter(a=>a.status==='ready').length;
-  if(!await ask({title:'迁移旧同步目录',message:`将 ${count} 本漫画的图片按书库当前目录规则移入 ${libSync.settings?.download_dir||'书库保存目录'}/图源ID/，并加入书库、登记为本地已下载。\n不覆盖已有文件；单本失败时该本图片放回原处。迁移期间书库同步暂停。`,ok:'开始迁移'}))return;
-  renderMigration(await api('/api/library/migration/run',{method:'POST'}));
+  if(!await ask({title:'迁移目录',message:`将 ${count} 本漫画的图片从 ${data.source_dir} 按「${data.target.label}」规则移入 ${data.target.download_dir}/图源ID/，并登记为本地已下载。\n不覆盖已有文件；单本失败时该本图片放回原处。迁移期间书库同步暂停。`,ok:'开始迁移'}))return;
+  renderMigration(libSync.migration=await api('/api/library/migration/run',{method:'POST'}));
 }
 
 $('library-sync-open').onclick=openLibrarySync;
@@ -396,9 +422,10 @@ $('fav-sync-check-local').onclick=()=>run(checkLibraryLocal,$('fav-sync-check-lo
 $('fav-sync-repair').onclick=()=>run(()=>repairLibraryLocal(),$('fav-sync-repair'));
 $('fav-sync-cancel').onclick=()=>run(async()=>{await api(`${SYNC_PATH}/cancel`,{method:'POST'});await loadSyncStatus();},$('fav-sync-cancel'));
 $('fav-sync-settings-open').onclick=()=>run(openSyncSettings,$('fav-sync-settings-open'));
-$('legacy-migration-open').onclick=()=>run(openMigration,$('legacy-migration-open'));
-$('legacy-migration-preview').onclick=()=>run(previewMigration,$('legacy-migration-preview'));
-$('legacy-migration-run').onclick=()=>run(runMigration,$('legacy-migration-run'));
+$('library-migration-open').onclick=()=>run(openMigration,$('library-migration-open'));
+$('library-migration-browse').onclick=()=>run(()=>openDirectoryPicker('migration',libSync.migration?.roots,libSync.migrationSource||libSync.migration?.source_dir||''),$('library-migration-browse'));
+$('library-migration-preview').onclick=()=>run(previewMigration,$('library-migration-preview'));
+$('library-migration-run').onclick=()=>run(runMigration,$('library-migration-run'));
 $('fav-sync-form').onsubmit=event=>{
   event.preventDefault();
   const values={};
@@ -414,12 +441,12 @@ $('fav-sync-form').onsubmit=event=>{
 };
 for(const name of ['download_dir','directory_rule','image_format'])syncField(name).addEventListener('input',updateSyncPreview);
 $('fav-cron-open').onclick=event=>cronEditor.open(event.currentTarget,syncField('cron').value,({expression,description})=>{syncField('cron').value=expression;$('fav-cron-summary').textContent=`${description} · ${expression}`;});
-$('fav-directory-open').onclick=()=>run(async()=>{
-  $('fav-directory-dialog').showModal();
-  $('fav-directory-roots').replaceChildren(...(libSync.options?.roots||[]).map(root=>button(root,()=>browseSyncDirectory(root),'small root-chip')));
-  await browseSyncDirectory(syncField('download_dir').value);
-});
-$('fav-directory-select').onclick=()=>{syncField('download_dir').value=libSync.view.directory;updateSyncPreview();$('fav-directory-dialog').close();};
+$('fav-directory-open').onclick=()=>run(()=>openDirectoryPicker('sync',libSync.options?.roots,syncField('download_dir').value));
+$('fav-directory-select').onclick=()=>{
+  if(libSync.view.directoryMode==='migration'){libSync.migrationSource=libSync.view.directory;renderMigration(libSync.migration);}
+  else{syncField('download_dir').value=libSync.view.directory;updateSyncPreview();}
+  $('fav-directory-dialog').close();
+};
 setInterval(()=>{
   if(document.hidden)return;
   const watching=$('fav-sync-dialog').open||['library',...Object.values(FAV_VIEWS).map(view=>view.tab)].includes(state.tab);
@@ -427,7 +454,7 @@ setInterval(()=>{
     libSync.polling=true;
     loadSyncStatus().catch(error=>{$('fav-sync-schedule').textContent=`同步状态读取失败：${error.message}`;}).finally(()=>libSync.polling=false);
   }
-  if(($('fav-sync-dialog').open||$('legacy-migration-dialog').open)&&libSync.migration&&(libSync.migration.active||$('legacy-migration-dialog').open)&&!libSync.migrationPolling){
+  if($('library-migration-dialog').open&&!libSync.migrationPolling){
     libSync.migrationPolling=true;
     loadMigration().catch(()=>{}).finally(()=>libSync.migrationPolling=false);
   }

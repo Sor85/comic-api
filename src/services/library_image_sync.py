@@ -48,7 +48,7 @@ class LibraryImageSync:
         self.stopping = False
         self.child = None
         self.current = None
-        # Set by the legacy migration, which must not move files while a run writes them.
+        # Set by the directory migration, which must not move files while a run writes them.
         self.blocked_by = None
 
     @property

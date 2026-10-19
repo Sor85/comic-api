@@ -288,11 +288,8 @@
           <div><dt>同步范围</dt><dd id="fav-sync-scope">—</dd></div>
           <div class="sync-config-path"><dt>保存目录</dt><dd id="fav-sync-dir" class="jm-path">—</dd></div>
         </dl>
+        <button id="library-migration-open" class="small" type="button" aria-haspopup="dialog" aria-controls="library-migration-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M10 13h6m-2-2 2 2-2 2"/></svg><span>迁移目录</span></button>
         <button id="fav-sync-settings-open" class="small" type="button" aria-haspopup="dialog" aria-controls="fav-sync-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>同步设置</span></button>
-      </div>
-      <div id="legacy-migration-note" class="callout migration-note" role="note" hidden>
-        <span id="legacy-migration-summary"></span>
-        <button id="legacy-migration-open" class="small" type="button" aria-haspopup="dialog" aria-controls="legacy-migration-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M10 13h6m-2-2 2 2-2 2"/></svg><span>迁移旧同步目录</span></button>
       </div>
       <section class="sync-section" aria-labelledby="fav-sync-latest-title">
         <h3 id="fav-sync-latest-title">最近任务</h3>
@@ -421,22 +418,48 @@
     </div>
     <div class="modal-foot"><button id="fav-directory-parent" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span>上一级</span></button><button id="fav-directory-select" type="button" class="primary">使用此目录</button></div>
   </dialog>
-  <dialog id="legacy-migration-dialog" class="modal modal-wide fav-sync-dialog" aria-labelledby="legacy-migration-title">
+  <dialog id="library-migration-dialog" class="modal modal-wide fav-sync-dialog" aria-labelledby="library-migration-title">
     <div class="modal-head">
-      <div class="modal-title"><h2 id="legacy-migration-title">迁移旧同步目录</h2><p>JM、哔咔收藏同步已并入书库同步，旧目录中已完整下载的漫画按书库目录规则移入书库保存目录。</p></div>
-      <button class="icon-btn ghost" type="button" data-close="legacy-migration-dialog" title="关闭迁移旧同步目录" aria-label="关闭迁移旧同步目录"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <div class="modal-title"><h2 id="library-migration-title">迁移目录</h2><p>源目录中已有的书库漫画按当前目录规则移入书库保存目录。</p></div>
+      <button class="icon-btn ghost" type="button" data-close="library-migration-dialog" title="关闭迁移目录" aria-label="关闭迁移目录"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="modal-body" data-scroll-area>
-      <p id="legacy-migration-state" class="status" role="status"></p>
-      <ul class="rule-points migration-points">
-        <li>只迁移旧同步登记为「已下载」的漫画，包括「【作者】原标题 / 第N話 章节标题」格式的目录；图片改按书库当前目录规则命名，登记为本地已下载，不在书库中的漫画加入「JM 收藏」「哔咔收藏」分类。</li>
-        <li>不覆盖已有文件；单本迁移失败时该本已移动的图片放回原处。书库已有完整副本的漫画保留旧文件，不重复迁移。</li>
-        <li>未完整下载或从未登记的目录不迁移，列在下方「旧目录剩余内容」中，可手动整理。</li>
-      </ul>
-      <div id="legacy-migration-list" class="migration-list"></div>
-      <details id="legacy-migration-leftovers" class="hint-details" hidden><summary>旧目录剩余内容</summary><div id="legacy-migration-leftover-list"></div></details>
+      <div class="sync-config">
+        <dl id="library-migration-config">
+          <div class="sync-config-path"><dt>源目录</dt><dd id="library-migration-source" class="jm-path">—</dd></div>
+          <div class="sync-config-path"><dt>目标</dt><dd id="library-migration-target" class="jm-path">—</dd></div>
+        </dl>
+        <button id="library-migration-browse" class="small" type="button" aria-haspopup="dialog" aria-controls="fav-directory-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>选择源目录</span></button>
+      </div>
+      <ol class="migration-flow" aria-label="迁移步骤">
+        <li class="migration-step">
+          <span class="migration-step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 19H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v2.5"/><circle cx="18" cy="18" r="3"/><path d="M20.2 20.2 22 22"/></svg></span>
+          <strong>识别漫画</strong>
+          <p>按漫画 ID 或完整标题匹配书库中的漫画；源目录含图源子目录（如 jm/）时只查对应子目录。</p>
+          <ul class="migration-samples" aria-label="可识别的目录结构">
+            <li>123456/</li><li>标题 [123456]/</li><li>标题/第1話 章节/</li><li>作者/标题 [123456]/</li><li>【作者】原标题/</li><li>标题/00001.jpg（单章）</li>
+          </ul>
+        </li>
+        <li class="migration-link" aria-hidden="true"><svg class="migration-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M13 18l6-6"/><path d="M13 6l6 6"/></svg></li>
+        <li class="migration-step">
+          <span class="migration-step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 8h.01"/><path d="M11.5 21H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v7"/><path d="m3 16 5-5c.93-.89 2.07-.89 3 0l4 4"/><path d="m14 14 1-1c.93-.89 2.07-.89 3 0"/><path d="m15 19 2 2 4-4"/></svg></span>
+          <strong>校验图片</strong>
+          <p>逐章核对页码并解码验证图片；损坏、多余或无法对应页码的文件保留原处。</p>
+        </li>
+        <li class="migration-link" aria-hidden="true"><svg class="migration-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M13 18l6-6"/><path d="M13 6l6 6"/></svg></li>
+        <li class="migration-step">
+          <span class="migration-step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 19H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v4"/><path d="m15 19 2 2 4-4"/></svg></span>
+          <strong>移入书库</strong>
+          <p>按当前目录规则改名移入，登记为本地已下载；缺少的章节和页面由书库同步补齐。</p>
+          <p id="library-migration-example" class="migration-example jm-path"></p>
+        </li>
+      </ol>
+      <p class="migration-safety"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.46 20.85A12 12 0 0 1 3.5 6 12 12 0 0 0 12 3a12 12 0 0 0 8.5 3 12 12 0 0 1-.09 7.06"/><path d="m15 19 2 2 4-4"/></svg><span>不覆盖已有文件；单本迁移失败时该本已移动的图片放回原处。未识别的目录列在「未识别内容」中。</span></p>
+      <p id="library-migration-state" class="status" role="status"></p>
+      <div id="library-migration-list" class="migration-list"></div>
+      <details id="library-migration-leftovers" class="hint-details" hidden><summary>未识别内容</summary><div id="library-migration-leftover-list"></div></details>
     </div>
-    <div class="modal-foot"><button id="legacy-migration-preview" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>生成预览</span></button><button id="legacy-migration-run" class="primary" type="button" hidden>开始迁移</button></div>
+    <div class="modal-foot"><button id="library-migration-preview" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>生成预览</span></button><button id="library-migration-run" class="primary" type="button" hidden>开始迁移</button></div>
   </dialog>
   <button id="to-top" class="icon-btn" type="button" title="回到顶部" aria-label="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>
 

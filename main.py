@@ -24,8 +24,8 @@ from src.services.downloads import DownloadManager, pdf_password_for
 from src.services.favorites_library_sync import FavoritesLibrarySettings, FavoritesLibrarySync
 from src.services.favorites import BikaFavorites, JmFavorites
 from src.services.image_sync import ImageSyncSettings
-from src.services.legacy_migration import LegacyMigration
 from src.services.library_image_sync import LibraryImageSync
+from src.services.library_migration import LibraryMigration
 from src.services.search_dedup import search_result_payload
 from src.storage import Store
 
@@ -122,6 +122,10 @@ class LibraryRunInput(BaseModel):
     items: list[LibraryItem] | None = Field(default=None, min_length=1, max_length=200)
 
 
+class MigrationInput(BaseModel):
+    source_dir: str = Field(min_length=1, max_length=2048)
+
+
 def create_app(store=None, sources=None):
     store = store or Store()
     auth = AuthManager(store)
@@ -131,7 +135,7 @@ def create_app(store=None, sources=None):
     library_images = LibraryImageSync(store, service, favorites)
     favorites.update(jm=JmFavorites(store, service, library_images), bika=BikaFavorites(store, service, library_images))
     library_sync = FavoritesLibrarySync(store, service)
-    migration = LegacyMigration(store, service, library_images)
+    migration = LibraryMigration(store, service, library_images)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -392,17 +396,20 @@ def create_app(store=None, sources=None):
     async def cancel_library_images():
         return library_images.cancel()
 
-    # Temporary: moves images of the removed JM/Bika favorites sync into the library; removed in the next version.
     @app.get("/api/library/migration")
-    async def legacy_migration_status():
+    async def library_migration_status():
         return JSONResponse(await asyncio.to_thread(migration.status), headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/library/migration/directories")
+    async def library_migration_directories(path: str = Query("", max_length=2048)):
+        return await asyncio.to_thread(migration.browse, path)
+
     @app.post("/api/library/migration/preview", status_code=202)
-    async def preview_legacy_migration():
-        return migration.preview()
+    async def preview_library_migration(values: MigrationInput):
+        return migration.preview(values.source_dir)
 
     @app.post("/api/library/migration/run", status_code=202)
-    async def run_legacy_migration():
+    async def run_library_migration():
         return migration.run()
 
     @app.get("/api/sources/{source}/search-categories")
