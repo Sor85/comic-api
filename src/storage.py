@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -202,6 +203,43 @@ class Store:
             db.execute("INSERT INTO app_settings VALUES (?,?) ON CONFLICT(name) DO UPDATE SET settings=excluded.settings",
                        (name, json.dumps(values, ensure_ascii=False)))
 
+    def delete_settings(self, name):
+        with self.connect() as db:
+            db.execute("DELETE FROM app_settings WHERE name=?", (name,))
+
+    def ensure_sync_tables(self, prefix):
+        """Checkpoint tables for one library image-sync source, mirroring the JM/Bika favorites tables."""
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,80}", prefix):
+            raise ValueError(f"Invalid sync table prefix: {prefix}")
+        with self.connect() as db:
+            db.executescript(f"""
+                CREATE TABLE IF NOT EXISTS {prefix}_sync_runs (
+                    id TEXT PRIMARY KEY, state TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS {prefix}_sync_files (
+                    scope TEXT NOT NULL, album_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                    page INTEGER NOT NULL, image_key TEXT NOT NULL, path TEXT NOT NULL,
+                    size INTEGER NOT NULL DEFAULT 0, digest TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(scope, album_id, chapter_id, page)
+                );
+                CREATE TABLE IF NOT EXISTS {prefix}_sync_local_files (
+                    root TEXT NOT NULL, album_id TEXT NOT NULL, chapter_id TEXT NOT NULL,
+                    page INTEGER NOT NULL, image_key TEXT NOT NULL, path TEXT NOT NULL,
+                    size INTEGER NOT NULL, digest TEXT NOT NULL,
+                    PRIMARY KEY(root, album_id, chapter_id, page), UNIQUE(root, path)
+                );
+                CREATE TABLE IF NOT EXISTS {prefix}_local_status (
+                    root TEXT NOT NULL, album_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('downloaded','missing','error')),
+                    title TEXT NOT NULL DEFAULT '', path TEXT NOT NULL DEFAULT '',
+                    images INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
+                    checked_at REAL NOT NULL,
+                    PRIMARY KEY(root, album_id)
+                );
+                CREATE INDEX IF NOT EXISTS {prefix}_sync_files_path ON {prefix}_sync_files(path);
+                CREATE INDEX IF NOT EXISTS {prefix}_sync_local_files_path ON {prefix}_sync_local_files(path);
+            """)
+
     def save_account(self, source, values):
         cipher = AES.new(self.key, AES.MODE_GCM)
         cipher.update(source.encode())
@@ -379,6 +417,13 @@ class Store:
                 ON CONFLICT(source,comic_id) DO UPDATE SET metadata=excluded.metadata,
                 category=excluded.category, updated_at=CURRENT_TIMESTAMP""",
                        (source, comic_id, json.dumps(metadata, ensure_ascii=False), category))
+
+    def refresh_book_metadata(self, source, comic_id, metadata):
+        """Refresh an existing book without changing categories or re-adding a removed book."""
+        payload = json.dumps(metadata, ensure_ascii=False)
+        with self.connect() as db:
+            db.execute("""UPDATE library SET metadata=?, updated_at=CURRENT_TIMESTAMP
+                WHERE source=? AND comic_id=? AND metadata<>?""", (payload, source, comic_id, payload))
 
     def set_category(self, source, comic_id, category):
         with self.connect() as db:

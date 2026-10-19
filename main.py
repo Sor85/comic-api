@@ -24,6 +24,7 @@ from src.services.bika_sync import BikaSync
 from src.services.downloads import DownloadManager, pdf_password_for
 from src.services.favorites_library_sync import FavoritesLibrarySettings, FavoritesLibrarySync
 from src.services.jm_sync import JmSync
+from src.services.library_image_sync import LibraryImageSettings, LibraryImageSync
 from src.services.search_dedup import search_result_payload
 from src.storage import Store
 
@@ -124,6 +125,7 @@ def create_app(store=None, sources=None):
     bika_sync = BikaSync(store, service)
     image_syncs = {"jm": jm_sync, "bika": bika_sync}
     library_sync = FavoritesLibrarySync(store, service)
+    library_images = LibraryImageSync(store, service, image_syncs)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -131,9 +133,11 @@ def create_app(store=None, sources=None):
         for sync in image_syncs.values():
             await sync.start()
         await library_sync.start()
+        await library_images.start()
         try:
             yield
         finally:
+            await library_images.stop()
             await library_sync.stop()
             for sync in image_syncs.values():
                 await sync.stop()
@@ -144,6 +148,7 @@ def create_app(store=None, sources=None):
     app.state.auth = auth
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
     app.state.jm_sync, app.state.bika_sync, app.state.library_sync = jm_sync, bika_sync, library_sync
+    app.state.library_images = library_images
     app.mount("/static", VersionedStaticFiles(directory=WEB_STATIC), name="static")
 
     @app.exception_handler(ComicApiError)
@@ -188,6 +193,7 @@ def create_app(store=None, sources=None):
         if source in image_syncs:
             image_syncs[source].source_changed()
         library_sync.source_changed(source)
+        library_images.source_changed(source)
         return {"success": True, "source": service.manifest(source)}
 
     @app.post("/api/sources/{source}/login")
@@ -386,6 +392,30 @@ def create_app(store=None, sources=None):
 
     for sync in image_syncs.values():
         sync_routes(sync)
+
+    @app.get("/api/library/sync/settings")
+    async def library_image_settings():
+        return library_images.options()
+
+    @app.put("/api/library/sync/settings")
+    async def save_library_image_settings(values: LibraryImageSettings):
+        return library_images.save_settings(values)
+
+    @app.get("/api/library/sync/directories")
+    async def library_image_directories(path: str = Query("", max_length=2048)):
+        return await asyncio.to_thread(library_images.paths.browse, path)
+
+    @app.get("/api/library/sync")
+    async def library_image_status():
+        return JSONResponse(library_images.status(), headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/library/sync/run", status_code=202)
+    async def run_library_images():
+        return library_images.launch()
+
+    @app.post("/api/library/sync/cancel")
+    async def cancel_library_images():
+        return library_images.cancel()
 
     @app.get("/api/sources/{source}/search-categories")
     async def search_categories(source: str):

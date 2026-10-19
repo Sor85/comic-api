@@ -515,7 +515,7 @@ def test_sync_api_and_static_ui(jm_client):
 def test_directory_switch_warning_is_visible_before_changing_settings(jm_client):
     html = jm_client.get("/").text
     start = html.index('<div id="fav-sync-switch-note"')
-    notice = html[start:html.index('<section class="form-section">', start)]
+    notice = html[start:html.index('<section', start)]
     assert 'role="note"' in notice and 'aria-labelledby="fav-sync-switch-title"' in notice
     assert "hidden" not in notice.split(">", 1)[0]
     assert "保存即同步一次" in notice and "旧目录未登记时会计为冲突并重复下载" in notice

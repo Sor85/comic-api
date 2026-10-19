@@ -61,6 +61,7 @@ services:
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
       - JM_DOWNLOAD_ROOTS=${JM_DOWNLOAD_ROOTS:-/app/data/jm-favorites}
       - BIKA_DOWNLOAD_ROOTS=${BIKA_DOWNLOAD_ROOTS:-/app/data/bika-favorites}
+      - LIBRARY_DOWNLOAD_ROOTS=${LIBRARY_DOWNLOAD_ROOTS:-/app/data/library}
       - BIKA_ACCOUNT=${BIKA_ACCOUNT:-}
       - BIKA_PASSWORD=${BIKA_PASSWORD:-}
       - COPY_API_BASE=${COPY_API_BASE:-https://api.copy3000.com/api/v3}
@@ -94,6 +95,7 @@ docker compose up -d
 - **最近搜索**：搜索条件与上次浏览的结果页码保存在当前浏览器，默认恢复上次页码；「设置 → 浏览偏好 → 最近搜索恢复页码」可关闭页码恢复。在搜索框重新提交同一条件、关闭恢复开关或旧记录缺少页码时，从第 1 页开始。
 - **图片代理**：封面与章节图片经 `/api/image/proxy` 中转并缓存到磁盘，带 SSRF 防护；支持 `HTTP(S)_PROXY`、系统代理与 Fake-IP 透明代理。
 - **书库**：收藏、分类、筛选与手动检查章节更新；JM／哔咔云收藏可定时增补到书库。
+- **书库本地同步**：书库全部漫画（所有图源）可按计划增量下载到服务器目录，目录规则、图片格式、限速与重试和收藏同步一致，按 `保存目录/图源ID/…` 存放；下载根目录由 `LIBRARY_DOWNLOAD_ROOTS` 限定。JM／哔咔收藏同步已完整下载的漫画直接跳过，不再重复下载；已完整同步且文件未变化的漫画只读取一次详情，新增章节只补齐新增内容。
 - **下载任务**：章节打包为加密 PDF，支持排队、进度、取消、重试与一键下载全部章节。
 - **阅读进度**：保存在服务器，多设备共享；支持续读、滚动／翻页模式。打开阅读器后第一次翻页才写入观看记录，只打开不翻页不改动「继续阅读」。
 - **云收藏与图片同步**：JM、哔咔收藏可浏览、加入／取消收藏，并按目录规则增量同步图片到服务器目录；支持 Cron 定时计划与执行时间预览，图片同步和本地检查不自动加入书库。下载根目录由 `JM_DOWNLOAD_ROOTS`、`BIKA_DOWNLOAD_ROOTS` 限定，Docker 中自定义目录需同时挂载卷。

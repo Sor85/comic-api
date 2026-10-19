@@ -116,7 +116,7 @@
     <section id="library" hidden>
       <div class="section-head">
         <div class="section-title"><h1>我的书库</h1><span id="library-count" class="count"></span></div>
-        <button id="library-refresh" class="icon-btn" type="button" title="刷新书库" aria-label="刷新书库"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
+        <div class="page-actions"><button id="library-sync-open" class="sync-trigger" data-state="idle" type="button" aria-haspopup="dialog" aria-controls="fav-sync-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg><span id="library-sync-open-label">本地同步</span></button><button id="library-refresh" class="icon-btn" type="button" title="刷新书库" aria-label="刷新书库"><svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button></div>
       </div>
       <div class="library-filters fav-toolbar">
         <div class="input-icon">
@@ -336,14 +336,14 @@
             <p>运行中的任务完成或停止后才能修改设置。</p>
           </details>
         </div>
-        <section class="form-section">
+        <section id="fav-sync-plan-section" class="form-section">
           <h3>计划</h3>
           <div class="group">
-            <label class="group-row jm-check"><span class="row-text"><strong>定时同步</strong><span>按下方计划自动同步收藏图片</span></span><input type="checkbox" name="enabled"></label>
+            <label class="group-row jm-check"><span class="row-text"><strong>定时同步</strong><span id="fav-sync-plan-note">按下方计划自动同步收藏图片</span></span><input type="checkbox" name="enabled"></label>
             <div class="group-row cron-row"><span class="row-text"><strong>同步计划</strong><span id="fav-cron-summary"></span></span><input type="hidden" name="cron"><button id="fav-cron-open" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="fav-cron-pop"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg><span>编辑计划</span></button></div>
           </div>
         </section>
-        <section class="form-section">
+        <section id="fav-sync-download-section" class="form-section">
           <h3>下载与图片</h3>
           <div class="jm-settings-grid">
             <label>下载限速（KiB/s，0 为不限速）<input name="speed_limit_kbps" type="number" min="0" max="1048576" required></label>
@@ -353,7 +353,7 @@
           </div>
           <p class="field-hint">限速只作用于同步任务，不影响在线阅读与 PDF。转换格式时动图仅保存首帧，PNG 不使用质量参数。</p>
         </section>
-        <section class="form-section">
+        <section id="fav-sync-location-section" class="form-section">
           <h3>保存位置</h3>
           <label>服务器下载目录
             <span class="input-action"><input name="download_dir" maxlength="2048" required><button id="fav-directory-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>选择服务器目录</span></button></span>

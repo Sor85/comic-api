@@ -6,8 +6,10 @@
 const FAV_SYNC = {
   jm:{label:'JM',tab:'jm-favorites',folders:true,ids:['123456','123457'],sortKey:'order',sorts:{mr:'收藏时间',mp:'更新时间'}},
   bika:{label:'哔咔',tab:'bika-favorites',folders:false,ids:['5e7f2a9c1b3d4e6f8a0b2c4d','1'],sortKey:'sort',sorts:{dd:'最新上架',da:'最旧上架',ld:'最多喜欢',vd:'最多观看'}},
+  library:{label:'书库',tab:'library',folders:false,ids:['123456','123457']},
 };
-const favSync = {source:'jm',view:{},jm:{active:false,settings:null,local:{}},bika:{active:false,settings:null,local:{}}};
+const favSync = {source:'jm',view:{},jm:{active:false,settings:null,local:{}},bika:{active:false,settings:null,local:{}},library:{active:false,settings:null,local:{}}};
+const syncPath = source => source==='library'?'/api/library/sync':`/api/${source}/sync`;
 const LOCAL_STATUS = {downloaded:{label:'已下载',tone:'ok',icon:'check'},error:{label:'本地异常',tone:'danger',icon:'alert'},missing:{label:'未下载',tone:'muted',icon:'download'}};
 const JM_SYNC_LABELS = {running:'同步中',cancelling:'停止中',cancelled:'已停止',interrupted:'重启中断',completed:'已完成',partial:'部分失败',failed:'失败'};
 const syncField = name => $('fav-sync-form').elements.namedItem(name);
@@ -15,16 +17,20 @@ const jmDate = value => value ? new Date(value*1000).toLocaleString() : '尚未�
 const jmBytes = value => value<1024*1024 ? `${(value/1024).toFixed(1)} KiB` : `${(value/1024/1024).toFixed(1)} MiB`;
 
 async function loadSyncSettings(source=favSync.source){
-  const data=await api(`/api/${source}/sync/settings`);favSync[source].settings=data.settings;favSync[source].options=data;
+  const data=await api(`${syncPath(source)}/settings`);favSync[source].settings=data.settings;favSync[source].options=data;
   if(favSync.source===source)renderSyncSchedule();
   return data;
+}
+function syncScope(source){
+  if(source==='library'){const books=favSync.library.options?.books;return books===undefined?'整个书库':`整个书库（${books} 本）`;}
+  return favSync[source].settings?.folder_ids?.length?`${favSync[source].settings.folder_ids.length} 个指定收藏夹`:'全部收藏';
 }
 function renderSyncSchedule(){
   const source=favSync.source,s=favSync[source].settings,schedule=$('fav-sync-schedule');
   if(!s)return;
-  $('fav-sync-scope').textContent=s.folder_ids?.length?`${s.folder_ids.length} 个指定收藏夹`:'全部收藏';
+  $('fav-sync-scope').textContent=syncScope(source);
   $('fav-sync-dir').textContent=s.download_dir||'—';
-  if(favSync[source].paused||sourcePlugin(source)?.enabled===false){schedule.replaceChildren(node('span',`${FAV_SYNC[source].label} 图源已关闭，定时同步暂停；重新启用后按原计划恢复。`,'schedule-state paused'));return;}
+  if(favSync[source].paused||source!=='library'&&sourcePlugin(source)?.enabled===false){schedule.replaceChildren(node('span',`${FAV_SYNC[source].label} 图源已关闭，定时同步暂停；重新启用后按原计划恢复。`,'schedule-state paused'));return;}
   const parts=[node('span',s.enabled?`定时同步 · ${favSync[source].options?.schedule||s.cron}`:'定时同步关闭','schedule-state'+(s.enabled?' on':''))];
   if(s.enabled&&favSync[source].nextRun)parts.push(node('span',`下次 ${jmDate(favSync[source].nextRun)}`));
   schedule.replaceChildren(...parts);
@@ -65,7 +71,7 @@ function syncableCard(item,source,view,onSelect){
 async function loadLocalStatus(source,ids){
   if(!ids.length)return false;
   try{
-    const data=await api(`/api/${source}/sync/local-status?`+new URLSearchParams({ids:ids.join(',')}),{cache:'no-store'});
+    const data=await api(`${syncPath(source)}/local-status?`+new URLSearchParams({ids:ids.join(',')}),{cache:'no-store'});
     const next={...favSync[source].local};for(const id of ids)delete next[id];Object.assign(next,data.items);
     const changed=JSON.stringify(ids.map(id=>favSync[source].local[id]||null))!==JSON.stringify(ids.map(id=>next[id]||null));
     favSync[source].local=next;return changed;
@@ -77,7 +83,7 @@ function matchesLocalFilter(source,id,filter){if(!filter)return true;const downl
 // JM custom folders keep filtering the current upstream page.
 function favCatalogMode(source,view){return Boolean($(`${source}-favorites-local`).value)&&(!FAV_SYNC[source].folders||view.folder==='0');}
 async function loadFavCatalog(source,view,request,reload){
-  const data=await api(`/api/${source}/sync/catalog?`+new URLSearchParams({local:$(`${source}-favorites-local`).value,page:view.page}),{cache:'no-store'});
+  const data=await api(`${syncPath(source)}/catalog?`+new URLSearchParams({local:$(`${source}-favorites-local`).value,page:view.page}),{cache:'no-store'});
   if(request!==view.request)return false;
   const ids=new Set(data.items.map(item=>String(item.id))),known=favSync[source].local;
   for(const id of view.selected)if(!ids.has(id))view.selected.delete(id);
@@ -92,7 +98,7 @@ async function loadFavCatalog(source,view,request,reload){
   return true;
 }
 async function refreshFavCatalog(source,view,reload){
-  await api(`/api/${source}/sync/catalog/refresh?`+new URLSearchParams({sort:view[FAV_SYNC[source].sortKey]}),{method:'POST'});
+  await api(`${syncPath(source)}/catalog/refresh?`+new URLSearchParams({sort:view[FAV_SYNC[source].sortKey]}),{method:'POST'});
   await reload();
 }
 const catalogTime=value=>value?new Date(value.replace(' ','T')+'Z').toLocaleString():'';
@@ -153,22 +159,25 @@ function toggleSyncPage(view,ids,render){
 }
 async function startFavSync(source,albumIds){
   const s=(await loadSyncSettings(source)).settings;
-  if(!albumIds&&!await ask({title:'同步收藏到服务器',message:`范围：${s.folder_ids?.length?'设置中指定的收藏夹':'全部收藏'}。\n目标：${s.download_dir}\n已完成图片会校验并跳过。此操作不修改远端收藏，不删除本地文件。`,ok:'开始同步'}))return;
-  await api(`/api/${source}/sync/run`,write('POST',albumIds?{album_ids:albumIds}:{}));
-  toast(`${FAV_SYNC[source].label} 收藏同步已启动`);await loadSyncStatus(source);
+  const library=source==='library';
+  if(!albumIds&&!await ask(library
+    ?{title:'同步书库到服务器',message:`范围：${syncScope(source)}，包含全部图源。\n目标：${s.download_dir}/图源ID/\nJM、哔咔收藏同步已完整下载的漫画直接跳过；已完成图片校验后跳过。此操作不修改书库和远端收藏，不删除本地文件。`,ok:'开始同步'}
+    :{title:'同步收藏到服务器',message:`范围：${s.folder_ids?.length?'设置中指定的收藏夹':'全部收藏'}。\n目标：${s.download_dir}\n已完成图片会校验并跳过。此操作不修改远端收藏，不删除本地文件。`,ok:'开始同步'}))return;
+  await api(source==='library'?'/api/library/sync/run':`/api/${source}/sync/run`,write('POST',albumIds?{album_ids:albumIds}:{}));
+  toast(source==='library'?'书库本地同步已启动':`${FAV_SYNC[source].label} 收藏同步已启动`);await loadSyncStatus(source);
 }
 async function repairFavLocal(source=favSync.source,albumIds){
   const s=(await loadSyncSettings(source)).settings,count=albumIds?.length||favSync[source].counts?.repairable||0;
   const backup=`${s.download_dir.replace(/[\\/]$/,'')}/.comic-api-repair/`;
   if(!await ask({title:'修复异常漫画',message:`范围：本地检查标记为异常的 ${count} 本漫画。\n目录：${s.download_dir}\n标题相同、仅「第N話」序号与当前章节顺序不同的已有章节目录唯一时改名对上；逐页核对已有图片：可正常解码的图片保留不动，缺失页从图源补下载；损坏、重复或多余的图片移入 ${backup} 备份目录，不删除任何文件。修复完成后重新校验并登记为已下载。`,ok:'开始修复'}))return;
-  await api(`/api/${source}/sync/repair`,write('POST',albumIds?{album_ids:albumIds}:{}));
+  await api(`${syncPath(source)}/repair`,write('POST',albumIds?{album_ids:albumIds}:{}));
   toast('异常漫画修复已启动');await loadSyncStatus(source);
 }
 async function checkFavLocal(source=favSync.source){
   const s=(await loadSyncSettings(source)).settings;
   const naming=s.directory_rule==='Bd_Aauthoroname_Pindextitle'?'按“【作者】原标题 / 第N話 章节标题”规则匹配':'按漫画 ID 或完整标题匹配';
   if(!await ask({title:'检查本地漫画',message:`范围：${s.folder_ids?.length?'设置中指定的收藏夹':'全部收藏'}。\n目录：${s.download_dir}\n${naming}，核对章节、页码并解码验证图片，建立本地 SHA-256 校验记录。检查需要读取远端目录信息，但不下载、修改或删除图片；不进行模糊标题匹配。`,ok:'开始检查'}))return;
-  await api(`/api/${source}/sync/check-local`,{method:'POST'});
+  await api(`${syncPath(source)}/check-local`,{method:'POST'});
   toast('本地漫画检查已启动');await loadSyncStatus(source);
 }
 function jmRunCard(item){
@@ -202,6 +211,13 @@ function jmRunCard(item){
       jmStat(`${item.repaired_albums||0} 本`,'已修复',item.repaired_albums?'ok':''),
       jmStat(`${item.downloaded} 张`,`补下载 · 移入备份 ${item.moved_images||0} 张`),
       jmStat(`${item.failed} 本`,'仍异常',item.failed?'danger':''),
+    );
+  }else if(item.mode==='library'){
+    stats.append(
+      jmStat(`${item.albums_done} / ${item.albums_total}`,'漫画已处理'),
+      jmStat(`${item.downloaded} 张`,'新下载',item.downloaded?'ok':''),
+      jmStat(`${item.skipped_albums||0} 本`,`跳过 · 其中 JM／哔咔已同步 ${item.external_albums||0} 本`),
+      jmStat(`${item.failed} 项`,item.deferred_albums?`失败 · 推迟 ${item.deferred_albums} 本`:'失败',item.failed?'danger':''),
     );
   }else{
     stats.append(
@@ -263,7 +279,7 @@ function syncProgressLabel(data){
   return {status,percent};
 }
 async function loadSyncStatus(source=favSync.source){
-  const data=await api(`/api/${source}/sync`),s=favSync[source],finished=s.active&&!data.active;
+  const data=await api(`${syncPath(source)}`),s=favSync[source],finished=s.active&&!data.active;
   s.active=data.active;s.nextRun=data.next_run_at;s.paused=data.paused;s.counts=data.local_counts||{};
   // A finished check, repair or sync changes per-comic local state; refresh the visible cards once.
   if(finished)FAV_SYNC[source].onLocalChange?.();
@@ -284,10 +300,11 @@ function renderSyncDialog(data,status,mode){
   if(historySignature!==view.history){view.history=historySignature;$('fav-sync-history-list').replaceChildren(...history.map(jmRunCard));}
   $('fav-sync-history').hidden=!history.length;$('fav-sync-history-count').textContent=history.length||'';
   // While a task runs, its stop control replaces the start controls.
-  $('fav-sync-run').hidden=$('fav-sync-check-local').hidden=data.active;
+  $('fav-sync-run').hidden=data.active;
+  $('fav-sync-check-local').hidden=data.active||favSync.source==='library';
   $('fav-sync-run').disabled=$('fav-sync-check-local').disabled=data.active||data.paused;
   const broken=data.local_counts?.repairable||0,repair=$('fav-sync-repair');
-  repair.hidden=data.active||!broken;repair.disabled=data.active||data.paused;
+  repair.hidden=data.active||favSync.source==='library'||!broken;repair.disabled=data.active||data.paused;
   repair.lastElementChild.textContent=`修复异常漫画（${broken}）`;
   $('fav-sync-cancel').hidden=!data.active;$('fav-sync-cancel').disabled=data.current?.status==='cancelling';
   const chip=$('fav-sync-chip');chip.hidden=!data.active;chip.lastElementChild.textContent=status;
@@ -302,6 +319,7 @@ function openFavSync(source){
     $('fav-sync-schedule').replaceChildren();$('fav-sync-scope').textContent=$('fav-sync-dir').textContent='—';
   }
   $('fav-sync-panel-title').textContent=`${FAV_SYNC[source].label} 本地同步`;
+  $('fav-sync-run').lastElementChild.textContent=source==='library'?'同步书库':'同步收藏';
   $('fav-sync-dialog').showModal();
   run(()=>Promise.all([loadSyncSettings(source),loadSyncStatus(source)]));
 }
@@ -309,12 +327,12 @@ async function openSyncSettings(){
   const source=favSync.source,config=FAV_SYNC[source];
   await loadSyncSettings(source);await loadSyncStatus(source);
   const s=favSync[source].settings,o=favSync[source].options;
-  $('fav-sync-settings-title').textContent=`${config.label} 收藏同步设置`;
-  $('fav-sync-roots-env').textContent=o.roots_env;
-  options(syncField('directory_rule'),o.directory_rules,s.directory_rule);
+  $('fav-sync-settings-title').textContent=`${config.label} ${source==='library'?'本地同步':'收藏同步'}设置`;
+  $('fav-sync-roots-env').textContent=o.roots_env||'—';
+  options(syncField('directory_rule'),o.directory_rules||[],s.directory_rule);
   for(const element of $('fav-sync-settings').querySelectorAll('[data-source]'))element.hidden=element.dataset.source!==source;
   for(const [name,value] of Object.entries(s)){
-    const field=syncField(name);if(!field||name==='folder_ids')continue;
+    const field=syncField(name);if(!field||value===undefined||name==='folder_ids')continue;
     if(field.type==='checkbox')field.checked=value;else field.value=value;
   }
   $('fav-cron-summary').textContent=`${o.schedule} · ${s.cron}`;
@@ -329,10 +347,13 @@ async function openSyncSettings(){
     }));
     if(!folders.size)$('fav-sync-folders').append(node('span','暂无自建收藏夹，范围为全部收藏。','muted'));
   }
+  $('fav-sync-plan-note').textContent=source==='library'?'按下方计划自动同步整个书库的图片':'按下方计划自动同步收藏图片';
   updateSyncPreview();$('fav-sync-settings').showModal();
 }
 function updateSyncPreview(){
-  const rule=syncField('directory_rule').value,format=syncField('image_format').value,root=syncField('download_dir').value.replaceAll('\\','/').replace(/\/$/,'');
+  const rule=syncField('directory_rule').value,format=syncField('image_format').value;
+  // Library images go under one folder per source, e.g. <root>/jm/....
+  const root=syncField('download_dir').value.replaceAll('\\','/').replace(/\/$/,'')+(favSync.source==='library'?'/jm':'');
   const [comic,chapter]=FAV_SYNC[favSync.source].ids;
   const paths={
     Bd_Aauthoroname_Pindextitle:'【作者】原标题/第1話 章节标题',
@@ -351,7 +372,7 @@ async function browseSyncDirectory(path=''){
   $('fav-directory-select').disabled=true;$('fav-directory-parent').disabled=true;
   $('fav-directory-list').replaceChildren();$('fav-directory-message').textContent='正在读取目录…';
   try{
-    const data=await api(`/api/${favSync.source}/sync/directories?`+new URLSearchParams({path}));if(request!==view.directoryRequest)return;
+    const data=await api(`${syncPath(favSync.source)}/directories?`+new URLSearchParams({path}));if(request!==view.directoryRequest)return;
     view.directory=data.path;
     $('fav-directory-roots').replaceChildren(...data.roots.map(root=>{const control=button(root,()=>browseSyncDirectory(root),'small root-chip');control.classList.toggle('active',data.path===root||data.path.startsWith(root.replace(/[\\/]$/,'')+'/'));return control;}));
     $('fav-directory-current').textContent=data.path;
@@ -365,16 +386,20 @@ for(const source of Object.keys(FAV_SYNC))$(`${source}-sync-open`).onclick=()=>o
 $('fav-sync-run').onclick=()=>run(()=>startFavSync(favSync.source),$('fav-sync-run'));
 $('fav-sync-check-local').onclick=()=>run(()=>checkFavLocal(favSync.source),$('fav-sync-check-local'));
 $('fav-sync-repair').onclick=()=>run(()=>repairFavLocal(favSync.source),$('fav-sync-repair'));
-$('fav-sync-cancel').onclick=()=>run(async()=>{const source=favSync.source;await api(`/api/${source}/sync/cancel`,{method:'POST'});await loadSyncStatus(source);},$('fav-sync-cancel'));
+$('fav-sync-cancel').onclick=()=>run(async()=>{const source=favSync.source;await api(`${syncPath(source)}/cancel`,{method:'POST'});await loadSyncStatus(source);},$('fav-sync-cancel'));
 $('fav-sync-settings-open').onclick=()=>run(openSyncSettings,$('fav-sync-settings-open'));
 $('fav-sync-form').onsubmit=event=>{
   event.preventDefault();
   const source=favSync.source,values={};
-  for(const key of ['enabled'])values[key]=syncField(key).checked;
+  values.enabled=syncField('enabled').checked;
+  values.cron=syncField('cron').value;
   for(const key of ['speed_limit_kbps','quality','retries'])values[key]=Number(syncField(key).value);
-  for(const key of ['cron','download_dir','image_format','directory_rule'])values[key]=syncField(key).value;
+  for(const key of ['download_dir','image_format','directory_rule'])values[key]=syncField(key).value;
   if(FAV_SYNC[source].folders)values.folder_ids=[...$('fav-sync-folders').querySelectorAll('input:checked')].map(input=>input.value);
-  run(async()=>{const data=await api(`/api/${source}/sync/settings`,write('PUT',values));favSync[source].settings=data.settings;favSync[source].options=data;$('fav-sync-settings').close();toast('同步设置已保存');await loadSyncStatus(source);},event.submitter);
+  run(async()=>{
+    const data=await api(`${syncPath(source)}/settings`,write('PUT',values));
+    favSync[source].settings=data.settings;favSync[source].options=data;$('fav-sync-settings').close();toast('同步设置已保存');await loadSyncStatus(source);
+  },event.submitter);
 };
 for(const name of ['download_dir','directory_rule','image_format'])syncField(name).addEventListener('input',updateSyncPreview);
 $('fav-cron-open').onclick=event=>cronEditor.open(event.currentTarget,syncField('cron').value,({expression,description})=>{syncField('cron').value=expression;$('fav-cron-summary').textContent=`${description} · ${expression}`;});

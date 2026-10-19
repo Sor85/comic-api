@@ -55,9 +55,10 @@ def numeric_id(value, source="jm"):
 class DownloadPaths:
     """Download roots come from an administrator-controlled environment variable per source."""
 
-    def __init__(self, store, source="jm", env="JM_DOWNLOAD_ROOTS", default="jm-favorites", comic_id=None):
+    def __init__(self, store, source="jm", env="JM_DOWNLOAD_ROOTS", default="jm-favorites", comic_id=None, chapter_id=None):
         self.source, self.env = source, env
         self.comic_id = comic_id or (lambda value: numeric_id(value, source))
+        self.chapter_id = chapter_id or (lambda value: numeric_id(value, source))
         configured = os.environ.get(env, "")
         self.roots = [Path(p.strip()).expanduser().resolve() for p in configured.split(os.pathsep) if p.strip()]
         if not self.roots:
@@ -125,7 +126,7 @@ class DownloadPaths:
         return self.resolve(root / album)
 
     def chapter(self, settings, book, chapter, index):
-        chapter_id = numeric_id(chapter["id"], self.source)
+        chapter_id = self.chapter_id(chapter["id"])
         album = self.album(settings, book)
         rule = settings["directory_rule"]
         if rule == "id":
