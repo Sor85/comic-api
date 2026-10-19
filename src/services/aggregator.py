@@ -9,9 +9,15 @@ from typing import List, Dict, Any
 from src.errors import ComicApiError
 from src.services.image_proxy import ImageProxy
 from src.services.pdf import build_chapter_pdf
-from src.services.search_dedup import search_result_payload
 from src.sources import load_sources
 from src.storage import Store
+
+
+def search_result_payload(items, all_results, errors, upstream_count=None):
+    # upstream_count drives paging: local tag filtering can empty a page that still has a successor.
+    return {'items': items, 'all_results': all_results, 'errors': errors,
+            'upstream_count': len(items) if upstream_count is None else upstream_count}
+
 
 # Tags are separated by whitespace or commas; quotes keep spaces inside one tag, a leading "-" excludes it.
 TAG_TERM = re.compile(r'([+-]?)((?:[a-z]+:)?"[^"]*"|[^\s,，、"]+)')
@@ -160,8 +166,7 @@ class AggregatorService:
                      if include <= (keys := _label_keys(item)) and not exclude & keys]
         return (self.rank_results(keyword, items) if mode == "keyword" else items), upstream_count
 
-    async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword",
-                               deduplicate: bool = False) -> Dict[str, Any]:
+    async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword") -> Dict[str, Any]:
         """Search registered sources independently and retain partial failures."""
         capability = self.search_capability(mode, self.tag_terms(mode, keyword))
         keys = [key for key, plugin in self.sources.items() if self.is_enabled(key) and capability in plugin.capabilities]
@@ -179,8 +184,7 @@ class AggregatorService:
                 upstream_count += result[1]
         if mode == "keyword":
             candidates = self.rank_results(keyword, candidates)
-        result = search_result_payload(candidates, all_results, errors, deduplicate=deduplicate,
-                                       upstream_count=upstream_count)
+        result = search_result_payload(candidates, all_results, errors, upstream_count)
         return dict(result, keyword=keyword, best_match=result['items'][0] if result['items'] else None)
 
     async def get_comic_detail(self, source: str, comic_id: str) -> Dict[str, Any]:

@@ -54,7 +54,7 @@ function refreshBikaAccountViews(){
   if(state.detail?.source==='bika'&&$('detail-dialog').open)renderDetail();
   if(state.tab==='bika-favorites')run(loadBikaFavoritesView);
 }
-function bikaCardSignature(item){return [localStatusSignature('bika',String(item.id)),item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
+function bikaCardSignature(item){return [localStatusSignature('bika',String(item.id)),item.title,coverKey(coverFor(item)),item.author,item.authors,readingLast(item)?.chapterName||''];}
 function filteredBikaFavorites(){
   const keyword=$('bika-favorites-keyword').value.trim().toLocaleLowerCase();
   const local=$('bika-favorites-local').value;

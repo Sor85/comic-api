@@ -55,7 +55,7 @@ function filteredJmBooks(){
   return jm.items.filter(item=>(!keyword||`${item.title} ${item.author||''}`.toLocaleLowerCase().includes(keyword))&&matchesLocalFilter('jm',String(item.id),local));
 }
 function jmCard(item){return syncableCard(item,'jm',jm,syncJmSelection);}
-function jmCardSignature(item){return [localStatusSignature('jm',String(item.id)),item.title,coverKey(coverFor(item)),item.author,item.authors,(item.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(item)?.chapterName||''];}
+function jmCardSignature(item){return [localStatusSignature('jm',String(item.id)),item.title,coverKey(coverFor(item)),item.author,item.authors,readingLast(item)?.chapterName||''];}
 function renderJmBooks(){
   const items=filteredJmBooks(),box=$('jm-favorites-books');
   if(!items.length){

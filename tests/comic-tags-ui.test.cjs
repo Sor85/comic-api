@@ -224,67 +224,17 @@ test('作者兼容数组与旧字符串，多作者分别点击，未知作者�
   assert.equal(root.querySelectorAll('a').length,2);assert.match(root.textContent,/<script>/);
 });
 
-test('合并数量、全部图源计数与原始源计数分别展示，分页依据原始返回数',async()=>{
+test('全部图源计数与各源计数分别展示，搜索请求不带去重参数',async()=>{
   const h=harness();let pagerCount;
-  h.context.api=async()=>({items:[{id:'1'}],raw_count:3,duplicate_count:2,all_results:{jm:[{},{}],bika:[{}]},errors:{}});
+  h.context.api=async path=>{h.calls.push(path);return {items:[{id:'1'},{id:'2'},{id:'3'}],all_results:{jm:[{},{}],bika:[{}]},errors:{}};};
   h.context.renderPager=count=>{pagerCount=count;};
-  h.context.startSearch('测试','',{mode:'keyword',deduplicate:true});await h.context.loadSearch();
+  h.context.startSearch('测试','',{mode:'keyword'});await h.context.loadSearch();
   const chips=h.roots.filters.children[0].querySelectorAll('button');
-  assert.equal(chips[0].textContent,'全部1');assert.equal(chips[1].textContent,'jm2');assert.equal(chips[2].textContent,'bika1');
-  assert.match(chips[1].title,/合并前/);assert.match(h.roots['results-meta'].textContent,/1 部 · 合并 2 项重复结果/);
-  assert.equal(pagerCount,3);
-});
-
-test('结果去重默认关闭，首页开关只改变选择，启用后搜索才传去重参数',async()=>{
-  const h=harness();h.context.syncSearchMode();
-  const toggle=()=>h.roots['search-mode'].querySelectorAll('button').find(button=>button.attributes.role==='switch');
-  assert.equal(toggle().attributes['aria-checked'],'false');assert.match(toggle().textContent,/关闭/);
-  assert.equal(h.context.searchParams({keyword:'测试'}).has('deduplicate'),false);
-  await toggle().onclick();assert.equal(h.calls.length,0);assert.equal(toggle().attributes['aria-checked'],'true');
-  h.context.startSearch('测试');await h.context.loadSearch();
-  assert.equal(new URL(h.calls.at(-1),'http://test').searchParams.get('deduplicate'),'true');
-  assert.equal(h.context.readRecent()[0].deduplicate,true);
-  h.state.search.page=4;await toggle().onclick();
-  assert.equal(h.state.search.page,1);assert.equal(h.state.search.deduplicate,false);
+  assert.equal(chips[0].textContent,'全部3');assert.equal(chips[1].textContent,'jm2');assert.equal(chips[2].textContent,'bika1');
+  assert.match(h.roots['results-meta'].textContent,/3 部$/);assert.equal(pagerCount,3);
   assert.equal(new URL(h.calls.at(-1),'http://test').searchParams.has('deduplicate'),false);
-  assert.equal(toggle().attributes['aria-checked'],'false');
-});
-
-test('去重开关保留搜索方式和筛选，作者搜索沿用当前选择，显式关闭可覆盖选择',async()=>{
-  const h=harness();h.context.startSearch('测试','bika',{mode:'tag',category:'全彩',tag_value:'原始标签'});
-  const toggle=h.roots['search-mode'].querySelectorAll('button').find(button=>button.attributes.role==='switch');
-  await toggle.onclick();
-  const query=new URL(h.calls.filter(path=>path.startsWith('/api/search?')).at(-1),'http://test').searchParams;
-  assert.equal(query.get('deduplicate'),'true');assert.equal(query.get('mode'),'tag');
-  assert.equal(query.get('category'),'全彩');assert.equal(query.get('tag_value'),'原始标签');
-  h.context.searchComicAuthor('作者');assert.equal(h.state.search.deduplicate,true);assert.equal(h.state.search.mode,'author');
-  h.context.startSearch('测试','',{deduplicate:false});assert.equal(h.state.search.deduplicate,false);
-});
-
-test('去重状态随搜索链接和历史恢复，旧链接默认关闭，计数缓存隔离',async()=>{
-  const h=harness();h.context.startSearch('测试','',{deduplicate:true});h.state.search.page=2;
-  const url=h.context.viewURL();assert.equal(new URL(url,'http://test').searchParams.get('deduplicate'),'true');
-  const fresh=harness();fresh.context.location.search=url;fresh.context.initBrowse();await flush();
-  assert.equal(fresh.state.search.deduplicate,true);assert.equal(fresh.state.search.page,2);
-  const recent=h.context.readRecent()[0];fresh.context.startSearch(recent.keyword,recent.source,recent);
-  assert.equal(fresh.state.search.deduplicate,true);
-  for(const query of ['?q=旧搜索','?q=测试&deduplicate=false']){
-    fresh.context.location.search=query;fresh.context.initBrowse();await flush();assert.equal(fresh.state.search.deduplicate,false);
-  }
-  assert.notEqual(h.context.searchKey({keyword:'测试',deduplicate:true}),h.context.searchKey({keyword:'测试'}));
-});
-
-test('切换去重后旧请求的原始结果不会覆盖新结果',async()=>{
-  const h=harness();let finishOld,shown;
-  h.context.api=path=>new URL(path,'http://test').searchParams.get('deduplicate')==='true'
-    ?Promise.resolve({items:[{id:'合并结果'}],raw_count:3,duplicate_count:2,all_results:{jm:[{},{},{}]},errors:{}})
-    :new Promise(resolve=>{finishOld=resolve;});
-  h.context.showResults=items=>{shown=items;};h.context.startSearch('测试');
-  const old=h.context.loadSearch();
-  await h.roots['search-mode'].querySelectorAll('button').find(button=>button.attributes.role==='switch').onclick();
-  finishOld({items:[{id:'旧结果'},{id:'旧结果2'},{id:'旧结果3'}],raw_count:3,duplicate_count:0,all_results:{jm:[{},{},{}]},errors:{}});
-  await old;assert.equal(shown[0].id,'合并结果');assert.equal(shown.length,1);
-  assert.match(h.roots['results-meta'].textContent,/合并 2 项重复结果/);
+  h.context.syncSearchMode();
+  assert.equal(h.roots['search-mode'].querySelectorAll('button').filter(button=>button.attributes.role==='switch').length,0);
 });
 
 test('标签与关键词搜索计数不混用，分类筛选不显示聚合旧计数',()=>{
@@ -303,7 +253,7 @@ test('多标签与排除标签按服务端规则解析，只显示支持多标�
   assert.equal(h.context.searchCapability({keyword:'巨乳 -中文',mode:'tag',tag_value:'巨乳'}),'tag_search');
   assert.equal(h.context.searchCapability({keyword:'巨乳 -中文',mode:'keyword'}),'search');
   for(const source of h.state.sources)if(source.id!=='copy')source.capabilities.push('multi_tag_search');
-  h.context.api=async path=>{h.calls.push(path);return {items:[],raw_count:0,upstream_count:20,all_results:{},errors:{}};};
+  h.context.api=async path=>{h.calls.push(path);return {items:[],upstream_count:20,all_results:{},errors:{}};};
   h.context.renderPager=count=>{pagerCount=count;};
   h.context.startSearch('巨乳 -中文','copy',{mode:'tag'});
   assert.equal(h.state.search.source,'');

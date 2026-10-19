@@ -36,10 +36,9 @@ function searchCapability(search){
   }
   return {tag:'tag_search',author:'author_search'}[search.mode]||'search';
 }
-function searchKey(search){return JSON.stringify([search.keyword,search.mode||'keyword',search.page||1,search.deduplicate===true]);}
+function searchKey(search){return JSON.stringify([search.keyword,search.mode||'keyword',search.page||1]);}
 function searchParams(search){
   const params=new URLSearchParams({keyword:search.keyword,page:search.page||1});
-  if(search.deduplicate===true)params.set('deduplicate','true');
   if(['tag','author'].includes(search.mode))params.set('mode',search.mode);
   if(search.source){
     params.set('source',search.source);

@@ -28,7 +28,7 @@ function harness(storage={}){
   vm.runInContext(app.slice(app.indexOf('function readRecent('),app.indexOf('function readHistory(')),context);
   return {context,storage,searches,root:context.$};
 }
-const search=(page,extra={})=>({keyword:'123',mode:'keyword',source:'',tag_value:'',category:'',deduplicate:false,page,sort:'',...extra});
+const search=(page,extra={})=>({keyword:'123',mode:'keyword',source:'',tag_value:'',category:'',page,sort:'',...extra});
 
 test('翻页记录到对应最近搜索，不改变列表顺序',()=>{
   const h=harness();

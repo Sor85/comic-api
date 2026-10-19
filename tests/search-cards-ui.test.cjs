@@ -52,17 +52,6 @@ test('书库卡片同时显示手动分类和云收藏分类',()=>{
   assert.match(card.textContent,/JM 收藏 \/ 追更/);assert.doesNotMatch(card.textContent,/未分类/);
 });
 
-test('合并卡片为每个原始版本保留独立入口，同源版本不重名',async()=>{
-  const h=harness(),variants=[book,{...book,id:'2',page_count:42},{...book,source:'bika'}];
-  const card=h.context.card({...book,variants}),links=card.querySelectorAll('.variant-link');
-  assert.deepEqual(links.map(link=>link.textContent),['jm · 1','jm · 2','bika']);
-  assert.match(card.textContent,/3 个版本/);assert.match(links[1].title,/42 页/);
-  for(const link of links)await link.onclick();
-  assert.deepEqual(h.opened.map(([item])=>[item.source,item.id]),[['jm','1'],['jm','2'],['bika','1']]);
-  assert.ok(card.querySelectorAll('button').every(button=>button.querySelectorAll('button').length===0));
-  const single=h.context.card(book);assert.equal(single.querySelectorAll('.variant-link').length,0);
-});
-
 test('历史卡片显示阅读进度，只有播放按钮直接进入阅读页，点击其他部分打开简介',async()=>{
   const h=harness(),history={chapterName:'第一章',index:3,total:20};
   const card=h.context.card(book,{history});
@@ -74,7 +63,7 @@ test('历史卡片显示阅读进度，只有播放按钮直接进入阅读页�
   assert.equal(h.context.card(book).querySelectorAll('.cover-play').length,0);
 });
 
-test('结果卡片标识书库与云收藏，合并卡片检查所有版本，收藏状态变更后刷新',async()=>{
+test('结果卡片标识书库与云收藏，收藏状态变更后刷新',async()=>{
   const h=harness(),calls=[],results={children:[]};
   Object.assign(h.context,{
     inLibrary:item=>item.source==='jm'&&item.id==='1',
@@ -85,15 +74,15 @@ test('结果卡片标识书库与云收藏，合并卡片检查所有版本，�
   h.context.state.favoriteIds={};h.context.state.browseRequest=7;
   vm.runInContext(app.slice(app.indexOf('// Result cards mark'),app.indexOf('function card(')),h.context);
   const bika={id:'b2',source:'bika',title:'夏日'},plain=h.context.card({...book,id:'9'},{marks:true});
-  const merged=h.context.card({...book,variants:[book,bika]},{marks:true});
-  results.children.push(plain,merged);
+  const local=h.context.card(book,{marks:true}),favorite=h.context.card(bika,{marks:true});
+  results.children.push(plain,local,favorite);
   const marks=card=>card.querySelectorAll('.cover-mark').map(mark=>{assert.equal(mark.textContent,'');assert.equal(mark.attributes['aria-label'],mark.title);return mark.className.split(' ')[1];});
-  assert.deepEqual(marks(merged),['library']);assert.ok(plain.querySelectorAll('.cover-marks')[0].hidden);
+  assert.deepEqual(marks(local),['library']);assert.deepEqual(marks(favorite),[]);assert.ok(plain.querySelectorAll('.cover-marks')[0].hidden);
   assert.equal(h.context.card(book).querySelectorAll('.cover-marks').length,0);
-  await h.context.loadResultFavorites([{...book,variants:[book,bika]}],7);
+  await h.context.loadResultFavorites([book,bika],7);
   assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/bika\/favorite-ids\?ids=b2$/);
-  assert.deepEqual(marks(merged),['library','favorite']);assert.match(merged.querySelectorAll('.favorite')[0].title,/哔咔收藏/);
-  h.context.setFavoriteMark('bika','b2',false);assert.deepEqual(marks(merged),['library']);
+  assert.deepEqual(marks(favorite),['favorite']);assert.match(favorite.querySelectorAll('.favorite')[0].title,/哔咔收藏/);
+  h.context.setFavoriteMark('bika','b2',false);assert.deepEqual(marks(favorite),[]);
 });
 
 test('阅读记录晚于卡片加载时，刷新后补上读至标签',()=>{
@@ -113,7 +102,7 @@ test('新增作者脚本在主脚本前加载，交互样式声明排版基线�
   const html=readFileSync(join(__dirname,'../src/web/templates/index.html'),'utf8');
   assert.ok(html.indexOf('/static/comic-authors.js')<html.indexOf('/static/app.js'));
   const css=readFileSync(join(__dirname,'../src/web/static/app.css'),'utf8');
-  for(const name of ['comic-authors','comic-variants']){
+  for(const name of ['comic-authors']){
     const rule=css.match(new RegExp(`\\.${name}\\{([^}]+)\\}`))[1];
     assert.match(rule,/font-size:/);assert.match(rule,/line-height:/);assert.doesNotMatch(rule,/cursor:/);
   }

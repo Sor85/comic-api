@@ -6,7 +6,7 @@ const state = {
   discover: {source: '', action: 'latest', page: 1, name: '', sort: '', mode: 'day'}, search: null, searchCounts: null, view: 'home',
   health: {}, healthDots: {}, chapterDesc: readLocal('comic:chapter-desc') === true,
   chapterPreviews: readLocal('comic:chapter-previews') === true, recentPage: readLocal('comic:recent-page') !== false,
-  searchMode: 'keyword', searchDeduplicate: false, searchCategories: {}, searchCategoryRequests: {},
+  searchMode: 'keyword', searchCategories: {}, searchCategoryRequests: {},
   browseRequest: 0, shelfRequest: 0, detailRequest: 0, readerRequest: 0, resultItems: [], resultShown: 0, activeTasks: 0,
   reading: [], readingIndex: new Map(), readingLoaded: false, favoriteIds: {},
 };
@@ -266,7 +266,7 @@ function initBrowse(){
   if(tab&&Object.hasOwn(TAB_LABELS,tab)&&tab!=='browse'){setView('home');showTab(tab,false);syncHistory(false);return;}
   const q=(params.get('q')||'').trim().slice(0,200),src=params.get('source'),action=params.get('browse');
   if(q){
-    state.search={keyword:q,source:sourcePlugin(src)?src:'',page:Math.min(1000,Math.max(1,parseInt(params.get('page'),10)||1)),sort:params.get('sort')||'',mode:['tag','author'].includes(params.get('mode'))?params.get('mode'):'keyword',tag_value:(params.get('tag_value')||'').slice(0,200),category:(params.get('category')||'').slice(0,200),deduplicate:['true','1'].includes(params.get('deduplicate'))};
+    state.search={keyword:q,source:sourcePlugin(src)?src:'',page:Math.min(1000,Math.max(1,parseInt(params.get('page'),10)||1)),sort:params.get('sort')||'',mode:['tag','author'].includes(params.get('mode'))?params.get('mode'):'keyword',tag_value:(params.get('tag_value')||'').slice(0,200),category:(params.get('category')||'').slice(0,200)};
     normalizeSearch();
     $('keyword').value=q;syncClear();setView('results');syncHistory(false);run(loadSearch);return;
   }
@@ -297,10 +297,10 @@ function readRecent(){
 }
 function recentEntry(search){
   const text=value=>typeof value==='string'?value:'';
-  return {keyword:search.keyword,mode:['tag','author'].includes(search.mode)?search.mode:'keyword',source:text(search.source),tag_value:text(search.tag_value),category:text(search.category),deduplicate:search.deduplicate===true,page:search.page||1,sort:text(search.sort)};
+  return {keyword:search.keyword,mode:['tag','author'].includes(search.mode)?search.mode:'keyword',source:text(search.source),tag_value:text(search.tag_value),category:text(search.category),page:search.page||1,sort:text(search.sort)};
 }
 // A recent entry is identified by its query and filters; page and sort record where browsing left off.
-function recentKey(item){return JSON.stringify([item.keyword,item.mode,item.source,item.tag_value,item.category,item.deduplicate]);}
+function recentKey(item){return JSON.stringify([item.keyword,item.mode,item.source,item.tag_value,item.category]);}
 function addRecent(search){
   const entry=recentEntry(search);search.recent=recentKey(entry);
   saveLocal('comic:recent',[entry,...readRecent().filter(item=>recentKey(item)!==search.recent)].slice(0,10));
@@ -493,15 +493,6 @@ function syncSearchMode(){
     if(state.search){Object.assign(state.search,{mode:value,page:1,sort:'',tag_value:''});run(loadSearch);}
     else syncSearchMode();
   }));
-  const deduplicate=state.search?state.search.deduplicate===true:state.searchDeduplicate===true;state.searchDeduplicate=deduplicate;
-  const toggle=button(`结果去重：${deduplicate?'开启':'关闭'}`,()=>{
-    state.searchDeduplicate=!deduplicate;
-    if(state.search){Object.assign(state.search,{deduplicate:state.searchDeduplicate,page:1});return loadSearch();}
-    syncSearchMode();
-  },'chip dedup-chip'+(deduplicate?' active':''));
-  toggle.textContent='';toggle.append(node('i',undefined,'dedup-switch'),node('span',`结果去重：${deduplicate?'开启':'关闭'}`));
-  toggle.setAttribute('role','switch');toggle.setAttribute('aria-label','结果去重');toggle.setAttribute('aria-checked',String(deduplicate));
-  toggle.title='仅合并本页高置信度重复作品，保留所有版本入口';$('search-mode').append(toggle);
   if(mode==='tag'){state.tagTermsBox=node('div',undefined,'tag-terms');$('search-mode').append(state.tagTermsBox);renderTagTerms();}
   else state.tagTermsBox=null;
   $('keyword').placeholder=mode==='tag'?'输入标签名称，前加 - 排除；拷贝使用题材…':mode==='author'?'搜索作者名称…':'搜索漫画、作者…';
@@ -532,7 +523,7 @@ function updateTagTerms(list){
 }
 function normalizeSearch(){
   const s=state.search;if(!s)return;
-  s.mode=['tag','author'].includes(s.mode)?s.mode:'keyword';s.deduplicate=s.deduplicate===true;
+  s.mode=['tag','author'].includes(s.mode)?s.mode:'keyword';
   if(s.source&&(sourcePlugin(s.source)?.enabled===false||!(sourcePlugin(s.source)?.capabilities||[]).includes(searchCapability(s)))){s.source='';s.tag_value='';s.category='';s.sort='';s.page=1;}
   if(s.mode!=='tag'||!s.source)s.tag_value='';
   if(!(sourcePlugin(s.source)?.capabilities||[]).includes('search_categories'))s.category='';
@@ -568,8 +559,8 @@ function renderFilters(){
     const searchable=activeSources().filter(p=>(p.capabilities||[]).includes(searchCapability(s)));
     const c=!s.category&&!s.tag_value&&state.searchCounts?.key===searchKey(s)?state.searchCounts:null;
     if(searchable.length>1)box.append(chipGroup('图源',[
-      {value:'',label:'全部',count:c?c.total??Object.values(c.counts).reduce((a,b)=>a+b,0):undefined,hint:s.deduplicate?'本页合并后的作品数':'本页图源原始结果数'},
-      ...searchable.map(p=>({value:p.id,label:p.name,count:c?(c.errors[p.id]?'!':c.counts[p.id]??0):undefined,warn:c?.errors[p.id]?.message,hint:s.deduplicate?'本页图源原始结果数（合并前）':'本页图源原始结果数'}))],
+      {value:'',label:'全部',count:c?c.total??Object.values(c.counts).reduce((a,b)=>a+b,0):undefined,hint:'本页图源原始结果数'},
+      ...searchable.map(p=>({value:p.id,label:p.name,count:c?(c.errors[p.id]?'!':c.counts[p.id]??0):undefined,warn:c?.errors[p.id]?.message,hint:'本页图源原始结果数'}))],
       s.source,v=>{Object.assign(s,{source:v,page:1,sort:'',category:'',tag_value:''});run(loadSearch);}));
     if((sourcePlugin(s.source)?.capabilities||[]).includes('search_categories'))box.append(searchCategoryFilter(s));
     const sorts=sourcePlugin(s.source)?.[s.mode==='tag'?'tag_sorts':'search_sorts']||[];
@@ -668,8 +659,8 @@ async function loadSearch(){
     showResults(data.items,s.page>1?'已经到最后一页了':'没有找到相关漫画','换个关键词，或切换到其他图源试试');
     if(state.recentPage&&(data.items.length||s.page===1))saveRecentPage(s);
     loadResultFavorites(data.items,request);
-    $('results-meta').textContent=`${scope} · 第 ${s.page} 页 · ${data.items.length} 部`+(data.duplicate_count?` · 合并 ${data.duplicate_count} 项重复结果`:'');
-    renderPager(data.upstream_count??data.raw_count??data.items.length);
+    $('results-meta').textContent=`${scope} · 第 ${s.page} 页 · ${data.items.length} 部`;
+    renderPager(data.upstream_count??data.items.length);
     const errors=Object.entries(data.errors||{}),status=$('browse-status');
     if(errors.length){
       status.classList.add('warn');
@@ -681,7 +672,7 @@ async function loadSearch(){
 function startSearch(keyword,source='',filters={}){
   keyword=keyword.trim().slice(0,200);if(!keyword)return;
   if(state.tab!=='browse')showTab('browse');
-  state.search={keyword,source,page:filters.page||1,sort:filters.sort||'',mode:filters.mode||state.searchMode||'keyword',tag_value:filters.tag_value||'',category:filters.category||'',deduplicate:filters.deduplicate??state.searchDeduplicate??false};
+  state.search={keyword,source,page:filters.page||1,sort:filters.sort||'',mode:filters.mode||state.searchMode||'keyword',tag_value:filters.tag_value||'',category:filters.category||''};
   normalizeSearch();
   $('keyword').value=keyword;syncClear();addRecent(state.search);renderRecent();
   return openResults();
@@ -725,15 +716,13 @@ function showTab(tab,updateHistory=true,dismissSettings=true) {
   if(tab==='jm-favorites')run(loadJmFavoritesView);
   if(tab==='bika-favorites')run(loadBikaFavoritesView);
 }
-// Result cards mark works already in the library or in a cloud favorites list; merged cards check every version.
+// Result cards mark works already in the library or in a cloud favorites list.
 const FAVORITE_LABELS={jm:'JM 收藏',bika:'哔咔收藏'};
-function comicVersions(item){return item.variants?.length?item.variants:[item];}
 function isFavorited(item){return state.favoriteIds[item.source]?.has(String(item.id))===true;}
 function syncComicMarks(box,item){
-  const versions=comicVersions(item),favorites=[...new Set(versions.filter(isFavorited).map(v=>FAVORITE_LABELS[v.source]))];
   const marks=[];
-  if(versions.some(inLibrary))marks.push(['bookmark','已加入本地书库','library']);
-  if(favorites.length)marks.push(['star',`已在${favorites.join('、')}中（按本地记录的收藏列表）`,'favorite']);
+  if(inLibrary(item))marks.push(['bookmark','已加入本地书库','library']);
+  if(isFavorited(item))marks.push(['star',`已在${FAVORITE_LABELS[item.source]}中（按本地记录的收藏列表）`,'favorite']);
   box.replaceChildren(...marks.map(([icon,title,kind])=>{const mark=node('span',undefined,`cover-mark ${kind}`);mark.innerHTML=svgIcon(icon);mark.title=title;mark.setAttribute('role','img');mark.setAttribute('aria-label',title);return mark;}));
   box.hidden=!marks.length;
 }
@@ -741,10 +730,10 @@ function refreshCardStates(){for(const el of document.querySelectorAll('.card'))
 // Favorite marks come from the locally recorded favorites tables only; failures leave the cards unmarked.
 async function loadResultFavorites(items,request){
   const wanted={};
-  for(const item of items)for(const v of comicVersions(item)){
-    const p=sourcePlugin(v.source);
-    if(!FAVORITE_LABELS[v.source]||p?.enabled===false||!(p?.capabilities||[]).includes('favorites')||!(p.account?.authenticated||p.account?.configured))continue;
-    (wanted[v.source]??=new Set()).add(String(v.id));
+  for(const item of items){
+    const p=sourcePlugin(item.source);
+    if(!FAVORITE_LABELS[item.source]||p?.enabled===false||!(p?.capabilities||[]).includes('favorites')||!(p.account?.authenticated||p.account?.configured))continue;
+    (wanted[item.source]??=new Set()).add(String(item.id));
   }
   await Promise.all(Object.entries(wanted).map(async([source,ids])=>{
     const list=[...ids];
@@ -795,24 +784,9 @@ function card(item,{showSource=true,library=false,history=null,marks=false}={}){
     const category=node('span',categories,'card-meta-category');category.title=categories;
     meta.append(category,node('span',`${item.chapters?.length||0} 章`,'card-meta-count'));el.append(meta);
   }
-  if(item.variants?.length>1)el.append(renderComicVariants(item.variants));
   if(library)el.append(libraryActions(item,el));
   if(syncs.length){el.syncState=()=>syncs.forEach(sync=>sync());el.syncState();}
   return el;
-}
-function renderComicVariants(variants){
-  const root=node('div',undefined,'comic-variants');root.setAttribute('aria-label','作品版本');
-  root.append(node('span',`${variants.length} 个版本`));
-  const counts=new Map(),seen=new Map();
-  for(const item of variants)counts.set(item.source,(counts.get(item.source)||0)+1);
-  for(const item of variants){
-    const index=(seen.get(item.source)||0)+1;seen.set(item.source,index);
-    const label=sourceName(item.source)+(counts.get(item.source)>1?` · ${index}`:'');
-    const link=button(label,()=>openComic(item),'variant-link');
-    link.title=`${sourceName(item.source)} · ${item.title||'未命名'}${item.page_count?` · ${item.page_count} 页`:''} · ID ${item.id}`;
-    link.setAttribute('aria-label',link.title);root.append(link);
-  }
-  return root;
 }
 function libraryActions(item,cardEl){
   const more=node('button',undefined,'icon-btn card-more');more.type='button';more.title='更多操作';more.setAttribute('aria-label','更多操作');more.innerHTML=svgIcon('dots');more.onclick=()=>showMenu();more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');
@@ -844,7 +818,7 @@ async function loadLibrary() {
   filterBooks();
 }
 // Library cards keyed by book; unchanged cards stay mounted so covers and entrance animations do not replay.
-function bookSignature(b){return [b.title,coverKey(coverFor(b)),b.author,b.authors,b.library_category,bookCategories(b),b.chapters?.length||0,(b.variants||[]).map(v=>[v.source,v.id,v.title,v.page_count]),readingLast(b)?.chapterName||''];}
+function bookSignature(b){return [b.title,coverKey(coverFor(b)),b.author,b.authors,b.library_category,bookCategories(b),b.chapters?.length||0,readingLast(b)?.chapterName||''];}
 function filterBooks(){
   const category=$('library-category').value,sort=$('library-sort').value,needle=($('library-filter').value||'').trim().toLowerCase(),box=$('books');
   if(!state.books.length){box.keyedCards=null;box.replaceChildren(emptyState('书库为空','漫画详情中的「加入书库」用于收藏到本地书库，支持追更和继续阅读。',labelBtn('compass','发现漫画',()=>showTab('browse'),'primary'),'bookmark'));return;}

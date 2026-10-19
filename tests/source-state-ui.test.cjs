@@ -87,7 +87,7 @@ test('关闭的单源搜索清除专属筛选并回到聚合搜索',()=>{
   const h=harness();h.state.sources[1].enabled=false;
   h.state.search={source:'bika',mode:'tag',keyword:'标签',page:5,sort:'dd',category:'全彩',tag_value:'tag'};
   h.context.normalizeSearch();
-  assert.deepEqual(JSON.parse(JSON.stringify(h.state.search)),{source:'',mode:'tag',keyword:'标签',page:1,sort:'',category:'',tag_value:'',deduplicate:false});
+  assert.deepEqual(JSON.parse(JSON.stringify(h.state.search)),{source:'',mode:'tag',keyword:'标签',page:1,sort:'',category:'',tag_value:''});
   assert.deepEqual(Array.from(h.context.browsable(),p=>p.id),['jm','copy']);
 });
 

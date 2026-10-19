@@ -317,7 +317,7 @@ def test_multi_tag_api_passes_native_terms_and_filters_locally(search_api):
     # Upstream receives only the first tag; remaining tags match tags or categories case-insensitively.
     assert plugins['bika'].calls == [('tag', '巨乳', 1, {'category': '全彩', 'sort': 'vd'})]
     assert [item['id'] for item in response['items']] == ['2']
-    assert response['raw_count'] == 1 and response['upstream_count'] == 3
+    assert response['upstream_count'] == 3
 
 
 def test_single_tag_and_tag_links_keep_the_plain_tag_search(search_api):
