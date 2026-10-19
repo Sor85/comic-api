@@ -162,9 +162,13 @@ const dropdown = (() => {
     if (name) trigger.setAttribute('aria-label', name);
     value.className = 'dd-value';
     trigger.append(value); trigger.insertAdjacentHTML('beforeend', CHEVRON);
-    // 触发按钮排在 select 之前：外层 <label> 的点击转给按钮，即点标签文字也能展开。
+    // 触发按钮排在 select 之前：外层 <label> 以按钮为关联控件，标签文字作为按钮的可访问名称。
     select.before(wrap); wrap.append(trigger, select);
     select.classList.add('dd-native'); select.tabIndex = -1; select.setAttribute('aria-hidden', 'true');
+    // 只有点框体才展开：拦下 <label> 其余区域转给按钮的点击，菜单展开时点该区域只收起菜单。
+    wrap.closest('label')?.addEventListener('click', event => {
+      if (!event.target.closest('.dd-select, button, input, select, textarea, a')) event.preventDefault();
+    });
 
     const sync = () => {
       const option = select.options[select.selectedIndex];
