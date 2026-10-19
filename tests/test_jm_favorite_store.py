@@ -6,7 +6,8 @@ import pytest
 
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
-from src.services.jm_sync import JmSync
+from src.services.favorites import JmFavorites
+from src.services.library_image_sync import LibraryImageSync
 from src.storage import Store
 from tests.test_jm_favorites import favorite_client
 
@@ -67,42 +68,26 @@ def test_v3_database_migrates_without_losing_existing_data(tmp_path):
     assert reopened.jm_favorite_status(owner, "102") is False
 
 
-def test_sync_full_scan_updates_catalog_before_downloads(favorite_client, monkeypatch):
-    monkeypatch.delenv("JM_DOWNLOAD_ROOTS", raising=False)
+def jm_favorites(store, plugin):
+    service = AggregatorService(store, {"jm": plugin})
+    return JmFavorites(store, service, LibraryImageSync(store, service, {}))
+
+
+def test_catalog_refresh_replaces_recorded_favorites(favorite_client, monkeypatch):
     _, remote, plugin, store = favorite_client
     async def scenario():
-        sync = JmSync(store, AggregatorService(store, {"jm": plugin}))
-        owner = sync.identity()
+        favorites = jm_favorites(store, plugin)
+        owner = favorites.owner()
         store.record_jm_favorites(owner, ["999"])
-        sync.current = sync._new_state(False)
-        data = await sync._collect(sync.settings(), owner)
-        assert set(data) == remote.ids
+        favorites.refresh_catalog()
+        await favorites.catalog_task
+        assert not favorites.catalog_state["error"]
         assert store.jm_favorite_status(owner, "101") is True
         assert store.jm_favorite_status(owner, "999") is False
     asyncio.run(scenario())
 
 
-def test_sync_custom_folder_does_not_delete_other_favorites(favorite_client, monkeypatch):
-    monkeypatch.delenv("JM_DOWNLOAD_ROOTS", raising=False)
-    client, _, plugin, store = favorite_client
-    payload = {"list": [{"id": "101", "name": "Scoped"}],
-               "folder_list": [{"FID": "7", "name": "Scope"}], "total": "1"}
-    monkeypatch.setattr(client, "jm_request", lambda *a, **k: payload)
-    async def scenario():
-        sync = JmSync(store, AggregatorService(store, {"jm": plugin}))
-        owner = sync.identity()
-        store.record_jm_favorites(owner, ["999"])
-        sync.current = sync._new_state(False)
-        config = dict(sync.settings(), folder_ids=["7"])
-        assert set(await sync._collect(config, owner)) == {"101"}
-        assert store.jm_favorite_status(owner, "101") is True
-        assert store.jm_favorite_status(owner, "999") is True
-        assert store.jm_favorite_status(owner, "102") is None
-    asyncio.run(scenario())
-
-
-def test_failed_sync_keeps_pulled_rows_without_completing_snapshot(favorite_client, monkeypatch):
-    monkeypatch.delenv("JM_DOWNLOAD_ROOTS", raising=False)
+def test_failed_refresh_keeps_pulled_rows_without_completing_snapshot(favorite_client, monkeypatch):
     client, remote, plugin, store = favorite_client
     original = remote.request
     def broken(method, url, **kwargs):
@@ -111,12 +96,12 @@ def test_failed_sync_keeps_pulled_rows_without_completing_snapshot(favorite_clie
         return original(method, url, **kwargs)
     monkeypatch.setattr(client, "request", broken)
     async def scenario():
-        sync = JmSync(store, AggregatorService(store, {"jm": plugin}))
-        owner = sync.identity()
+        favorites = jm_favorites(store, plugin)
+        owner = favorites.owner()
         store.record_jm_favorites(owner, ["999"])
-        sync.current = sync._new_state(False)
-        with pytest.raises(ComicApiError, match="第二页失败"):
-            await sync._collect(sync.settings(), owner)
+        favorites.refresh_catalog()
+        await favorites.catalog_task
+        assert "第二页失败" in favorites.catalog_state["error"]
         assert store.jm_favorite_status(owner, "101") is True
         assert store.jm_favorite_status(owner, "999") is True
         assert store.jm_favorite_status(owner, "121") is None
@@ -126,11 +111,12 @@ def test_failed_sync_keeps_pulled_rows_without_completing_snapshot(favorite_clie
 def test_browsing_every_page_records_items_in_listing_order(favorite_client):
     client, remote, _, store = favorite_client
     owner = store.account_owner("test-account")
+    store.ensure_sync_tables("library_jm")
     client.favorites(page=1, order="mp")
-    data = store.favorite_catalog("jm", owner, "/root")
+    data = store.favorite_catalog("jm", owner, "/root", "library_jm_local_status")
     assert not data["complete"] and len(data["rows"]) == 20
     client.favorites(page=2, order="mp")
-    data = store.favorite_catalog("jm", owner, "/root")
+    data = store.favorite_catalog("jm", owner, "/root", "library_jm_local_status")
     assert data["complete"] and data["sort"] == "mp"
     assert [row["comic_id"] for row in data["rows"]] == [str(value) for value in range(101, 122)]
     assert json.loads(data["rows"][0]["item"])["title"] == "漫画 101"

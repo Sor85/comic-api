@@ -30,7 +30,7 @@
   <script src="/static/site-settings.js?v=29" defer></script>
   <script src="/static/app.js?v=29" defer></script>
   <script src="/static/cron-editor.js?v=29" defer></script>
-  <script src="/static/favorite-sync.js?v=29" defer></script>
+  <script src="/static/library-sync.js?v=29" defer></script>
   <script src="/static/jm-sync.js?v=29" defer></script>
   <script src="/static/bika-favorites.js?v=29" defer></script>
 </head>
@@ -140,11 +140,10 @@
       <div class="page-head">
         <div class="page-title"><h1>JM 收藏</h1><span id="jm-favorites-count" class="count"></span><span class="scope-picker"><select id="jm-favorites-folder" aria-label="收藏夹"><option value="0">全部收藏</option></select></span></div>
         <div class="page-actions">
-          <button id="jm-sync-open" class="sync-trigger" data-state="idle" type="button" aria-haspopup="dialog" aria-controls="fav-sync-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg><span id="jm-sync-open-label">本地同步</span></button>
           <button id="jm-favorites-refresh" class="icon-btn" type="button" title="刷新收藏" aria-label="刷新收藏"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
         </div>
       </div>
-      <p class="page-lead">漫画详情中的「加入 JM 收藏」写入已绑定账号，不指定收藏夹。收藏浏览、本地同步和本地书库操作不修改远端收藏；本地同步保存解码后的图片，不删除已有文件。</p>
+      <p class="page-lead">漫画详情中的「加入 JM 收藏」写入已绑定账号，不指定收藏夹。收藏浏览和本地书库操作不修改远端收藏。「同步本书」「同步所选」把漫画加入书库（「JM 收藏」分类）并由书库本地同步下载图片，不删除已有文件。</p>
       <form id="jm-favorites-filter" class="fav-toolbar">
         <div class="input-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="jm-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选"></div>
         <select id="jm-favorites-sort" hidden data-menu aria-label="收藏排序"><option value="mr">收藏时间</option><option value="mp">更新时间</option></select>
@@ -164,11 +163,10 @@
       <div class="page-head">
         <div class="page-title"><h1>哔咔收藏</h1><span id="bika-favorites-count" class="count"></span></div>
         <div class="page-actions">
-          <button id="bika-sync-open" class="sync-trigger" data-state="idle" type="button" aria-haspopup="dialog" aria-controls="fav-sync-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg><span id="bika-sync-open-label">本地同步</span></button>
           <button id="bika-favorites-refresh" class="icon-btn" type="button" title="刷新收藏" aria-label="刷新收藏"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
         </div>
       </div>
-      <p class="page-lead">已绑定账号的全部云端收藏，与「我的书库」独立。漫画详情中的「加入哔咔收藏」写入账号收藏，再次点击「已收藏」取消收藏，哔咔不提供收藏分组。收藏浏览、本地同步和本地书库操作不修改远端收藏；本地同步保存解码后的图片，不删除已有文件。</p>
+      <p class="page-lead">已绑定账号的全部云端收藏，与「我的书库」独立。漫画详情中的「加入哔咔收藏」写入账号收藏，再次点击「已收藏」取消收藏，哔咔不提供收藏分组。收藏浏览和本地书库操作不修改远端收藏。「同步本书」「同步所选」把漫画加入书库（「哔咔收藏」分类）并由书库本地同步下载图片，不删除已有文件。</p>
       <form id="bika-favorites-filter" class="fav-toolbar bika-favorites-toolbar">
         <div class="input-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input id="bika-favorites-keyword" type="search" maxlength="200" placeholder="本页标题或作者筛选" aria-label="本页标题或作者筛选"></div>
         <select id="bika-favorites-sort" hidden data-menu aria-label="收藏排序"><option value="dd">最新上架</option><option value="da">最旧上架</option><option value="ld">最多喜欢</option><option value="vd">最多观看</option></select>
@@ -278,7 +276,7 @@
       <span class="sync-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2m-.5-4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg></span>
       <div class="modal-title">
         <div class="sync-title-row">
-          <h2 id="fav-sync-panel-title">JM 本地同步</h2>
+          <h2 id="fav-sync-panel-title">书库本地同步</h2>
           <span class="tip" role="button" tabindex="0" data-tip="tip-fav-local-check" aria-label="本地检查说明" aria-describedby="tip-fav-local-check"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>
           <span id="fav-sync-chip" class="sync-chip" hidden><i aria-hidden="true"></i><span></span></span>
         </div>
@@ -294,26 +292,30 @@
         </dl>
         <button id="fav-sync-settings-open" class="small" type="button" aria-haspopup="dialog" aria-controls="fav-sync-settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></svg><span>同步设置</span></button>
       </div>
+      <div id="legacy-migration-note" class="callout migration-note" role="note" hidden>
+        <span id="legacy-migration-summary"></span>
+        <button id="legacy-migration-open" class="small" type="button" aria-haspopup="dialog" aria-controls="legacy-migration-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M10 13h6m-2-2 2 2-2 2"/></svg><span>迁移旧同步目录</span></button>
+      </div>
       <section class="sync-section" aria-labelledby="fav-sync-latest-title">
         <h3 id="fav-sync-latest-title">最近任务</h3>
         <div id="fav-sync-status" class="fav-sync-status" role="status"></div>
       </section>
       <details id="fav-sync-history" class="jm-history" hidden><summary><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg><span>更早的同步记录</span><span id="fav-sync-history-count" class="history-count"></span><svg class="history-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></summary><div id="fav-sync-history-list"></div></details>
-      <div class="tip-sources" hidden><p id="tip-fav-local-check">本地检查按同步范围核对已有漫画的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。检查结果按漫画保存，收藏页和漫画详情显示本地状态；标记为异常的漫画可通过「修复异常漫画」处理：标题相同、仅「第N話」序号不同的章节目录唯一时改名对上，保留有效图片、补齐缺失页，损坏或多余的图片移入保存目录下的 .comic-api-repair 备份目录。</p></div>
+      <div class="tip-sources" hidden><p id="tip-fav-local-check">本地检查按同步范围核对书库漫画在保存目录中的章节、页数和图片完整性，不下载图片。完整匹配的漫画登记为已下载，后续同步校验后跳过；未匹配、缺页、损坏或重名歧义不会登记。检查结果按漫画保存，书库、收藏页和漫画详情显示本地状态；标记为异常的漫画可通过「修复异常漫画」处理：标题相同、仅「第N話」序号不同的章节目录唯一时改名对上，保留有效图片、补齐缺失页，损坏或多余的图片移入保存目录下的 .comic-api-repair 备份目录。</p></div>
     </div>
     <div class="modal-foot sync-foot">
       <p class="sync-foot-note">不改远端收藏，不删本地文件</p>
       <div class="sync-foot-actions">
         <button id="fav-sync-repair" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5"/></svg><span>修复异常漫画</span></button>
         <button id="fav-sync-check-local" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="m8 12 3 3 5-6"/></svg><span>检查本地漫画</span></button>
-        <button id="fav-sync-run" class="primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>同步收藏</span></button>
+        <button id="fav-sync-run" class="primary" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>同步书库</span></button>
         <button id="fav-sync-cancel" class="danger-soft" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>停止本次任务</span></button>
       </div>
     </div>
   </dialog>
   <dialog id="fav-sync-settings" class="modal modal-wide fav-sync-dialog" aria-labelledby="fav-sync-settings-title">
     <div class="modal-head">
-      <div class="modal-title"><h2 id="fav-sync-settings-title">JM 收藏同步设置</h2><p>更换或解除账号绑定后，定时同步自动关闭。</p></div>
+      <div class="modal-title"><h2 id="fav-sync-settings-title">书库本地同步设置</h2><p>书库中全部图源的漫画按同一目录规则保存，每个图源一个子目录。</p></div>
       <button class="icon-btn ghost" type="button" data-close="fav-sync-settings" title="关闭同步设置" aria-label="关闭同步设置"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <form id="fav-sync-form" class="modal-form settings-form">
@@ -339,7 +341,7 @@
         <section id="fav-sync-plan-section" class="form-section">
           <h3>计划</h3>
           <div class="group">
-            <label class="group-row jm-check"><span class="row-text"><strong>定时同步</strong><span id="fav-sync-plan-note">按下方计划自动同步收藏图片</span></span><input type="checkbox" name="enabled"></label>
+            <label class="group-row jm-check"><span class="row-text"><strong>定时同步</strong><span id="fav-sync-plan-note">按下方计划自动同步书库图片</span></span><input type="checkbox" name="enabled"></label>
             <div class="group-row cron-row"><span class="row-text"><strong>同步计划</strong><span id="fav-cron-summary"></span></span><input type="hidden" name="cron"><button id="fav-cron-open" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="fav-cron-pop"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg><span>编辑计划</span></button></div>
           </div>
         </section>
@@ -358,26 +360,26 @@
           <label>服务器下载目录
             <span class="input-action"><input name="download_dir" maxlength="2048" required><button id="fav-directory-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>选择服务器目录</span></button></span>
           </label>
-          <p class="field-hint">目录在服务器上，不是本机。可选根目录由 <span id="fav-sync-roots-env">JM_DOWNLOAD_ROOTS</span> 决定；Docker 需挂载持久化卷。</p>
-          <label>目录层级<select name="directory_rule"><option value="Bd_Aauthoroname_Pindextitle">【作者】原标题 / 第N話 章节标题</option><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option></select></label>
+          <p class="field-hint">目录在服务器上，不是本机。可选根目录由 <span id="fav-sync-roots-env">LIBRARY_DOWNLOAD_ROOTS</span> 决定；Docker 需挂载持久化卷。</p>
+          <label>目录层级<select name="directory_rule"><option value="id">漫画 ID / 章节 ID</option><option value="title">漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option><option value="title_plain">漫画标题 / 第N話 章节标题</option><option value="author">作者 / 漫画标题 [ID] / 章节序号 - 章节标题 [ID]</option></select></label>
           <p id="fav-directory-preview" class="jm-path path-preview"></p>
           <details class="hint-details">
             <summary>目录规则说明</summary>
             <ul class="rule-points">
-              <li data-source="jm"><strong>【作者】原标题</strong>：对应 JMComic-kit 的 Bd_Aauthoroname_Pindextitle，章节为「第N話 完整标题」，不附加 ID、不合并作者。</li>
-              <li><strong>超长目录名</strong>：超过 255 字节时截短，规则与 JMComic 一致，本地检查按同样规则识别。</li>
+              <li><strong>图源子目录</strong>：每个图源保存在「保存目录/图源ID」下，例如 jm、bika、nhentai、copy。</li>
+              <li><strong>超长目录名</strong>：超过字节上限时截短，本地检查按同样规则识别。</li>
               <li><strong>无 ID 规则</strong>：输出「漫画标题/第1話 章节标题/图片」，不附加 ID；目录已关联其他漫画时报冲突。</li>
               <li><strong>已有目录</strong>：「检查本地漫画」可识别，无需补 ID；层级只影响新下载，不改名已检查的漫画。</li>
             </ul>
           </details>
-          <p class="field-hint">已完成图片会校验并跳过，失败图片下次重试。改目录或层级不会移动旧文件；改格式或质量可能替换同路径图片。同步只写下载目录，不加入书库。</p>
+          <p class="field-hint">已完成图片会校验并跳过，失败图片下次重试。改目录或层级不会移动旧文件；改格式或质量可能替换同路径图片。</p>
         </section>
-        <section id="fav-sync-scope-section" class="form-section" data-source="jm">
+        <section id="fav-sync-scope-section" class="form-section">
           <h3>同步范围</h3>
           <div class="group">
             <div class="group-row stacked">
-              <span class="row-text"><strong>收藏夹</strong><span>不勾选任何收藏夹时同步全部收藏；单本与所选同步不受此限制。</span></span>
-              <div id="fav-sync-folders"></div>
+              <span class="row-text"><strong>书库分类</strong><span>不勾选任何分类时同步整个书库；同步本书与同步所选不受此限制。</span></span>
+              <div id="fav-sync-categories"></div>
             </div>
           </div>
         </section>
@@ -420,6 +422,23 @@
       <div id="fav-directory-list" class="dir-list"></div>
     </div>
     <div class="modal-foot"><button id="fav-directory-parent" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg><span>上一级</span></button><button id="fav-directory-select" type="button" class="primary">使用此目录</button></div>
+  </dialog>
+  <dialog id="legacy-migration-dialog" class="modal modal-wide fav-sync-dialog" aria-labelledby="legacy-migration-title">
+    <div class="modal-head">
+      <div class="modal-title"><h2 id="legacy-migration-title">迁移旧同步目录</h2><p>JM、哔咔收藏同步已并入书库同步，旧目录中已完整下载的漫画按书库目录规则移入书库保存目录。</p></div>
+      <button class="icon-btn ghost" type="button" data-close="legacy-migration-dialog" title="关闭迁移旧同步目录" aria-label="关闭迁移旧同步目录"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="modal-body" data-scroll-area>
+      <p id="legacy-migration-state" class="status" role="status"></p>
+      <ul class="rule-points migration-points">
+        <li>只迁移旧同步登记为「已下载」的漫画，包括「【作者】原标题 / 第N話 章节标题」格式的目录；图片改按书库当前目录规则命名，登记为本地已下载，不在书库中的漫画加入「JM 收藏」「哔咔收藏」分类。</li>
+        <li>不覆盖已有文件；单本迁移失败时该本已移动的图片放回原处。书库已有完整副本的漫画保留旧文件，不重复迁移。</li>
+        <li>未完整下载或从未登记的目录不迁移，列在下方「旧目录剩余内容」中，可手动整理。</li>
+      </ul>
+      <div id="legacy-migration-list" class="migration-list"></div>
+      <details id="legacy-migration-leftovers" class="hint-details" hidden><summary>旧目录剩余内容</summary><div id="legacy-migration-leftover-list"></div></details>
+    </div>
+    <div class="modal-foot"><button id="legacy-migration-preview" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>生成预览</span></button><button id="legacy-migration-run" class="primary" type="button" hidden>开始迁移</button></div>
   </dialog>
   <button id="to-top" class="icon-btn" type="button" title="回到顶部" aria-label="回到顶部"><svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>
 

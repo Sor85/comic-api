@@ -1,4 +1,4 @@
-"""Local image output for favorites sync. Paths are confined to administrator-owned roots."""
+"""Local image output for library sync. Paths are confined to administrator-owned roots."""
 import hashlib
 import io
 import os
@@ -12,11 +12,9 @@ from PIL import Image
 
 from src.errors import ComicApiError, DownloadCancelled
 from src.services.image_proxy import ensure_public_url
-from src.services.jm_naming import JM_DIRECTORY_RULE, MAX_NAME_BYTES, album_name, chapter_directory, validate_name
 
 
 DIRECTORY_RULES = {
-    JM_DIRECTORY_RULE: "【作者】原标题 / 第N話 章节标题",
     "id": "漫画 ID / 章节 ID",
     "title": "漫画标题 [ID] / 章节序号 - 章节标题 [ID]",
     "title_plain": "漫画标题 / 第N話 章节标题",
@@ -24,6 +22,8 @@ DIRECTORY_RULES = {
 }
 FORMATS = {"original": "保留图片格式", "jpeg": "JPEG", "png": "PNG", "webp": "WebP"}
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
+# Common Linux filesystems (ext4, ZFS, btrfs) cap a single name at 255 bytes.
+MAX_NAME_BYTES = 255
 
 
 def safe_name(value, fallback="未命名", max_bytes=100):
@@ -45,20 +45,11 @@ def plain_chapter_name(chapter, index):
     return safe_name(f"第{index}話 {title}", max_bytes=MAX_NAME_BYTES)
 
 
-def numeric_id(value, source="jm"):
-    value = str(value)
-    if not re.fullmatch(r"[0-9]{1,20}", value):
-        raise ComicApiError("禁漫返回了无效编号" if source == "jm" else "图源返回了无效编号", 502, "invalid_response", source)
-    return value
-
-
 class DownloadPaths:
-    """Download roots come from an administrator-controlled environment variable per source."""
+    """Download roots come from an administrator-controlled environment variable."""
 
-    def __init__(self, store, source="jm", env="JM_DOWNLOAD_ROOTS", default="jm-favorites", comic_id=None, chapter_id=None):
-        self.source, self.env = source, env
-        self.comic_id = comic_id or (lambda value: numeric_id(value, source))
-        self.chapter_id = chapter_id or (lambda value: numeric_id(value, source))
+    def __init__(self, store, env, default, comic_id=str, chapter_id=str):
+        self.env, self.comic_id, self.chapter_id = env, comic_id, chapter_id
         configured = os.environ.get(env, "")
         self.roots = [Path(p.strip()).expanduser().resolve() for p in configured.split(os.pathsep) if p.strip()]
         if not self.roots:
@@ -115,8 +106,6 @@ class DownloadPaths:
         rule = settings["directory_rule"]
         if rule == "id":
             album = album_id
-        elif rule == JM_DIRECTORY_RULE:
-            album = validate_name(album_name(book))
         elif rule == "title_plain":
             album = safe_name(book["title"], max_bytes=MAX_NAME_BYTES)
         else:
@@ -131,8 +120,6 @@ class DownloadPaths:
         rule = settings["directory_rule"]
         if rule == "id":
             episode = chapter_id
-        elif rule == JM_DIRECTORY_RULE:
-            episode = validate_name(chapter_directory(album, chapter))
         elif rule == "title_plain":
             episode = plain_chapter_name(chapter, index)
         else:
@@ -140,7 +127,7 @@ class DownloadPaths:
         return self.resolve(album / episode)
 
 
-def encode_image(data, image_format, quality, source="jm"):
+def encode_image(data, image_format, quality, source=""):
     """Preserve animated originals; explicit conversion deliberately uses the first frame."""
     try:
         with Image.open(io.BytesIO(data)) as image:
@@ -166,7 +153,7 @@ def encode_image(data, image_format, quality, source="jm"):
         raise ComicApiError("图片无法解码或转换", 502, "invalid_image", source) from exc
 
 
-def receive_image(plugin, url, chapter_id, settings, signal, source="jm"):
+def receive_image(plugin, url, chapter_id, settings, signal, source=""):
     """One sync worker + libcurl receive limit bounds aggregate sync traffic, not reader traffic."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:

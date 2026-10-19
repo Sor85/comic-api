@@ -1,4 +1,4 @@
-"""Read-only discovery of existing favorite images; imported files never become owned output."""
+"""Read-only discovery of existing library images; imported files never become owned output."""
 import re
 import unicodedata
 import warnings
@@ -9,8 +9,7 @@ from urllib.parse import unquote, urlparse
 from PIL import Image
 
 from src.errors import ComicApiError, DownloadCancelled
-from src.services.jm_naming import JM_DIRECTORY_RULE, album_name, chapter_name, cut_of, fits
-from src.services.local_images import MAX_IMAGE_BYTES, file_digest, numeric_id, plain_chapter_name, safe_name
+from src.services.local_images import MAX_IMAGE_BYTES, file_digest, plain_chapter_name, safe_name
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"}
 COVER_STEMS = {"cover", "folder", "thumb", "poster"}
@@ -23,7 +22,7 @@ def name_keys(value):
             for name in (str(value or ""), safe_name(value), safe_name(value, max_bytes=None))}
 
 
-def directory_id(name, pattern=r"[0-9]{1,20}"):
+def directory_id(name, pattern):
     match = re.fullmatch(f"({pattern})", name, re.IGNORECASE) or re.search(f" \\[({pattern})\\]$", name, re.IGNORECASE)
     return match[1].lower() if match else None
 
@@ -40,29 +39,24 @@ def local_file_valid(paths, root, row, url, signal):
 
 
 class LocalLibrary:
-    def __init__(self, store, paths, config, favorites, signal, owner=None):
+    def __init__(self, store, paths, config, books, signal, owner):
         self.store, self.paths, self.signal = store, paths, signal
-        self.source = getattr(owner, "source", "jm")
-        self.files_table = getattr(owner, "files_table", "jm_sync_files")
-        self.local_table = getattr(owner, "local_table", "jm_sync_local_files")
-        self.id_pattern = getattr(owner, "id_pattern", r"[0-9]{1,20}")
-        self.comic_id = getattr(owner, "comic_id", numeric_id)
+        self.source, self.files_table, self.local_table = owner.source, owner.files_table, owner.local_table
+        self.id_pattern, self.chapter_pattern = owner.id_pattern, owner.chapter_pattern
+        self.comic_id, self.chapter_id = owner.comic_id, owner.chapter_id
         self.root = paths.resolve(config["download_dir"])
         self.plain_names = config["directory_rule"] == "title_plain"
-        self.jm_names = config["directory_rule"] == JM_DIRECTORY_RULE
         if not self.root.is_dir():
             raise ComicApiError("本地检查目录不存在或不是目录", 422, "directory_unavailable", self.source)
         self.directories, self.inspected = {}, {}
-        self.books = {}
         self.titles = defaultdict(set)
-        for book in favorites:
-            self.add_book(book)
+        for book in books:
+            self.add_title(book)
 
-    def add_book(self, book):
-        album_id = str(book["id"])
-        self.books[album_id] = book
-        for key in {album_name(book)} if self.jm_names else name_keys(book.get("title")):
-            self.titles[key].add(album_id)
+    def add_title(self, book):
+        """Same-title books cannot be told apart by directory name alone; record every title in scope."""
+        for key in name_keys(book.get("title")):
+            self.titles[key].add(str(book["id"]))
 
     def check(self):
         if self.signal.is_set():
@@ -87,50 +81,35 @@ class LocalLibrary:
     def album(self, book):
         album_id = self.comic_id(book["id"])
         candidates = list(self.children(self.root))
-        if self.jm_names:
-            expected = album_name(book)
-            named = [path for path in candidates if path.name == expected]
-            if named and self.titles[expected] - {album_id}:
-                raise ComicApiError("多个收藏生成相同 Aauthoroname 目录，未自动匹配", 409, "local_ambiguous", self.source)
-            return self.unique(named, "Aauthoroname")
         author_keys = name_keys(book.get("author") or "未知作者")
         for directory in list(candidates):
             if name_keys(directory.name) & author_keys:
                 candidates.extend(self.children(directory))
-        identified = [p for p in candidates if directory_id(p.name, self.id_pattern) == album_id]
+        identified = [p for p in candidates if directory_id(p.name, self.id_pattern) == album_id.lower()]
         keys = name_keys(book["title"])
         named = [p for p in candidates if (self.plain_names or directory_id(p.name, self.id_pattern) is None) and name_keys(p.name) & keys]
         if identified and not (self.plain_names and named):
             return self.unique(identified, "漫画 ID")
         if named and any(self.titles[key] - {album_id} for key in keys):
-            raise ComicApiError("收藏中存在同名漫画，本地目录缺少 ID，未自动匹配", 409, "local_ambiguous", self.source)
+            raise ComicApiError("书库中存在同名漫画，本地目录缺少 ID，未自动匹配", 409, "local_ambiguous", self.source)
         return self.unique(named, "漫画标题")
 
     def chapter(self, album, chapter, index):
         found = self.find_chapter(album, chapter, index)
         if found:
             return found
-        if self.jm_names:
-            raise ComicApiError(f"缺少 Pindextitle 章节目录：{chapter_name(chapter)}", 409, "local_incomplete", self.source)
-        chapter_id = numeric_id(chapter["id"], self.source)
+        chapter_id = self.chapter_id(chapter["id"])
         raise ComicApiError(f"缺少可匹配的章节目录：{chapter.get('name') or chapter_id}", 409, "local_incomplete", self.source)
 
     def find_chapter(self, album, chapter, index):
         """The matched chapter directory, or None when no candidate exists; ambiguity still raises."""
         candidates = self.children(album)
-        if self.jm_names:
-            expected = chapter_name(chapter)
-            named = [path for path in candidates if path.name == expected]
-            if not named and not fits(expected):
-                # An over-long name exists only cut down: by JMComic under any save root, or by this project.
-                named = [path for path in candidates if cut_of(path.name, expected)]
-            return self.unique(named, "Pindextitle")
-        chapter_id = numeric_id(chapter["id"], self.source)
-        identified = [p for p in candidates if directory_id(p.name) == chapter_id]
+        chapter_id = self.chapter_id(chapter["id"])
+        identified = [p for p in candidates if directory_id(p.name, self.chapter_pattern) == chapter_id.lower()]
         keys = name_keys(chapter.get("name")) | name_keys(plain_chapter_name(chapter, index))
         named = []
         for directory in candidates:
-            if not self.plain_names and directory_id(directory.name) is not None:
+            if not self.plain_names and directory_id(directory.name, self.chapter_pattern) is not None:
                 continue
             if name_keys(directory.name) & keys:
                 named.append(directory)

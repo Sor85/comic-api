@@ -20,11 +20,12 @@ from src.auth import AuthManager, AuthUpdate, BasicAuthMiddleware
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services import cron
-from src.services.bika_sync import BikaSync
 from src.services.downloads import DownloadManager, pdf_password_for
 from src.services.favorites_library_sync import FavoritesLibrarySettings, FavoritesLibrarySync
-from src.services.jm_sync import JmSync
-from src.services.library_image_sync import LibraryImageSettings, LibraryImageSync
+from src.services.favorites import BikaFavorites, JmFavorites
+from src.services.image_sync import ImageSyncSettings
+from src.services.legacy_migration import LegacyMigration
+from src.services.library_image_sync import LibraryImageSync
 from src.services.search_dedup import search_result_payload
 from src.storage import Store
 
@@ -112,8 +113,13 @@ class ReadingImport(BaseModel):
     chapters: list[ReadingImportChapter] = Field(default_factory=list, max_length=20000)
 
 
-class SyncInput(BaseModel):
-    album_ids: list[str] | None = Field(default=None, min_length=1, max_length=200)
+class LibraryItem(BaseModel):
+    source: str = Field(min_length=1, max_length=64)
+    id: str = Field(min_length=1, max_length=200)
+
+
+class LibraryRunInput(BaseModel):
+    items: list[LibraryItem] | None = Field(default=None, min_length=1, max_length=200)
 
 
 def create_app(store=None, sources=None):
@@ -121,17 +127,15 @@ def create_app(store=None, sources=None):
     auth = AuthManager(store)
     service = AggregatorService(store, sources)
     downloads = DownloadManager(store, service)
-    jm_sync = JmSync(store, service)
-    bika_sync = BikaSync(store, service)
-    image_syncs = {"jm": jm_sync, "bika": bika_sync}
+    favorites = {}
+    library_images = LibraryImageSync(store, service, favorites)
+    favorites.update(jm=JmFavorites(store, service, library_images), bika=BikaFavorites(store, service, library_images))
     library_sync = FavoritesLibrarySync(store, service)
-    library_images = LibraryImageSync(store, service, image_syncs)
+    migration = LegacyMigration(store, service, library_images)
 
     @asynccontextmanager
     async def lifespan(app):
         await downloads.start()
-        for sync in image_syncs.values():
-            await sync.start()
         await library_sync.start()
         await library_images.start()
         try:
@@ -139,16 +143,16 @@ def create_app(store=None, sources=None):
         finally:
             await library_images.stop()
             await library_sync.stop()
-            for sync in image_syncs.values():
-                await sync.stop()
+            for favorite in favorites.values():
+                await favorite.stop()
             await downloads.stop()
 
     app = FastAPI(title="Comic · 图源与书库", version="2.0.0", lifespan=lifespan)
     app.add_middleware(BasicAuthMiddleware, auth=auth)
     app.state.auth = auth
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
-    app.state.jm_sync, app.state.bika_sync, app.state.library_sync = jm_sync, bika_sync, library_sync
-    app.state.library_images = library_images
+    app.state.favorites, app.state.library_sync = favorites, library_sync
+    app.state.library_images, app.state.migration = library_images, migration
     app.mount("/static", VersionedStaticFiles(directory=WEB_STATIC), name="static")
 
     @app.exception_handler(ComicApiError)
@@ -190,8 +194,6 @@ def create_app(store=None, sources=None):
         service.set_enabled(source, values.enabled)
         if not values.enabled:
             downloads.cancel_source(source)
-        if source in image_syncs:
-            image_syncs[source].source_changed()
         library_sync.source_changed(source)
         library_images.source_changed(source)
         return {"success": True, "source": service.manifest(source)}
@@ -204,17 +206,15 @@ def create_app(store=None, sources=None):
             raise ComicApiError("该图源不提供登录", 400, "unsupported", source)
         if any(not values.get(field["name"], "").strip() for field in plugin.login_fields):
             raise ComicApiError("请填写全部登录字段", 422, "invalid_request", source)
-        sync = image_syncs.get(source)
-        if sync:
-            sync.guard_account_change()
+        favorite = favorites.get(source)
+        if favorite:
+            favorite.guard_account_change()
         try:
             async with library_sync.account_change(source):
                 await service.call(source, "login", values)
-                if sync:
-                    sync.account_changed()
         finally:
-            if sync:
-                sync.account_changing = False
+            if favorite:
+                favorite.account_changing = False
         return {"success": True, "account": plugin.account_status()}
 
     @app.put("/api/sources/{source}/settings")
@@ -230,17 +230,15 @@ def create_app(store=None, sources=None):
     async def logout(source: str):
         if "login" not in service.source(source, allow_disabled=True).capabilities:
             raise ComicApiError("该图源不提供登录", 400, "unsupported", source)
-        sync = image_syncs.get(source)
-        if sync:
-            sync.guard_account_change()
+        favorite = favorites.get(source)
+        if favorite:
+            favorite.guard_account_change()
         try:
             async with library_sync.account_change(source):
                 await service.call(source, "logout")
-                if sync:
-                    sync.account_changed()
         finally:
-            if sync:
-                sync.account_changing = False
+            if favorite:
+                favorite.account_changing = False
         return {"success": True}
 
     @app.get("/api/sources/{source}/library-sync")
@@ -259,14 +257,14 @@ def create_app(store=None, sources=None):
     async def jm_favorites(page: int = Query(1, ge=1, le=1000),
                            folder_id: str = Query("0", pattern=r"^[0-9]{1,20}$"),
                            order: str = Query("mr", pattern=r"^(mr|mp)$")):
-        jm_sync.require_account()
+        favorites["jm"].require_account()
         return await service.call("jm", "favorites", page=page, folder_id=folder_id, order=order)
 
     @app.get("/api/jm/favorites/{comic_id}")
     async def jm_favorite_status(comic_id: str):
         if not re.fullmatch(r"[0-9]{1,20}", comic_id) or int(comic_id) < 1:
             raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
-        jm_sync.require_account()
+        favorites["jm"].require_account()
         owner = store.account_owner((store.account("jm") or {}).get("account"))
         if not owner:
             raise ComicApiError("禁漫收藏需要绑定账号", 401, "login_required", "jm")
@@ -278,7 +276,7 @@ def create_app(store=None, sources=None):
     async def add_jm_favorite(comic_id: str):
         if not re.fullmatch(r"[0-9]{1,20}", comic_id) or int(comic_id) < 1:
             raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
-        plugin = jm_sync.require_account()
+        plugin = favorites["jm"].require_account()
         if "add_favorite" not in plugin.capabilities:
             raise ComicApiError("当前禁漫插件不支持加入收藏", 400, "unsupported", "jm")
         return await service.call("jm", "add_favorite", comic_id)
@@ -287,7 +285,7 @@ def create_app(store=None, sources=None):
     async def remove_jm_favorite(comic_id: str):
         if not re.fullmatch(r"[0-9]{1,20}", comic_id) or int(comic_id) < 1:
             raise ComicApiError("漫画编号无效", 422, "invalid_request", "jm")
-        plugin = jm_sync.require_account()
+        plugin = favorites["jm"].require_account()
         if "remove_favorite" not in plugin.capabilities:
             raise ComicApiError("当前禁漫插件不支持取消收藏", 400, "unsupported", "jm")
         return await service.call("jm", "remove_favorite", comic_id)
@@ -326,79 +324,40 @@ def create_app(store=None, sources=None):
         except cron.CronError as exc:
             raise ComicApiError(str(exc), 422, "invalid_cron") from None
 
-    def sync_routes(sync):
-        prefix = f"/api/{sync.source}/sync"
+    def favorite_routes(favorite):
+        source = favorite.source
 
-        @app.get(f"{prefix}/settings", name=f"{sync.source}_sync_settings")
-        async def sync_settings():
-            return sync.options()
-
-        @app.put(f"{prefix}/settings", name=f"save_{sync.source}_sync_settings")
-        async def save_sync_settings(values: sync.settings_model):
-            return sync.save_settings(values)
-
-        @app.get(f"{prefix}/directories", name=f"{sync.source}_sync_directories")
-        async def sync_directories(path: str = Query("", max_length=2048)):
-            return await asyncio.to_thread(sync.paths.browse, path)
-
-        @app.get(prefix, name=f"{sync.source}_sync_status")
-        async def sync_status():
-            return sync.status()
-
-        @app.post(f"{prefix}/run", status_code=202, name=f"run_{sync.source}_sync")
-        async def run_sync(values: SyncInput):
-            album_ids = [sync.normalize_id(value) for value in values.album_ids] if values.album_ids else None
-            return sync.launch(album_ids)
-
-        @app.post(f"{prefix}/check-local", status_code=202, name=f"check_{sync.source}_local")
-        async def check_local():
-            return sync.launch(check_local=True)
-
-        @app.post(f"{prefix}/repair", status_code=202, name=f"repair_{sync.source}_local")
-        async def repair_local(values: SyncInput):
-            album_ids = [sync.normalize_id(value) for value in values.album_ids] if values.album_ids else None
-            return sync.launch(album_ids, repair=True)
-
-        @app.get(f"{prefix}/local-status", name=f"{sync.source}_local_status")
-        async def local_status(ids: str = Query("", max_length=8000)):
-            album_ids = list(dict.fromkeys(sync.normalize_id(value) for value in ids.split(",") if value))
-            if len(album_ids) > 200:
-                raise ComicApiError("单次最多查询 200 本漫画", 422, "invalid_request", sync.source)
-            data = await asyncio.to_thread(sync.local_status, album_ids)
-            return JSONResponse(data, headers={"Cache-Control": "no-store"})
-
-        @app.get(f"{prefix}/favorite-ids", name=f"{sync.source}_favorited_ids")
+        @app.get(f"/api/{source}/favorite-ids", name=f"{source}_favorited_ids")
         async def favorited_ids(ids: str = Query("", max_length=8000)):
             # Reads only the locally recorded favorites, so search results can be marked without upstream calls.
             album_ids = list(dict.fromkeys(value for value in ids.split(",") if value))
             if len(album_ids) > 200:
-                raise ComicApiError("单次最多查询 200 本漫画", 422, "invalid_request", sync.source)
-            data = await asyncio.to_thread(sync.store.favorited_ids, sync.source, sync.owner(), album_ids)
+                raise ComicApiError("单次最多查询 200 本漫画", 422, "invalid_request", source)
+            data = await asyncio.to_thread(store.favorited_ids, source, favorite.owner(), album_ids)
             return JSONResponse({"ids": data}, headers={"Cache-Control": "no-store"})
 
-        @app.get(f"{prefix}/catalog", name=f"{sync.source}_favorite_catalog")
+        @app.get(f"/api/{source}/favorites-catalog", name=f"{source}_favorite_catalog")
         async def favorite_catalog(local: str = Query("", pattern=r"^(|downloaded|missing)$"),
                                    page: int = Query(1, ge=1, le=10000)):
-            data = await asyncio.to_thread(sync.catalog, local, page)
+            data = await asyncio.to_thread(favorite.catalog, local, page)
             return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
-        @app.post(f"{prefix}/catalog/refresh", status_code=202, name=f"refresh_{sync.source}_favorite_catalog")
+        @app.post(f"/api/{source}/favorites-catalog/refresh", status_code=202, name=f"refresh_{source}_favorite_catalog")
         async def refresh_favorite_catalog(sort: str = Query("", max_length=8)):
-            return sync.refresh_catalog(sort or None)
+            return favorite.refresh_catalog(sort or None)
 
-        @app.post(f"{prefix}/cancel", name=f"cancel_{sync.source}_sync")
-        async def cancel_sync():
-            return sync.cancel()
+    for favorite in favorites.values():
+        favorite_routes(favorite)
 
-    for sync in image_syncs.values():
-        sync_routes(sync)
+    def run_items(values):
+        return [(item.source, item.id) for item in values.items] if values.items else None
 
     @app.get("/api/library/sync/settings")
     async def library_image_settings():
         return library_images.options()
 
     @app.put("/api/library/sync/settings")
-    async def save_library_image_settings(values: LibraryImageSettings):
+    async def save_library_image_settings(values: ImageSyncSettings):
         return library_images.save_settings(values)
 
     @app.get("/api/library/sync/directories")
@@ -410,12 +369,41 @@ def create_app(store=None, sources=None):
         return JSONResponse(library_images.status(), headers={"Cache-Control": "no-store"})
 
     @app.post("/api/library/sync/run", status_code=202)
-    async def run_library_images():
-        return library_images.launch()
+    async def run_library_images(values: LibraryRunInput | None = None):
+        return library_images.launch(items=run_items(values) if values else None)
+
+    @app.post("/api/library/sync/check-local", status_code=202)
+    async def check_library_images():
+        return library_images.launch(mode="check_local")
+
+    @app.post("/api/library/sync/repair", status_code=202)
+    async def repair_library_images(values: LibraryRunInput | None = None):
+        return library_images.launch(mode="repair", items=run_items(values) if values else None)
+
+    @app.get("/api/library/sync/local-status")
+    async def library_local_status(source: str = Query(min_length=1, max_length=64), ids: str = Query("", max_length=8000)):
+        album_ids = list(dict.fromkeys(value for value in ids.split(",") if value))
+        if len(album_ids) > 200:
+            raise ComicApiError("单次最多查询 200 本漫画", 422, "invalid_request", source)
+        data = await asyncio.to_thread(library_images.local_status, source, album_ids)
+        return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/library/sync/cancel")
     async def cancel_library_images():
         return library_images.cancel()
+
+    # Temporary: moves images of the removed JM/Bika favorites sync into the library; removed in the next version.
+    @app.get("/api/library/migration")
+    async def legacy_migration_status():
+        return JSONResponse(await asyncio.to_thread(migration.status), headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/library/migration/preview", status_code=202)
+    async def preview_legacy_migration():
+        return migration.preview()
+
+    @app.post("/api/library/migration/run", status_code=202)
+    async def run_legacy_migration():
+        return migration.run()
 
     @app.get("/api/sources/{source}/search-categories")
     async def search_categories(source: str):

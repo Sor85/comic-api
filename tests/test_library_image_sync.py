@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import create_app
-from src.services.jm_sync import SyncSettings
 from src.storage import Store
 from tests.fakes import DemoPlugin
 from tests.test_jm_sync import FavoritePlugin
@@ -16,8 +15,7 @@ from tests.test_jm_sync import FavoritePlugin
 @pytest.fixture(autouse=True)
 def isolated_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "default-data"))
-    for name in ("JM_DOWNLOAD_ROOTS", "BIKA_DOWNLOAD_ROOTS", "LIBRARY_DOWNLOAD_ROOTS"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("LIBRARY_DOWNLOAD_ROOTS", raising=False)
     monkeypatch.setattr("src.services.local_images.ensure_public_url", lambda url: None)
 
 
@@ -54,7 +52,6 @@ def test_library_sync_reuses_source_worker_and_skips_verified_album(tmp_path):
         assert first["downloaded"] == 4 and first["skipped"] == 0
         assert library_root(client) == (tmp_path / "library").resolve()
         assert (library_root(client) / "jm" / "101" / "1011" / "00001.png").is_file()
-        assert not any(Path(client.app.state.jm_sync.settings()["download_dir"]).glob("*"))
 
         plugin.requests.clear()
         assert client.post("/api/library/sync/run").status_code == 202
@@ -90,17 +87,20 @@ def test_library_checkpoint_tables_are_created_per_source_on_demand(tmp_path):
             "library_jm_local_status"} <= tables()
 
 
-def test_library_sync_settings_are_independent_from_favorites(tmp_path):
+def test_library_sync_options_list_categories_with_counts(tmp_path):
     store = Store(tmp_path)
     plugin = FavoritePlugin(store)
+    store.save_book("jm", "101", plugin.detail("101"), "精选")
+    store.save_book("jm", "102", plugin.detail("102"))
+    store.import_favorite_book("jm", "102", plugin.detail("102"), "JM 收藏")
+    store.save_book("jm", "103", plugin.detail("103"))
     with TestClient(create_app(store, {"jm": plugin})) as client:
-        response = client.put("/api/library/sync/settings", json={"enabled": True, "cron": "*/15 * * * *"})
-        assert response.status_code == 200
-        assert client.get("/api/library/sync/settings").json()["settings"]["enabled"]
-        assert not client.get("/api/jm/sync/settings").json()["settings"]["enabled"]
-
-    assert store.settings("library_image_sync")["enabled"] is True
-    assert store.settings("jm_sync").get("enabled", False) is False
+        options = client.get("/api/library/sync/settings").json()
+        assert {item["value"]: item["books"] for item in options["categories"]} == {"JM 收藏": 1, "精选": 1, "": 1}
+        assert options["books"] == options["scope_books"] == 3
+        response = client.put("/api/library/sync/settings", json=dict(options["settings"], categories=["JM 收藏", ""]))
+        assert response.status_code == 200 and response.json()["scope_books"] == 2
+        assert client.put("/api/library/sync/settings", json=dict(options["settings"], categories=["x" * 101])).status_code == 422
 
 
 def test_library_sync_reports_failed_worker_run_as_partial(tmp_path):
@@ -188,37 +188,6 @@ def test_completion_records_are_stored_per_album(tmp_path):
     with store.connect() as db:
         names = [row[0] for row in db.execute("SELECT name FROM app_settings WHERE name LIKE 'image_sync_complete%'")]
     assert len(names) == 2 and all(name.startswith("image_sync_complete:jm:") for name in names)
-
-
-def test_books_already_synced_by_jm_favorites_are_skipped(tmp_path):
-    store = Store(tmp_path)
-    plugin = FavoritePlugin(store)
-    store.save_book("jm", "101", plugin.detail("101"))
-    with TestClient(create_app(store, {"jm": plugin})) as client:
-        client.app.state.jm_sync.save_settings(SyncSettings(directory_rule="id", retries=0))
-        assert client.post("/api/jm/sync/run", json={"album_ids": ["101"]}).status_code == 202
-        for _ in range(500):
-            if not client.get("/api/jm/sync").json()["active"]:
-                break
-            time.sleep(.01)
-        # Simulate a favorites sync made before completion records existed: only per-image checkpoints remain.
-        with store.connect() as db:
-            db.execute("DELETE FROM app_settings WHERE name LIKE 'image_sync_complete:jm:%'")
-        use_id_rule(client)
-        plugin.requests.clear()
-        for _ in range(2):
-            assert client.post("/api/library/sync/run").status_code == 202
-            run = wait_for_sync(client)
-            assert run["status"] == "completed", run
-            assert run["downloaded"] == 0 and run["external_albums"] == 1 and run["skipped"] == 4
-        assert not plugin.requests
-        assert not (library_root(client) / "jm").exists()
-
-        # A chapter the favorites copy lacks means it is no longer complete: the library downloads its own copy.
-        plugin.extra_chapter = True
-        assert client.post("/api/library/sync/run").status_code == 202
-        run = wait_for_sync(client)
-        assert run["status"] == "completed" and run["external_albums"] == 0 and run["downloaded"] == 6, run
 
 
 class OtherPlugin(DemoPlugin):

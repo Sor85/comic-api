@@ -15,9 +15,10 @@ Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画、
 - **JM 收藏**：浏览云端收藏夹（分页、排序、本页标题／作者筛选、多选），漫画详情中可加入／取消 JM 收藏；收藏状态登记在本地表，按账号隔离。
 - **哔咔收藏**：浏览账号全部云端收藏，漫画详情中可加入／取消哔咔收藏，同样使用本地状态表。
 - **按下载状态筛选收藏**：JM「全部收藏」与哔咔可按已下载／未下载筛选服务器本地记录的全部收藏，未下载包含本地异常；可通过「更新收藏列表」后台补全记录。JM 自建收藏夹的下载状态筛选仍仅作用于当前页。
-- **收藏图片同步到本地**：JM 与哔咔收藏可按目录规则增量下载到服务器目录，支持定时同步、单本／所选同步、限速、图片格式与质量、失败重试、SHA-256 文件检查点；「检查本地漫画」可登记已有目录，避免重复下载；检查与同步结果按漫画保存，收藏卡片和漫画详情显示「已下载」「本地异常」状态，「修复异常漫画」把标题相同、仅「第N話」序号错位的章节目录改名对上，保留有效图片、补下载缺页，损坏或多余图片移入保存目录下的 `.comic-api-repair` 备份目录。JM 额外支持按收藏夹限定范围。下载根目录分别由 `JM_DOWNLOAD_ROOTS`、`BIKA_DOWNLOAD_ROOTS` 限定。
-- **收藏图片同步计划**：支持 5 字段 Cron，按服务器时区执行；「编辑计划」浮窗提供预设与自定义模式，可预览中文说明及后续执行时间，相邻运行至少间隔 5 分钟。
-- **云收藏自动同步到书库**：JM 与哔咔收藏可定时增补到「我的书库」的独立分类，不下载图片，默认关闭；与图片同步独立，下载图片或「检查本地漫画」不自动加入书库。
+- **书库图片同步到本地**：书库漫画（所有图源）按同一目录规则增量下载到服务器目录 `保存目录/图源ID/…`，支持定时同步、按书库分类限定范围、单本／所选同步、限速、图片格式与质量、失败重试、SHA-256 文件检查点；JM、哔咔收藏页的「同步本书」「同步所选」把不在书库中的收藏先加入「JM 收藏」「哔咔收藏」分类再同步。「检查本地漫画」可登记已有目录，避免重复下载；检查与同步结果按漫画保存，书库、收藏卡片和漫画详情显示「已下载」「本地异常」状态，「修复异常漫画」把标题相同、仅「第N話」序号错位的章节目录改名对上，保留有效图片、补下载缺页，损坏或多余图片移入保存目录下的 `.comic-api-repair` 备份目录。下载根目录由 `LIBRARY_DOWNLOAD_ROOTS` 限定。
+- **迁移旧同步目录（临时）**：原 JM、哔咔收藏同步已并入书库同步。书库同步窗口中的「迁移旧同步目录」先预览，再把旧目录中已完整下载的漫画（含「【作者】原标题 / 第N話」格式）按书库当前目录规则移入书库保存目录，登记为本地已下载并加入书库；不覆盖已有文件，未完整或未登记的目录保留原处。此功能将在下一个版本移除。
+- **图片同步计划**：支持 5 字段 Cron，按服务器时区执行；「编辑计划」浮窗提供预设与自定义模式，可预览中文说明及后续执行时间，相邻运行至少间隔 5 分钟。
+- **云收藏自动同步到书库**：JM 与哔咔收藏可定时增补到「我的书库」的独立分类，不下载图片，默认关闭；入库后由书库图片同步下载图片，「检查本地漫画」不改动书库。
 - **搜索增强**：禁漫、哔咔、拷贝三源标签搜索，哔咔分类筛选，作者搜索，以及可选的跨图源搜索结果去重；作者与可搜索标签支持右键／中键在新标签页打开。搜索与发现结果卡片标识已加入书库、已在 JM／哔咔云收藏的状态，合并卡片检查各原始版本。
 - **最近搜索恢复页码**：最近搜索保留上次浏览的结果页码与筛选条件，再次点击记录可回到对应页；页码恢复默认开启，可在「设置 → 浏览偏好」中关闭。记录与偏好保存在当前浏览器，不跨设备同步。
 - **nhentai 图源**：基于官方 API v2 的搜索、标签搜索、最新、分类、人气榜、随机与阅读；标签搜索内置 JM 主题标签的对应映射，仅收录两边存在且含义对应的项，兼容已登记的繁简名称；可选绑定 API Key 提高限额，PDF 下载使用官方归档接口。
@@ -59,8 +60,6 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_USERNAME=${AUTH_USERNAME:-}
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
-      - JM_DOWNLOAD_ROOTS=${JM_DOWNLOAD_ROOTS:-/app/data/jm-favorites}
-      - BIKA_DOWNLOAD_ROOTS=${BIKA_DOWNLOAD_ROOTS:-/app/data/bika-favorites}
       - LIBRARY_DOWNLOAD_ROOTS=${LIBRARY_DOWNLOAD_ROOTS:-/app/data/library}
       - BIKA_ACCOUNT=${BIKA_ACCOUNT:-}
       - BIKA_PASSWORD=${BIKA_PASSWORD:-}
@@ -95,10 +94,10 @@ docker compose up -d
 - **最近搜索**：搜索条件与上次浏览的结果页码保存在当前浏览器，默认恢复上次页码；「设置 → 浏览偏好 → 最近搜索恢复页码」可关闭页码恢复。在搜索框重新提交同一条件、关闭恢复开关或旧记录缺少页码时，从第 1 页开始。
 - **图片代理**：封面与章节图片经 `/api/image/proxy` 中转并缓存到磁盘，带 SSRF 防护；支持 `HTTP(S)_PROXY`、系统代理与 Fake-IP 透明代理。
 - **书库**：收藏、分类、筛选与手动检查章节更新；JM／哔咔云收藏可定时增补到书库。
-- **书库本地同步**：书库全部漫画（所有图源）可按计划增量下载到服务器目录，目录规则、图片格式、限速与重试和收藏同步一致，按 `保存目录/图源ID/…` 存放；下载根目录由 `LIBRARY_DOWNLOAD_ROOTS` 限定。JM／哔咔收藏同步已完整下载的漫画直接跳过，不再重复下载；已完整同步且文件未变化的漫画只读取一次详情，新增章节只补齐新增内容。
+- **书库本地同步**：书库漫画（所有图源，可按分类限定）按计划增量下载到服务器目录，按 `保存目录/图源ID/…` 存放；下载根目录由 `LIBRARY_DOWNLOAD_ROOTS` 限定。已完整同步且文件未变化的漫画只读取一次详情，新增章节只补齐新增内容；固定格式输出时目标文件已被未登记文件占用会在下载前跳过。
 - **下载任务**：章节打包为加密 PDF，支持排队、进度、取消、重试与一键下载全部章节。
 - **阅读进度**：保存在服务器，多设备共享；支持续读、滚动／翻页模式。打开阅读器后第一次翻页才写入观看记录，只打开不翻页不改动「继续阅读」。
-- **云收藏与图片同步**：JM、哔咔收藏可浏览、加入／取消收藏，并按目录规则增量同步图片到服务器目录；支持 Cron 定时计划与执行时间预览，图片同步和本地检查不自动加入书库。下载根目录由 `JM_DOWNLOAD_ROOTS`、`BIKA_DOWNLOAD_ROOTS` 限定，Docker 中自定义目录需同时挂载卷。
+- **云收藏**：JM、哔咔收藏可浏览、加入／取消收藏，按本地下载状态筛选全部收藏；图片由书库本地同步下载，Docker 中自定义下载目录需同时挂载卷。
 - **nhentai**：使用官方 API v2。API Key 在 nhentai「账号设置 → API Keys」生成后填入登录凭证；未绑定时可搜索、浏览、阅读，绑定后限额更高，PDF 下载需要 Key。标签模式下，已登记的 JM 标签会转换为 nhentai 对应标签，例如「女性向」→ `josei`、「全彩」→ `full color`；适用于单源与聚合搜索，不改变其他图源的搜索词。未登记的名称按原文搜索，显式的 `tag:"名称"` 等原生查询不转换；[映射表与范围](docs/nhentai-tags.md)。
 - **图源开关**：图源可在「图源管理」独立启用或关闭。
 
@@ -109,7 +108,8 @@ docker compose up -d
 | `comic.sqlite` | 站点鉴权、图源凭据密文、书库、下载与阅读记录、收藏状态 |
 | `credentials.key` | 凭据加密密钥，必须保密并与数据库一起备份 |
 | `downloads/` | 已生成的 PDF |
-| `jm-favorites/`、`bika-favorites/` | 默认收藏图片同步目录 |
+| `library/` | 默认书库图片同步目录，每个图源一个子目录 |
+| `jm-favorites/`、`bika-favorites/` | 旧版收藏同步目录，可用「迁移旧同步目录」移入 `library/` |
 | `plugins/` | 自定义可信 Python 图源 |
 
 ## 插件扩展
@@ -190,22 +190,26 @@ docker compose up -d
 | GET | `/api/bika/favorites` | 哔咔收藏：`page`、`sort=dd\|da\|ld\|vd` |
 | GET / POST / DELETE | `/api/{jm\|bika}/favorites/{comic_id}` | 本地登记的收藏状态／加入云收藏／取消云收藏 |
 
-**收藏图片同步**（`{s}` 为 `jm` 或 `bika`）
+| GET | `/api/{jm\|bika}/favorite-ids?ids=a,b` | 批量查询当前账号在本地登记的已收藏 ID，不请求上游；单次最多 200 本，返回 `{"ids":[...]}`，供结果卡片显示云收藏标识 |
+| GET | `/api/{jm\|bika}/favorites-catalog` | 本地记录的全部收藏及其书库本地状态：`local=downloaded\|missing`（未下载含异常）、`page`；返回筛选结果、各状态总数、列表是否完整与更新进度 |
+| POST | `/api/{jm\|bika}/favorites-catalog/refresh` | 后台读取全部收藏分页并替换本地记录：`sort`（JM `mr\|mp`，哔咔 `dd\|da\|ld\|vd`） |
+
+**书库图片同步**
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET / PUT | `/api/{s}/sync/settings` | 同步设置：`enabled`、`cron`（5 字段 Cron 表达式，服务器时区，相邻运行至少间隔 5 分钟；旧版 `interval_minutes` 自动换算）、`download_dir`、`speed_limit_kbps`、`image_format`、`quality`、`directory_rule`、`retries`；JM 另有 `folder_ids` |
+| GET / PUT | `/api/library/sync/settings` | 同步设置：`enabled`、`cron`（5 字段 Cron 表达式，服务器时区，相邻运行至少间隔 5 分钟）、`download_dir`、`speed_limit_kbps`、`image_format`、`quality`、`directory_rule`（`id`／`title`／`title_plain`／`author`）、`retries`、`categories`（书库分类，空为整个书库，`""` 为未分类）；返回可选分类及书本数 |
 | GET | `/api/cron/preview?expression=` | 校验 Cron 表达式，返回规范化表达式、中文说明、服务器时区和接下来 5 次运行时间 |
-| GET | `/api/{s}/sync/directories` | 浏览允许范围内的服务器目录：`path` |
-| GET | `/api/{s}/sync` | 当前任务、下次执行时间与最近记录 |
-| POST | `/api/{s}/sync/run` | 立即同步；`{"album_ids":[...]}` 指定漫画（最多 200 本） |
-| POST | `/api/{s}/sync/check-local` | 检查并登记本地已有漫画，不下载图片 |
-| POST | `/api/{s}/sync/repair` | 修复本地检查标记为异常的漫画：序号错位的章节目录改名对上，保留有效图片、补下载缺页，损坏或多余图片移入 `.comic-api-repair` 备份目录；`{"album_ids":[...]}` 限定范围 |
-| GET | `/api/{s}/sync/local-status?ids=a,b` | 当前保存目录下各漫画的本地状态（已下载 / 异常 / 未下载）及总数，单次最多 200 本 |
-| GET | `/api/{s}/sync/favorite-ids?ids=a,b` | 批量查询当前账号在本地登记的已收藏 ID，不请求上游；单次最多 200 本，返回 `{"ids":[...]}`，供结果卡片显示云收藏标识 |
-| GET | `/api/{s}/sync/catalog` | 本地记录的全部收藏及其本地状态：`local=downloaded\|missing`（未下载含异常）、`page`；返回筛选结果、各状态总数、列表是否完整与更新进度 |
-| POST | `/api/{s}/sync/catalog/refresh` | 后台读取全部收藏分页并替换本地记录：`sort`（JM `mr\|mp`，哔咔 `dd\|da\|ld\|vd`） |
-| POST | `/api/{s}/sync/cancel` | 停止当前任务 |
+| GET | `/api/library/sync/directories` | 浏览允许范围内的服务器目录：`path` |
+| GET | `/api/library/sync` | 当前任务、各本地状态总数、下次执行时间与最近记录 |
+| POST | `/api/library/sync/run` | 立即同步设置范围内的书库；`{"items":[{"source":"jm","id":"123"}]}` 只同步指定漫画（最多 200 本），不在书库中的先加入书库 |
+| POST | `/api/library/sync/check-local` | 检查并登记本地已有漫画，不下载图片 |
+| POST | `/api/library/sync/repair` | 修复本地检查标记为异常的漫画：序号错位的章节目录改名对上，保留有效图片、补下载缺页，损坏或多余图片移入 `.comic-api-repair` 备份目录；`items` 限定范围 |
+| GET | `/api/library/sync/local-status?source=jm&ids=a,b` | 指定图源各漫画的本地状态（已下载 / 异常 / 未下载），单次最多 200 本 |
+| POST | `/api/library/sync/cancel` | 停止当前任务 |
+| GET | `/api/library/migration` | 旧收藏同步目录迁移状态：待迁移数量、预览结果与旧目录剩余内容（临时接口，下个版本移除） |
+| POST | `/api/library/migration/preview` | 生成迁移预览，不移动文件 |
+| POST | `/api/library/migration/run` | 按最近一次预览执行迁移；设置变化后需重新预览 |
 
 ## 项目结构
 
@@ -215,7 +219,7 @@ src/auth.py              站点 HTTP Basic 鉴权
 src/storage.py           SQLite 存储与 AES-GCM 凭据加密
 src/sources/             图源插件（bika / jm / copy / nhentai）
 src/clients/             上游协议客户端
-src/services/            聚合搜索、图片代理、PDF 下载、收藏同步
+src/services/            聚合搜索、图片代理、PDF 下载、书库图片同步
 src/web/                 原生 JS 单页界面
 tests/                   pytest 与前端单元测试，无需真实账号
 ```
@@ -230,4 +234,4 @@ node --test tests/*-ui.test.cjs
 
 ## License
 
-MIT。第三方代码许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+MIT。

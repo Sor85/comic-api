@@ -16,7 +16,8 @@ from src.clients.jm import JmClient
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services.images import descramble_jm_image
-from src.services.jm_sync import JmSync, SyncSettings
+from src.services.image_sync import ImageSyncSettings
+from src.services.library_image_sync import LibraryImageSync
 from src.services.local_images import DownloadPaths, encode_image, receive_image, safe_name
 from src.sources.jm import JmPlugin
 from src.storage import Store
@@ -58,13 +59,6 @@ class FavoritePlugin(DemoPlugin):
     def pages(self, comic_id, chapter_id):
         return [f"https://images.invalid/{chapter_id}/{index}.png" for index in range(1, self.page_count+1)]
 
-    def chapter_detail(self, comic_id, chapter_id):
-        for index, chapter in enumerate(self.detail(comic_id)["chapters"], 1):
-            if chapter["id"] == chapter_id:
-                return dict(chapter, sort=chapter.get("sort", index), series_id=comic_id,
-                            images=self.pages(comic_id, chapter_id))
-        raise ComicApiError("测试章节不存在", 404, "not_found", "jm")
-
     def request(self, method, url, **kwargs):
         self.requests.append((url, kwargs))
         time.sleep(self.delay)
@@ -81,16 +75,33 @@ class FavoritePlugin(DemoPlugin):
 @pytest.fixture(autouse=True)
 def isolated_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "default-data"))
-    monkeypatch.delenv("JM_DOWNLOAD_ROOTS", raising=False)
+    monkeypatch.delenv("LIBRARY_DOWNLOAD_ROOTS", raising=False)
     monkeypatch.setattr("src.services.local_images.ensure_public_url", lambda url: None)
 
 
-def make_sync(tmp_path):
+def make_sync(tmp_path, rule="id", books=("101", "102")):
+    """Library sync over a JM test source whose ``books`` are already in the library."""
     store = Store(tmp_path)
     plugin = FavoritePlugin(store)
-    sync = JmSync(store, AggregatorService(store, {"jm": plugin}))
-    sync.save_settings(SyncSettings(directory_rule="id", retries=0))
-    return sync, plugin
+    library = LibraryImageSync(store, AggregatorService(store, {"jm": plugin}), {})
+    library.save_settings(ImageSyncSettings(directory_rule=rule, retries=0))
+    for comic_id in books:
+        store.save_book("jm", comic_id, plugin.detail(comic_id))
+    return library, plugin
+
+
+def save(library, **values):
+    library.save_settings(ImageSyncSettings(**dict(library.settings(), **values)))
+
+
+def jm_root(library):
+    return library.worker("jm").root()
+
+
+async def finish(library, **kwargs):
+    library.launch(**kwargs)
+    await library.task
+    return library.current
 
 
 def test_jm_favorite_protocol_and_fixed_pagination(tmp_path, monkeypatch):
@@ -211,78 +222,103 @@ def test_api_envelope_error_not_a_valid_empty_collection(tmp_path, monkeypatch):
     assert error.value.code == "upstream_error"
 
 
-def test_sync_pagination_incremental_repair_and_new_chapters(tmp_path):
+def test_sync_incremental_repair_and_new_chapters(tmp_path):
     async def scenario():
-        sync, plugin = make_sync(tmp_path)
-        sync.store.save_book("jm", "101", plugin.detail("101"), "手动分类")
-        sync.launch()
-        await sync.task
-        assert sync.current["status"] == "completed", sync.current
-        assert sync.current["downloaded"] == 8
-        assert plugin.favorite_calls == [(1, "0", "mr"), (2, "0", "mr")]
-        assert next(b for b in sync.store.books() if b["id"] == "101")["library_category"] == "手动分类"
+        library, plugin = make_sync(tmp_path)
+        library.store.save_book("jm", "101", plugin.detail("101"), "手动分类")
+        state = await finish(library)
+        assert state["status"] == "completed", state
+        assert state["downloaded"] == 8
+        assert next(b for b in library.store.books() if b["id"] == "101")["library_category"] == "手动分类"
         before = len(plugin.requests)
-        sync.launch()
-        await sync.task
-        assert sync.current["skipped"] == 8 and len(plugin.requests) == before
-        path = Path(sync.settings()["download_dir"]) / "101" / "1011" / "00001.png"
+        state = await finish(library)
+        assert state["skipped"] == 8 and state["skipped_albums"] == 2 and len(plugin.requests) == before
+        path = jm_root(library) / "101" / "1011" / "00001.png"
         path.write_bytes(b"corrupted")
         plugin.extra_chapter = True
-        sync.launch()
-        await sync.task
-        assert sync.current["downloaded"] == 5 and sync.current["skipped"] == 7
+        state = await finish(library)
+        assert state["downloaded"] == 5 and state["skipped"] == 7
         with Image.open(path) as image:
             assert image.format == "PNG"
     asyncio.run(scenario())
 
 
-def test_folder_scope_and_selected_album_sync(tmp_path):
+def test_category_scope_and_selected_items(tmp_path):
     async def scenario():
-        sync, plugin = make_sync(tmp_path)
-        config = SyncSettings(**dict(sync.settings(), folder_ids=["7"]))
-        sync.save_settings(config)
-        sync.launch()
-        await sync.task
-        assert sync.current["albums_total"] == 1
-        assert plugin.favorite_calls == [(1, "7", "mr")]
-        sync.launch(["102", "102"])
-        await sync.task
-        assert sync.current["albums_total"] == 1 and sync.current["downloaded"] == 4
+        library, plugin = make_sync(tmp_path)
+        library.store.save_book("jm", "101", plugin.detail("101"), "精选")
+        save(library, categories=["精选"])
+        assert library.options()["scope_books"] == 1
+        state = await finish(library)
+        assert state["albums_total"] == 1 and state["downloaded"] == 4
+        assert not (jm_root(library) / "102").exists()
+        save(library, categories=[""])
+        state = await finish(library)
+        assert state["albums_total"] == 1 and state["downloaded"] == 4 and (jm_root(library) / "102").is_dir()
+        state = await finish(library, items=[("jm", "102"), ("jm", "102")])
+        assert state["albums_total"] == 1 and state["selected"] and state["skipped"] == 4
+    asyncio.run(scenario())
+
+
+def test_selected_favorite_outside_library_is_added_then_synced(tmp_path):
+    async def scenario():
+        library, plugin = make_sync(tmp_path, books=())
+        state = await finish(library, items=[("jm", "103")])
+        assert state["status"] == "completed", state
+        assert state["added_books"] == 1 and state["downloaded"] == 4
+        book = next(b for b in library.store.books() if b["id"] == "103")
+        assert book["library_categories"] == ["JM 收藏"] and book["library_category"] == ""
+        assert library.worker("jm").local_status(["103"])["items"]["103"]["status"] == "downloaded"
+        # Check and repair runs never add books.
+        state = await finish(library, mode="check_local", items=[("jm", "104")])
+        assert state["failed"] == 1 and "不在书库中" in state["errors"][0]["message"]
+        assert not any(b["id"] == "104" for b in library.store.books())
     asyncio.run(scenario())
 
 
 def test_partial_failure_retry_and_conflict_preserves_external_file(tmp_path):
     async def scenario():
-        sync, plugin = make_sync(tmp_path)
+        library, plugin = make_sync(tmp_path)
         plugin.broken = {"1011/1"}
-        sync.launch(["101"])
-        await sync.task
-        assert sync.current["status"] == "partial" and sync.current["failed"] == 1
-        assert sync.current["downloaded"] == 3
-        target = Path(sync.settings()["download_dir"]) / "101" / "1011" / "00001.png"
+        state = await finish(library, items=[("jm", "101")])
+        assert state["status"] == "partial" and state["failed"] == 1
+        assert state["downloaded"] == 3
+        target = jm_root(library) / "101" / "1011" / "00001.png"
         target.write_bytes(b"user-owned")
         plugin.broken.clear()
-        sync.launch(["101"])
-        await sync.task
-        assert sync.current["status"] == "partial"
+        state = await finish(library, items=[("jm", "101")])
+        assert state["status"] == "partial"
         assert target.read_bytes() == b"user-owned"
         target.unlink()
-        sync.launch(["101"])
-        await sync.task
-        assert sync.current["status"] == "completed" and sync.current["downloaded"] == 1
-        assert sync.current["skipped"] == 3
+        state = await finish(library, items=[("jm", "101")])
+        assert state["status"] == "completed" and state["downloaded"] == 1
+        assert state["skipped"] == 3
+    asyncio.run(scenario())
+
+
+def test_fixed_format_conflict_is_refused_before_downloading(tmp_path):
+    async def scenario():
+        library, plugin = make_sync(tmp_path)
+        save(library, image_format="png")
+        target = jm_root(library) / "101" / "1011" / "00001.png"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"user-owned")
+        state = await finish(library, items=[("jm", "101")])
+        assert state["status"] == "partial" and state["failed"] == 1
+        assert "未覆盖" in state["errors"][0]["message"]
+        assert not any("1011/1.png" in url for url, _ in plugin.requests)
+        assert target.read_bytes() == b"user-owned"
     asyncio.run(scenario())
 
 
 def test_format_and_quality_change_replaces_only_tracked_files(tmp_path):
     async def scenario():
-        sync, _ = make_sync(tmp_path)
+        library, _ = make_sync(tmp_path)
         for image_format, quality in [("png", 90), ("jpeg", 85), ("webp", 75), ("jpeg", 95), ("png", 90)]:
-            sync.save_settings(SyncSettings(**dict(sync.settings(), image_format=image_format, quality=quality)))
-            sync.launch(["101"])
-            await sync.task
-            assert sync.current["status"] == "completed", sync.current
-        directory = Path(sync.settings()["download_dir"]) / "101" / "1011"
+            save(library, image_format=image_format, quality=quality)
+            state = await finish(library, items=[("jm", "101")])
+            assert state["status"] == "completed", state
+        directory = jm_root(library) / "101" / "1011"
         for extension, expected in [("png", "PNG"), ("jpg", "JPEG"), ("webp", "WEBP")]:
             with Image.open(directory / f"00001.{extension}") as image:
                 assert image.format == expected
@@ -291,25 +327,25 @@ def test_format_and_quality_change_replaces_only_tracked_files(tmp_path):
 
 def test_active_cancel_and_restart_preserve_checkpoints(tmp_path):
     async def scenario():
-        sync, plugin = make_sync(tmp_path)
+        library, plugin = make_sync(tmp_path)
         plugin.delay = .06
-        sync.launch(["101"])
-        while sync.current["downloaded"] < 1:
+        library.launch(items=[("jm", "101")])
+        while library.status()["current"]["downloaded"] < 1:
             await asyncio.sleep(.01)
         with pytest.raises(ComicApiError):
-            sync.launch()
+            library.launch()
         with pytest.raises(ComicApiError):
-            sync.save_settings(SyncSettings())
-        sync.cancel()
-        await sync.task
-        assert sync.current["status"] == "cancelled" and sync.current["downloaded"] >= 1
-        saved = sync.current["downloaded"]
-        sync.current["status"] = "running"
-        sync._persist(sync.current)
-        restarted = JmSync(Store(tmp_path), sync.service)
+            library.save_settings(ImageSyncSettings())
+        library.cancel()
+        await library.task
+        assert library.current["status"] == "cancelled" and library.current["downloaded"] >= 1
+        saved = library.current["downloaded"]
+        library.current["status"] = "running"
+        library._persist(library.current)
+        restarted = LibraryImageSync(Store(tmp_path), library.service, {})
         await restarted.start()
-        assert restarted.history()[0]["status"] == "interrupted"
-        restarted.launch(["101"])
+        assert restarted.status()["history"][0]["status"] == "interrupted"
+        restarted.launch(items=[("jm", "101")])
         await restarted.task
         assert restarted.current["skipped"] == saved
         assert restarted.current["status"] == "completed"
@@ -317,38 +353,24 @@ def test_active_cancel_and_restart_preserve_checkpoints(tmp_path):
     asyncio.run(scenario())
 
 
-def test_repeated_pagination_stops_instead_of_looping(tmp_path):
+def test_automatic_schedule_runs_full_scope(tmp_path):
     async def scenario():
-        sync, plugin = make_sync(tmp_path)
-        plugin.favorites = lambda **kwargs: {"items": [{"id": "101"}], "has_next": True}
-        sync.launch()
-        await sync.task
-        assert sync.current["status"] == "failed" and "分页重复" in sync.current["error"]
-        assert not plugin.requests
-    asyncio.run(scenario())
-
-
-def test_automatic_schedule_and_account_change(tmp_path):
-    async def scenario():
-        sync, plugin = make_sync(tmp_path)
-        await sync.start()
-        sync.save_settings(SyncSettings(**dict(sync.settings(), enabled=True)))
-        for _ in range(100):
-            if sync.task and sync.task.done():
+        library, plugin = make_sync(tmp_path)
+        await library.start()
+        save(library, enabled=True)
+        for _ in range(200):
+            if library.task and library.task.done():
                 break
             await asyncio.sleep(.02)
-        assert sync.current["automatic"] and sync.current["status"] == "completed"
-        assert sync.next_run_at > time.time()
-        plugin.store.save_account("jm", {"account": "different", "token": "different"})
-        with pytest.raises(ComicApiError) as error:
-            sync.launch(automatic=True)
-        assert error.value.code == "account_changed" and not sync.settings()["enabled"]
-        await sync.stop()
+        assert library.current["automatic"] and library.current["status"] == "completed"
+        assert library.current["downloaded"] == 8
+        assert library.next_run_at > time.time()
+        await library.stop()
     asyncio.run(scenario())
 
 
 def test_directory_bounds_normalization_and_symlinks(tmp_path, monkeypatch):
-    paths = DownloadPaths(Store(tmp_path / "data"))
+    paths = DownloadPaths(Store(tmp_path / "data"), "LIBRARY_DOWNLOAD_ROOTS", "library")
     root = paths.roots[0]
     assert paths.resolve(str(root).replace("/", "\\")) == root
     paths.prepare(root / "new")
@@ -361,24 +383,33 @@ def test_directory_bounds_normalization_and_symlinks(tmp_path, monkeypatch):
         paths.resolve(root / "link" / "outside")
     assert "link" not in [item["name"] for item in paths.browse()["directories"]]
     extra = tmp_path / "volume"
-    monkeypatch.setenv("JM_DOWNLOAD_ROOTS", str(extra))
-    assert DownloadPaths(Store(tmp_path / "other-data")).roots == [extra]
+    monkeypatch.setenv("LIBRARY_DOWNLOAD_ROOTS", str(extra))
+    assert DownloadPaths(Store(tmp_path / "other-data"), "LIBRARY_DOWNLOAD_ROOTS", "library").roots == [extra]
     assert safe_name("CON") == "_CON"
     assert "/" not in safe_name("../../name:bad")
 
 
 @pytest.mark.parametrize("rule", ["id", "title", "author"])
 def test_directory_rules_are_contained_and_id_stable(tmp_path, rule):
-    sync, plugin = make_sync(tmp_path)
+    library, plugin = make_sync(tmp_path)
+    worker = library.worker("jm")
     book = plugin.detail("101")
     book["title"] = "../../漫画\\标题"
     book["author"] = "CON"
     chapter = {"id": "1011", "name": "../../章节"}
-    config = dict(sync.settings(), directory_rule=rule)
-    path = sync.paths.chapter(config, book, chapter, 1)
+    config = dict(worker.settings(), directory_rule=rule)
+    path = worker.paths.chapter(config, book, chapter, 1)
     assert path.is_relative_to(Path(config["download_dir"]))
     assert "101" in str(path) and "1011" in str(path)
     assert len(path.relative_to(config["download_dir"]).parts) == (3 if rule == "author" else 2)
+
+
+def test_settings_reject_removed_jmcomic_rule():
+    with pytest.raises(ValueError):
+        ImageSyncSettings(directory_rule="Bd_Aauthoroname_Pindextitle")
+    with pytest.raises(ValueError):
+        ImageSyncSettings(folder_ids=["1"])
+    assert ImageSyncSettings(categories=["A", "A", ""]).categories == ["A", ""]
 
 
 def test_images_alpha_conversion_and_animated_original():
@@ -402,7 +433,7 @@ def test_receive_limit_reaches_transport_and_bounds_short_transfers(tmp_path):
     _, plugin = make_sync(tmp_path)
     # Make a small image take at least 0.5 seconds even when the fake transport delivers instantly.
     plugin.picture = plugin.picture + b"\0" * 2048
-    config = SyncSettings(speed_limit_kbps=4, retries=0).model_dump()
+    config = ImageSyncSettings(speed_limit_kbps=4, retries=0).model_dump()
     start = time.monotonic()
     data, extension, received = receive_image(plugin, "https://images.invalid/1.png", "1", config, threading.Event())
     assert time.monotonic() - start >= received / 4096 - .02
@@ -438,7 +469,7 @@ def test_real_curl_stream_transport_and_rate_limit(tmp_path, monkeypatch):
     try:
         url = f"http://127.0.0.1:{server.server_port}/image.png"
         started = time.monotonic()
-        data, extension, received = receive_image(plugin, url, "1", SyncSettings(speed_limit_kbps=8, retries=0).model_dump(), threading.Event())
+        data, extension, received = receive_image(plugin, url, "1", ImageSyncSettings(speed_limit_kbps=8, retries=0).model_dump(), threading.Event())
         assert data == payload and extension == "png" and received == len(payload)
         assert time.monotonic() - started >= len(payload) / 8192 - .03
         assert seen[0]["Referer"] == f"http://127.0.0.1:{server.server_port}/"
@@ -461,28 +492,17 @@ def test_stream_permit_is_held_until_response_closes(monkeypatch):
     client._request_slots.release()
 
 
-def test_incomplete_favorite_scan_is_not_marked_completed(tmp_path):
-    async def scenario():
-        sync, plugin = make_sync(tmp_path)
-        plugin.favorites = lambda **kwargs: {"items": [{"id": "101"}], "total": 3, "has_next": False}
-        sync.launch()
-        await sync.task
-        assert sync.current["status"] == "failed"
-        assert "数量不一致" in sync.current["error"] and not plugin.requests
-    asyncio.run(scenario())
-
-
 @pytest.fixture
 def jm_client(tmp_path):
     from main import create_app
-    sync, plugin = make_sync(tmp_path)
-    with TestClient(create_app(sync.store, {"jm": plugin})) as client:
+    library, plugin = make_sync(tmp_path)
+    with TestClient(create_app(library.store, {"jm": plugin})) as client:
         yield client
 
 
 def wait_for_run(client):
-    for _ in range(200):
-        data = client.get("/api/jm/sync").json()
+    for _ in range(300):
+        data = client.get("/api/library/sync").json()
         if not data["active"]:
             return data["history"][0]
         time.sleep(.01)
@@ -494,22 +514,26 @@ def test_sync_api_and_static_ui(jm_client):
     assert client.get("/api/jm/favorites").json()["items"]
     assert client.get("/api/jm/favorites?page=0").status_code == 422
     assert client.get("/api/jm/favorites?order=invalid").status_code == 422
-    settings = client.get("/api/jm/sync/settings").json()["settings"]
+    settings = client.get("/api/library/sync/settings").json()["settings"]
     assert not settings["enabled"]
-    assert client.put("/api/jm/sync/settings", json=dict(settings, speed_limit_kbps=-1)).status_code == 422
-    assert client.put("/api/jm/sync/settings", json=dict(settings, download_dir="/etc")).status_code == 422
-    assert client.get("/api/jm/sync/directories?path=/etc").status_code == 422
-    assert client.post("/api/jm/sync/run", json={"album_ids": ["../1"]}).status_code == 422
-    assert client.post("/api/jm/sync/run", json={"album_ids": []}).status_code == 422
-    assert client.post("/api/jm/sync/run", json={"album_ids": ["101"]}).status_code == 202
+    assert client.put("/api/library/sync/settings", json=dict(settings, speed_limit_kbps=-1)).status_code == 422
+    assert client.put("/api/library/sync/settings", json=dict(settings, download_dir="/etc")).status_code == 422
+    assert client.put("/api/library/sync/settings", json=dict(settings, directory_rule="Bd_Aauthoroname_Pindextitle")).status_code == 422
+    assert client.get("/api/library/sync/directories?path=/etc").status_code == 422
+    assert client.post("/api/library/sync/run", json={"items": [{"source": "jm", "id": "../1"}]}).status_code == 422
+    assert client.post("/api/library/sync/run", json={"items": []}).status_code == 422
+    assert client.post("/api/library/sync/run", json={"items": [{"source": "jm", "id": "101"}]}).status_code == 202
     assert wait_for_run(client)["status"] == "completed"
-    assert client.post("/api/jm/sync/cancel").status_code == 409
-    assert client.get("/static/jm-sync.js?v=test").status_code == 200
+    assert client.get("/api/library/sync/local-status?source=jm&ids=101").json()["items"]["101"]["status"] == "downloaded"
+    assert client.post("/api/library/sync/cancel").status_code == 409
+    for removed in ("/api/jm/sync", "/api/jm/sync/settings"):
+        assert client.get(removed).status_code != 200
+    assert client.get("/static/library-sync.js?v=test").status_code == 200
     html = client.get("/").text
-    assert 'id="jm-favorites"' in html and '/static/jm-sync.js?v=' in html
+    assert 'id="jm-favorites"' in html and '/static/library-sync.js?v=' in html
+    assert 'id="jm-sync-open"' not in html and "Bd_Aauthoroname_Pindextitle" not in html
     assert client.delete("/api/sources/jm/account").status_code == 200
     assert client.get("/api/jm/favorites").status_code == 401
-    assert client.post("/api/jm/sync/run", json={}).status_code == 401
 
 
 def test_directory_switch_warning_is_visible_before_changing_settings(jm_client):
@@ -526,29 +550,17 @@ def test_directory_switch_warning_is_visible_before_changing_settings(jm_client)
     assert "未登记的原文件不会被覆盖" in notice and "消耗流量和时间" in notice
     assert "运行中的任务完成或停止后才能修改设置" in notice
     assert start < html.index('<select name="directory_rule">')
-    assert "更换或解除账号绑定后，定时同步自动关闭" in html
 
 
 def test_active_sync_blocks_login_and_logout(jm_client):
     client = jm_client
     client.app.state.service.sources["jm"].delay = .2
-    assert client.post("/api/jm/sync/run", json={}).status_code == 202
+    assert client.post("/api/library/sync/run", json={}).status_code == 202
+    for _ in range(300):
+        if client.app.state.library_images.source_active("jm"):
+            break
+        time.sleep(.01)
     assert client.delete("/api/sources/jm/account").status_code == 409
     assert client.post("/api/sources/jm/login", json={"account": "new", "password": "secret"}).status_code == 409
-    assert client.post("/api/jm/sync/cancel").status_code == 200
+    assert client.post("/api/library/sync/cancel").status_code == 200
     assert wait_for_run(client)["status"] == "cancelled"
-
-
-def test_legacy_interval_migrates_to_cron_and_schedules_next_run(tmp_path):
-    from datetime import datetime
-    sync, _ = make_sync(tmp_path)
-    saved = sync.store.settings(sync.settings_key)
-    saved.pop("cron")
-    sync.store.save_settings(sync.settings_key, dict(saved, interval_minutes=360))
-    assert sync.settings()["cron"] == "0 */6 * * *"
-    assert sync.options()["schedule"] == "每 6 小时整点"
-    sync.save_settings(SyncSettings(**dict(sync.settings(), cron="30 3 * * *")))
-    sync._schedule_next()
-    run = datetime.fromtimestamp(sync.next_run_at)
-    assert (run.hour, run.minute) == (3, 30) and 0 < sync.next_run_at - time.time() <= 86400
-    assert sync.store.settings(sync.clock_key)["next_run_at"] == sync.next_run_at

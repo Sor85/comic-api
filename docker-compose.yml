@@ -10,8 +10,6 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
       - AUTH_USERNAME=${AUTH_USERNAME:-}
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
-      - JM_DOWNLOAD_ROOTS=${JM_DOWNLOAD_ROOTS:-/app/data/jm-favorites}
-      - BIKA_DOWNLOAD_ROOTS=${BIKA_DOWNLOAD_ROOTS:-/app/data/bika-favorites}
       - LIBRARY_DOWNLOAD_ROOTS=${LIBRARY_DOWNLOAD_ROOTS:-/app/data/library}
       - BIKA_ACCOUNT=${BIKA_ACCOUNT:-}
       - BIKA_PASSWORD=${BIKA_PASSWORD:-}

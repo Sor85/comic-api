@@ -3,7 +3,7 @@ const bikaFavorites = {page:1, sort:'dd', items:[], hasNext:false, request:0, se
 
 async function loadBikaFavoritesView(){
   const plugin=sourcePlugin('bika'),canRead=plugin?.enabled!==false&&plugin?.capabilities.includes('favorites')&&(plugin.account?.authenticated||plugin.account?.configured);
-  await Promise.all([canRead?loadSyncSettings('bika'):null,canRead?loadSyncStatus('bika'):null,loadBikaFavorites()]);
+  await Promise.all([canRead?loadSyncStatus().catch(()=>{}):null,loadBikaFavorites()]);
 }
 // Reloading the page already shown (tab re-entry, refresh) keeps its cards and only patches what changed remotely.
 async function loadBikaFavorites(){
@@ -69,7 +69,6 @@ function renderBikaFavorites(){
   syncBikaSelection();
 }
 function syncBikaSelection(){syncSelectionBar('bika',bikaFavorites);}
-FAV_SYNC.bika.onStatus=syncBikaSelection;
 $('bika-favorites-refresh').onclick=()=>run(loadBikaFavoritesView,$('bika-favorites-refresh'));
 $('bika-favorites-filter').onsubmit=event=>{event.preventDefault();renderBikaFavorites();};
 if(typeof dropdown!=='undefined')dropdown.filterMenu($('bika-favorites-filter-open'),[{select:$('bika-favorites-sort')},{select:$('bika-favorites-local')}]);
@@ -79,5 +78,5 @@ $('bika-favorites-sort').onchange=()=>{bikaFavorites.sort=$('bika-favorites-sort
 $('bika-favorites-prev').onclick=()=>{if(bikaFavorites.page>1){bikaFavorites.page--;run(loadBikaFavorites);}};
 $('bika-favorites-next').onclick=()=>{if(bikaFavorites.hasNext){bikaFavorites.page++;run(loadBikaFavorites);}};
 $('bika-select-page').onclick=()=>toggleSyncPage(bikaFavorites,filteredBikaFavorites().map(item=>String(item.id)),renderBikaFavorites);
-$('bika-sync-selected').onclick=()=>run(()=>startFavSync('bika',[...bikaFavorites.selected]),$('bika-sync-selected'));
-FAV_SYNC.bika.onLocalChange=async()=>{if(favCatalogMode('bika',bikaFavorites)){run(loadBikaFavorites);return;}if(bikaFavorites.items.length&&await loadLocalStatus('bika',bikaFavorites.items.map(item=>String(item.id))))renderBikaFavorites();};
+$('bika-sync-selected').onclick=()=>run(()=>startLibrarySync([...bikaFavorites.selected].map(id=>({source:'bika',id}))),$('bika-sync-selected'));
+libSync.onLocalChange.bika=async()=>{if(favCatalogMode('bika',bikaFavorites)){run(loadBikaFavorites);return;}if(bikaFavorites.items.length&&await loadLocalStatus('bika',bikaFavorites.items.map(item=>String(item.id))))renderBikaFavorites();};

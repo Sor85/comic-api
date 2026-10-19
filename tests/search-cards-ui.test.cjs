@@ -91,7 +91,7 @@ test('结果卡片标识书库与云收藏，合并卡片检查所有版本，�
   assert.deepEqual(marks(merged),['library']);assert.ok(plain.querySelectorAll('.cover-marks')[0].hidden);
   assert.equal(h.context.card(book).querySelectorAll('.cover-marks').length,0);
   await h.context.loadResultFavorites([{...book,variants:[book,bika]}],7);
-  assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/bika\/sync\/favorite-ids\?ids=b2$/);
+  assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/bika\/favorite-ids\?ids=b2$/);
   assert.deepEqual(marks(merged),['library','favorite']);assert.match(merged.querySelectorAll('.favorite')[0].title,/哔咔收藏/);
   h.context.setFavoriteMark('bika','b2',false);assert.deepEqual(marks(merged),['library']);
 });

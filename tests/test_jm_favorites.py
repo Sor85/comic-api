@@ -234,9 +234,9 @@ def test_add_favorite_api_is_separate_from_local_library(favorite_client):
         assert "add_favorite" in web.get("/api/sources").json()["sources"][0]["capabilities"]
         for value in ("0", "abc", "１２３", "1" * 21):
             assert web.post(f"/api/jm/favorites/{value}").status_code == 422
-        web.app.state.jm_sync.account_changing = True
+        web.app.state.favorites["jm"].account_changing = True
         assert web.post("/api/jm/favorites/124").status_code == 409
-        web.app.state.jm_sync.account_changing = False
+        web.app.state.favorites["jm"].account_changing = False
         plugin.capabilities = [cap for cap in plugin.capabilities if cap != "add_favorite"]
         assert web.post("/api/jm/favorites/124").status_code == 400
         assert len(remote.posts) == 1
