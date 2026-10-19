@@ -22,6 +22,9 @@ class SourcePlugin:
     latest_sorts = []
     leaderboard_modes = []
     settings_fields = []
+    # With "multi_tag_search": True means search_tag only receives the first tag and the
+    # aggregator filters list items by their tags; False passes tags/exclude_tags to search_tag.
+    local_tag_filter = False
 
     def __init__(self, store):
         self.store = store

@@ -97,7 +97,9 @@ def deduplicate_results(items):
             for group in groups]
 
 
-def search_result_payload(items, all_results, errors, *, deduplicate=False):
+def search_result_payload(items, all_results, errors, *, deduplicate=False, upstream_count=None):
     grouped = deduplicate_results(items) if deduplicate else items
+    # upstream_count drives paging: local tag filtering can empty a page that still has a successor.
     return {'items': grouped, 'all_results': all_results, 'errors': errors,
-            'raw_count': len(items), 'duplicate_count': len(items) - len(grouped)}
+            'raw_count': len(items), 'duplicate_count': len(items) - len(grouped),
+            'upstream_count': len(items) if upstream_count is None else upstream_count}

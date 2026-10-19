@@ -121,12 +121,29 @@ body[data-modal-depth]:not([data-modal-depth="1"]) :is(header,main,.tabbar,#to-t
 .searchbox .clear-btn:not([hidden])~.search-kbd{display:none}
 .searchbox button.primary{border-radius:999px;padding:10px 24px;flex:0 0 auto}
 .view-results .searchbox{max-width:760px;box-shadow:none}
-.search-mode{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px 16px;margin-top:12px;font-size:13px;line-height:1.5}
+.search-mode{position:relative;display:flex;width:100%;max-width:760px;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px 16px;margin-top:12px;font-size:13px;line-height:1.5}
 .search-mode .filter-row{align-items:center;justify-content:center;flex-wrap:wrap;gap:8px}
 .search-mode .chips{flex-wrap:wrap}
 .search-mode .filter-label{flex:0 0 auto;padding-top:0}
 /* Search mode reads as a segmented control; dedup is a labelled switch beside it. */
 .search-mode>.filter-row{gap:10px}
+/* Tag query chips: include reads as +, exclude as − with a danger tint and strikethrough. */
+.tag-terms{flex:0 0 100%;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;min-width:0;font-size:13px;line-height:1.5}
+.tag-terms-empty{color:var(--muted);font-size:12px}
+.tag-term{display:inline-flex;align-items:center;max-width:100%;border:1px solid var(--line);border-radius:999px;background:var(--panel);transition:border-color .15s,background-color .15s}
+.tag-term .tag-term-toggle{min-width:0;gap:4px;border:0;border-radius:999px;padding:3px 2px 3px 9px;background:none;color:var(--text);font-size:13px}
+.tag-term .tag-term-toggle span{overflow:hidden;text-overflow:ellipsis}
+.tag-term .tag-term-toggle svg{width:13px;height:13px;color:var(--accent)}
+.tag-term .tag-term-remove{width:24px;height:24px;margin-right:2px;padding:0;border:0;border-radius:50%;background:none;color:var(--muted)}
+.tag-term .tag-term-remove:hover{background:var(--soft);color:var(--text)}
+.tag-term .tag-term-remove svg{width:12px;height:12px}
+.tag-term:hover{border-color:var(--muted)}
+.tag-term.exclude{border-color:color-mix(in srgb,var(--danger) 45%,var(--line));background:color-mix(in srgb,var(--danger) 8%,var(--panel))}
+.tag-term.exclude .tag-term-toggle,.tag-term.exclude .tag-term-toggle svg{color:var(--danger)}
+.tag-term.exclude .tag-term-toggle span{text-decoration:line-through}
+.tag-terms .tag-terms-info{width:24px;height:24px;padding:0;border:0;border-radius:50%;background:none;color:var(--muted)}
+.tag-terms .tag-terms-info:hover{background:var(--soft);color:var(--text)}
+.tag-terms .tag-terms-info svg{width:15px;height:15px}
 .search-mode>.filter-row .chips{gap:2px;padding:3px;border-radius:999px;background:var(--soft)}
 .search-mode>.filter-row .chip{border:0;padding:4px 14px;background:none}
 .search-mode>.filter-row .chip.active{background:var(--panel);color:var(--text);box-shadow:0 1px 3px #00000024}
@@ -617,7 +634,8 @@ body.site-settings-open{overflow:hidden}
 .site-auth-form>*+*{box-shadow:none}
 .card-head{display:flex;align-items:center;gap:6px;margin-bottom:14px;font-size:14px}
 .card-head strong{font-weight:600}
-.chip{margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 8px;border-radius:999px;font-size:12px;font-weight:500;line-height:1.6;color:var(--muted);background:color-mix(in srgb,var(--text) 6%,transparent)}
+.card-head .chip{margin-left:auto}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 8px;border-radius:999px;font-size:12px;font-weight:500;line-height:1.6;color:var(--muted);background:color-mix(in srgb,var(--text) 6%,transparent)}
 .chip svg{width:13px;height:13px}
 .chip.on{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
 .chip:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:1px}

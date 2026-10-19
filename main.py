@@ -430,8 +430,9 @@ def create_app(store=None, sources=None):
         if not source and (category or sort):
             raise ComicApiError("分类和排序仅适用于单一图源搜索", 422, "invalid_request")
         if source:
-            items = await service.search_source(source, keyword, page, sort, mode, tag_value, category)
-            return search_result_payload(items, {source: items}, {}, deduplicate=deduplicate)
+            items, upstream_count = await service.search_source(source, keyword, page, sort, mode, tag_value, category)
+            return search_result_payload(items, {source: items}, {}, deduplicate=deduplicate,
+                                         upstream_count=upstream_count)
         return await service.aggregate_search(keyword, page, mode, deduplicate=deduplicate)
 
     @app.get("/api/comic/{source}/{comic_id}")

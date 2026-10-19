@@ -25,6 +25,9 @@ const icons = {
   tag:'<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
   'trash-2':'<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
   x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  plus:'<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  minus:'<line x1="5" y1="12" x2="19" y2="12"/>',
+  info:'<circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12.01" y2="8"/><polyline points="11 12 12 12 12 16 13 16"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   key:'<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
   unlink:'<path d="m18.84 12.25 1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71"/><line x1="8" y1="2" x2="8" y2="5"/><line x1="2" y1="8" x2="5" y2="8"/><line x1="16" y1="19" x2="16" y2="22"/><line x1="19" y1="16" x2="22" y2="16"/>',
@@ -499,13 +502,38 @@ function syncSearchMode(){
   toggle.textContent='';toggle.append(node('i',undefined,'dedup-switch'),node('span',`结果去重：${deduplicate?'开启':'关闭'}`));
   toggle.setAttribute('role','switch');toggle.setAttribute('aria-label','结果去重');toggle.setAttribute('aria-checked',String(deduplicate));
   toggle.title='仅合并本页高置信度重复作品，保留所有版本入口';$('search-mode').append(toggle);
-  $('keyword').placeholder=mode==='tag'?'输入标签名称；拷贝使用题材…':mode==='author'?'搜索作者名称…':'搜索漫画、作者…';
+  if(mode==='tag'){state.tagTermsBox=node('div',undefined,'tag-terms');$('search-mode').append(state.tagTermsBox);renderTagTerms();}
+  else state.tagTermsBox=null;
+  $('keyword').placeholder=mode==='tag'?'输入标签名称，前加 - 排除；拷贝使用题材…':mode==='author'?'搜索作者名称…':'搜索漫画、作者…';
   $('keyword').setAttribute('aria-label',mode==='tag'?'搜索漫画标签':mode==='author'?'搜索漫画作者':'搜索漫画');
+}
+// Tag mode shows the typed query as chips: clicking a chip toggles include/exclude, × removes it.
+function renderTagTerms(){
+  const box=state.tagTermsBox;if(!box)return;
+  const list=tagQueryList($('keyword').value),info=node('button',undefined,'tag-terms-info');
+  info.type='button';info.innerHTML=svgIcon('info');info.setAttribute('aria-label','标签语法说明');
+  info.dataset.tipText='多个标签以空格或逗号分隔，标签前加 - 表示排除，含空格的标签用英文引号包裹；拷贝仅支持单个题材';
+  if(!list.length){box.replaceChildren(node('span','多个标签以空格分隔，点击标签切换包含或排除','tag-terms-empty'),info);return;}
+  box.replaceChildren(...list.map((item,index)=>{
+    const chip=node('span',undefined,'tag-term'+(item.exclude?' exclude':'')),label=item.term.replace(/^[a-z]+:"(.*)"$/,'$1');
+    const toggle=button('',()=>updateTagTerms(list.filter(other=>other.term!==item.term||other===item).map(other=>other===item?{...item,exclude:!item.exclude}:other)),'tag-term-toggle');
+    toggle.innerHTML=svgIcon(item.exclude?'minus':'plus');toggle.append(node('span',label));
+    toggle.title=item.exclude?'已排除，点击改为包含':'已包含，点击改为排除';
+    toggle.setAttribute('aria-label',`${item.exclude?'排除':'包含'}标签 ${label}，点击切换`);
+    const remove=iconBtn('x',`移除标签 ${label}`,()=>updateTagTerms(list.filter((_,other)=>other!==index)),'tag-term-remove');
+    chip.append(toggle,remove);return chip;
+  }),info);
+}
+function updateTagTerms(list){
+  const keyword=tagQueryText(list);
+  $('keyword').value=keyword;syncClear();renderTagTerms();
+  // On the results view the edit applies immediately, like the other search filters.
+  if(state.search&&keyword&&list.some(item=>!item.exclude))startSearch(keyword,state.search.source||'',{mode:'tag',category:state.search.category||''});
 }
 function normalizeSearch(){
   const s=state.search;if(!s)return;
   s.mode=['tag','author'].includes(s.mode)?s.mode:'keyword';s.deduplicate=s.deduplicate===true;
-  if(s.source&&(sourcePlugin(s.source)?.enabled===false||!(sourcePlugin(s.source)?.capabilities||[]).includes({tag:'tag_search',author:'author_search'}[s.mode]||'search'))){s.source='';s.tag_value='';s.category='';s.sort='';s.page=1;}
+  if(s.source&&(sourcePlugin(s.source)?.enabled===false||!(sourcePlugin(s.source)?.capabilities||[]).includes(searchCapability(s)))){s.source='';s.tag_value='';s.category='';s.sort='';s.page=1;}
   if(s.mode!=='tag'||!s.source)s.tag_value='';
   if(!(sourcePlugin(s.source)?.capabilities||[]).includes('search_categories'))s.category='';
   s.sort=pick(sourcePlugin(s.source)?.[s.mode==='tag'?'tag_sorts':'search_sorts']||[],s.sort);
@@ -537,7 +565,7 @@ function renderFilters(){
   const box=$('filters');box.replaceChildren();
   const s=state.search,d=state.discover;
   if(s){
-    const searchable=activeSources().filter(p=>(p.capabilities||[]).includes({tag:'tag_search',author:'author_search'}[s.mode]||'search'));
+    const searchable=activeSources().filter(p=>(p.capabilities||[]).includes(searchCapability(s)));
     const c=!s.category&&!s.tag_value&&state.searchCounts?.key===searchKey(s)?state.searchCounts:null;
     if(searchable.length>1)box.append(chipGroup('图源',[
       {value:'',label:'全部',count:c?c.total??Object.values(c.counts).reduce((a,b)=>a+b,0):undefined,hint:s.deduplicate?'本页合并后的作品数':'本页图源原始结果数'},
@@ -591,9 +619,9 @@ function showMoreResults(){
   $('results-more').hidden=left<=0;$('results-more-btn').textContent=`显示更多（还有 ${left} 部）`;
   $('pager').classList.toggle('deferred',left>0);
 }
-function showNoEnabledSources(){
-  beginResults();renderFilters();$('results-title').textContent='暂无已启用的图源';$('results-meta').textContent='';
-  showResults([],'暂无已启用的图源','图源启用状态位于「设置 → 图源管理」。');
+function showNoEnabledSources(title='暂无已启用的图源',hint='图源启用状态位于「设置 → 图源管理」。'){
+  beginResults();renderFilters();$('results-title').textContent=title;$('results-meta').textContent='';
+  showResults([],title,hint);
 }
 async function loadDiscover(){
   const p=normalizeDiscover();if(!p){showNoEnabledSources();return;}
@@ -620,7 +648,12 @@ async function loadSearch(){
   const s=state.search;if(!s)return;
   normalizeSearch();
   syncHistory(false);
-  if(!activeSources().some(p=>p.capabilities.includes({tag:'tag_search',author:'author_search'}[s.mode]||'search'))){showNoEnabledSources();return;}
+  if(!activeSources().some(p=>p.capabilities.includes(searchCapability(s)))){
+    // Enabled sources that only take one tag must not read as "no enabled sources".
+    if(searchCapability(s)==='multi_tag_search'&&activeSources().some(p=>p.capabilities.includes('tag_search')))showNoEnabledSources('已启用的图源不支持多标签或排除标签搜索','只保留一个包含的标签即可搜索全部已启用的图源。');
+    else showNoEnabledSources();
+    return;
+  }
   const scope=s.source?sourceName(s.source):'全部图源';
   $('results-title').textContent=`${s.mode==='tag'?'标签 · ':s.mode==='author'?'作者 · ':''}“${s.keyword}”`;
   $('results-meta').textContent=`${scope} · 搜索中…`;
@@ -636,7 +669,7 @@ async function loadSearch(){
     if(state.recentPage&&(data.items.length||s.page===1))saveRecentPage(s);
     loadResultFavorites(data.items,request);
     $('results-meta').textContent=`${scope} · 第 ${s.page} 页 · ${data.items.length} 部`+(data.duplicate_count?` · 合并 ${data.duplicate_count} 项重复结果`:'');
-    renderPager(data.raw_count??data.items.length);
+    renderPager(data.upstream_count??data.raw_count??data.items.length);
     const errors=Object.entries(data.errors||{}),status=$('browse-status');
     if(errors.length){
       status.classList.add('warn');
@@ -1372,7 +1405,7 @@ $('detail-dialog').addEventListener('close',()=>{if(!$('detail-dialog').open){++
 $('detail-dialog').addEventListener('cancel',()=>chapterPreviews.stop());
 $('detail-scroll').addEventListener('scroll',syncDetailHead,{passive:true});
 $('browse-form').onsubmit=browse;
-function syncClear(){$('keyword-clear').hidden=!$('keyword').value;}
+function syncClear(){$('keyword-clear').hidden=!$('keyword').value;renderTagTerms();}
 $('keyword').addEventListener('input',syncClear);
 $('keyword').addEventListener('keydown',event=>{if(event.key==='Escape'&&$('keyword').value){event.preventDefault();$('keyword').value='';syncClear();}});
 $('keyword-clear').onclick=()=>{$('keyword').value='';syncClear();$('keyword').focus();};

@@ -5,8 +5,10 @@ from src.clients.bika import BikaClient
 from src.clients.jm import JmClient
 from src.errors import ComicApiError
 from src.metadata import comic_labels
+from src.services.aggregator import parse_tag_query
 from src.sources import SourcePlugin
 from src.sources.copy import CopyPlugin
+from src.sources.jm import JmPlugin
 from src.storage import Store
 
 
@@ -182,6 +184,9 @@ class SearchPlugin(SourcePlugin):
             self.capabilities = [*self.capabilities, 'author_search']
         if source == 'bika':
             self.capabilities = [*self.capabilities, 'search_categories']
+            self.local_tag_filter = True
+        if source != 'copy':
+            self.capabilities = [*self.capabilities, 'multi_tag_search']
 
     def search(self, keyword, page=1, **kwargs):
         self.calls.append(('keyword', keyword, page, kwargs))
@@ -191,6 +196,10 @@ class SearchPlugin(SourcePlugin):
         self.calls.append(('tag', keyword, page, kwargs))
         if self.id == 'copy' and keyword == '部分失败':
             raise ComicApiError('未知题材', 422, 'unknown_tag')
+        if self.local_tag_filter and keyword == '巨乳':
+            return [{'id': '1', 'title': '缺少标签', 'tags': [{'label': keyword, 'value': keyword}]},
+                    {'id': '2', 'title': '命中', 'tags': ['巨乳', 'Glasses'], 'categories': [{'label': '全彩', 'value': '全彩'}]},
+                    {'id': '3', 'title': '含排除标签', 'tags': ['巨乳', 'glasses', '中文']}]
         return [{'id': '1', 'title': '非标签同名标题'}, {'id': '2', 'title': keyword}]
 
     def search_author(self, keyword, page=1, **kwargs):
@@ -288,3 +297,56 @@ def test_older_keyword_plugin_signature_is_unchanged(search_api):
     plugin.search = old_search
     assert client.get('/api/search', params={'keyword': '测试', 'source': 'jm'}).status_code == 200
     assert client.get('/api/search', params={'keyword': '测试', 'source': 'jm', 'mode': 'tag'}).status_code == 422
+
+
+def test_tag_query_parser_splits_quotes_and_exclusions():
+    assert parse_tag_query(' 巨乳，眼鏡、全彩 -中文 +NTR "big breasts" -"full color" ') == (
+        ['巨乳', '眼鏡', '全彩', 'NTR', 'big breasts'], ['中文', 'full color'])
+    assert parse_tag_query('tag:"big breasts" -language:"chinese" 巨乳 巨乳 - + ""') == (
+        ['tag:"big breasts"', '巨乳'], ['language:"chinese"'])
+    assert parse_tag_query('weird" OR name') == (['weird', 'OR', 'name'], [])
+
+
+def test_multi_tag_api_passes_native_terms_and_filters_locally(search_api):
+    client, plugins = search_api
+    response = client.get('/api/search', params={'keyword': '巨乳 -中文', 'mode': 'tag', 'source': 'jm', 'page': 2})
+    assert response.status_code == 200
+    assert plugins['jm'].calls == [('tag', '巨乳 -中文', 2, {'tags': ['巨乳'], 'exclude_tags': ['中文']})]
+    response = client.get('/api/search', params={'keyword': '巨乳 glasses 全彩 -中文', 'mode': 'tag', 'source': 'bika',
+                                                 'category': '全彩', 'sort': 'vd'}).json()
+    # Upstream receives only the first tag; remaining tags match tags or categories case-insensitively.
+    assert plugins['bika'].calls == [('tag', '巨乳', 1, {'category': '全彩', 'sort': 'vd'})]
+    assert [item['id'] for item in response['items']] == ['2']
+    assert response['raw_count'] == 1 and response['upstream_count'] == 3
+
+
+def test_single_tag_and_tag_links_keep_the_plain_tag_search(search_api):
+    client, plugins = search_api
+    client.get('/api/search', params={'keyword': '巨乳', 'mode': 'tag', 'source': 'bika'})
+    client.get('/api/search', params={'keyword': '巨乳 -中文', 'mode': 'tag', 'source': 'bika', 'tag_value': 'x'})
+    assert plugins['bika'].calls == [('tag', '巨乳', 1, {}), ('tag', '巨乳 -中文', 1, {'tag_value': 'x'})]
+    response = client.get('/api/search', params={'keyword': '巨乳 -中文', 'mode': 'keyword', 'source': 'jm'})
+    assert response.status_code == 200 and plugins['jm'].calls == [('keyword', '巨乳 -中文', 1, {})]
+
+
+def test_multi_tag_search_rejects_unsupported_sources_and_exclusion_only(search_api):
+    client, plugins = search_api
+    response = client.get('/api/search', params={'keyword': '科幻 冒险', 'mode': 'tag', 'source': 'copy'})
+    assert response.status_code == 422 and response.json()['error']['code'] == 'unsupported'
+    for params in ({'source': 'jm'}, {}):
+        response = client.get('/api/search', params={'keyword': '-中文 -NTR', 'mode': 'tag', **params})
+        assert response.status_code == 422
+    response = client.get('/api/search', params={'keyword': '巨乳 -中文', 'mode': 'tag'}).json()
+    assert list(response['all_results']) == ['jm', 'bika']
+    assert response['upstream_count'] == 5 and [item['id'] for item in response['items']] == ['1', '2', '1', '2']
+    assert plugins['copy'].calls == []
+
+
+def test_jm_multi_tag_search_requires_every_tag_and_excludes_with_minus():
+    client, calls = jm_client({'data': {'content': []}})
+    plugin = JmPlugin.__new__(JmPlugin)
+    plugin.client = client
+    plugin.search_tag('ignored', 3, tags=['巨乳', '眼鏡'], exclude_tags=['中文'])
+    plugin.search_tag('全彩', tag_value='全彩标识')
+    assert [call[1]['params']['search_query'] for call in calls] == ['+巨乳 +眼鏡 -中文', '全彩标识']
+    assert calls[0][1]['params']['page'] == '3' and calls[0][1]['params']['main_tag'] == '3'

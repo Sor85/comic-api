@@ -9,10 +9,10 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const plain = value => JSON.parse(JSON.stringify(value));
 
 class Element {
-  constructor(tag) { this.tagName=tag;this.children=[];this.attributes={};this.hidden=false;this.value='';this.className='';this.open=false;this.classList={add:()=>{},remove:()=>{},toggle:()=>{}}; }
+  constructor(tag) { this.tagName=tag;this.children=[];this.attributes={};this.dataset={};this.hidden=false;this.value='';this.className='';this.open=false;this.classList={add:()=>{},remove:()=>{},toggle:()=>{}}; }
   set textContent(value) { this.text=String(value);this.children=[]; }
   get textContent() { return (this.text||'')+this.children.map(child=>child.textContent).join(''); }
-  set innerHTML(value) { throw new Error('Labels must be rendered as text, not HTML'); }
+  set innerHTML(value) { if(!String(value).startsWith('<svg'))throw new Error('Labels must be rendered as text, not HTML');this.icon=value; }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.text='';this.children=children; }
   setAttribute(name,value) { this.attributes[name]=String(value); }
@@ -26,7 +26,7 @@ function harness() {
   const sources=['jm','bika','copy','nhentai'].map(id=>({id,name:id,capabilities:['search','tag_search',...(id!=='copy'?['author_search']:[]),...(id==='bika'?['search_categories']:[])],search_sorts:id==='bika'?[{value:'dd',label:'最新'}]:[],tag_sorts:id==='copy'?[{value:'-popular',label:'热门'}]:[]}));
   const state={sources,search:null,searchMode:'keyword',searchCategories:{},searchCategoryRequests:{},searchCounts:null,view:'results',tab:'browse',detailRequest:0,discover:{}};
   const storage=new Map(),calls=[];
-  const context=vm.createContext({state,loadResultFavorites(){},document:{getElementById:id=>roots[id],createElement:tag=>new Element(tag)},
+  const context=vm.createContext({state,loadResultFavorites(){},svgIcon:name=>`<svg data-icon="${name}"></svg>`,run:(action,...args)=>action(...args),document:{getElementById:id=>roots[id],createElement:tag=>new Element(tag)},
     $:id=>roots[id],enc:encodeURIComponent,URLSearchParams,location:{pathname:'/',search:''},
     localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},
     api:async path=>{calls.push(path);return path.includes('search-categories')?{categories:[{label:'全彩',value:'全彩'},{label:'新分类',value:'新分类'}]}:{items:[],all_results:{},errors:{}};},
@@ -292,4 +292,62 @@ test('标签与关键词搜索计数不混用，分类筛选不显示聚合旧�
   h.state.searchCounts={key:h.context.searchKey(h.state.search),counts:{bika:99},errors:{}};
   h.context.renderFilters();assert.ok(!h.roots.filters.textContent.includes('99'));
   assert.notEqual(h.context.searchKey({keyword:'全彩',mode:'tag'}),h.context.searchKey({keyword:'全彩',mode:'keyword'}));
+});
+
+test('多标签与排除标签按服务端规则解析，只显示支持多标签的图源，分页依据上游返回数',async()=>{
+  const h=harness();let pagerCount;
+  assert.deepEqual(plain(h.context.tagQueryTerms('巨乳，眼鏡 -中文 "big breasts" -tag:"glasses" 巨乳 - +')),
+    {include:['巨乳','眼鏡','big breasts'],exclude:['中文','tag:"glasses"']});
+  assert.equal(h.context.searchCapability({keyword:'巨乳',mode:'tag'}),'tag_search');
+  assert.equal(h.context.searchCapability({keyword:'巨乳 -中文',mode:'tag'}),'multi_tag_search');
+  assert.equal(h.context.searchCapability({keyword:'巨乳 -中文',mode:'tag',tag_value:'巨乳'}),'tag_search');
+  assert.equal(h.context.searchCapability({keyword:'巨乳 -中文',mode:'keyword'}),'search');
+  for(const source of h.state.sources)if(source.id!=='copy')source.capabilities.push('multi_tag_search');
+  h.context.api=async path=>{h.calls.push(path);return {items:[],raw_count:0,upstream_count:20,all_results:{},errors:{}};};
+  h.context.renderPager=count=>{pagerCount=count;};
+  h.context.startSearch('巨乳 -中文','copy',{mode:'tag'});
+  assert.equal(h.state.search.source,'');
+  await h.context.loadSearch();
+  const sources=h.roots.filters.children[0].querySelectorAll('button').map(button=>button.textContent);
+  assert.deepEqual(sources,['全部0','jm0','bika0','nhentai0']);
+  assert.equal(new URL(h.calls.at(-1),'http://test').searchParams.get('keyword'),'巨乳 -中文');
+  assert.equal(pagerCount,20);
+});
+
+test('启用的图源都不支持多标签时提示改用单个标签，而不是提示没有启用图源',async()=>{
+  const h=harness();let empty;
+  vm.runInContext(app.slice(app.indexOf('function showNoEnabledSources('),app.indexOf('async function loadDiscover(')),h.context);
+  h.context.showResults=(_items,title,hint)=>{empty=[title,hint];};
+  h.context.startSearch('女性向 恋爱','',{mode:'tag'});await h.context.loadSearch();
+  assert.equal(h.roots['results-title'].textContent,'已启用的图源不支持多标签或排除标签搜索');
+  assert.match(empty[1],/只保留一个包含的标签/);assert.equal(h.calls.length,0);
+});
+
+test('标签模式把输入显示为可切换包含或排除的标签，编辑写回输入框并在结果页重新搜索',async()=>{
+  const h=harness();h.context.syncClear=h.context.renderTagTerms;
+  for(const source of h.state.sources)if(source.id!=='copy')source.capabilities.push('multi_tag_search');
+  h.state.searchMode='tag';h.context.syncSearchMode();
+  const box=()=>h.state.tagTermsBox,info=()=>box().children.at(-1);
+  assert.match(box().textContent,/点击标签切换包含或排除/);
+  assert.match(info().dataset.tipText,/标签前加 - 表示排除，含空格的标签用英文引号包裹；拷贝仅支持单个题材/);
+  h.roots.keyword.value='巨乳 -中文 "big breasts" tag:"glasses"';h.context.renderTagTerms();
+  const chips=box().children.slice(0,-1);
+  assert.deepEqual(chips.map(chip=>chip.className),['tag-term','tag-term exclude','tag-term','tag-term']);
+  assert.deepEqual(chips.map(chip=>chip.children[0].textContent),['巨乳','中文','big breasts','glasses']);
+  // Home view: edits rewrite the input only.
+  chips[0].children[0].onclick();
+  assert.equal(h.roots.keyword.value,'-巨乳 -中文 "big breasts" tag:"glasses"');
+  assert.equal(h.state.search,null);
+  h.context.startSearch('巨乳 -中文 眼鏡','',{mode:'tag'});h.calls.length=0;
+  box().children[1].children[0].onclick();await flush();
+  assert.equal(h.roots.keyword.value,'巨乳 中文 眼鏡');
+  assert.equal(h.state.search.keyword,'巨乳 中文 眼鏡');
+  box().children[2].children[1].onclick();await flush();
+  assert.equal(h.state.search.keyword,'巨乳 中文');
+  // Excluding every tag leaves the query unsearchable, so the previous search stays.
+  box().children[0].children[0].onclick();box().children[1].children[0].onclick();
+  assert.equal(h.roots.keyword.value,'-巨乳 -中文');assert.equal(h.state.search.keyword,'-巨乳 中文');
+  assert.equal(h.context.tagQueryText([{term:'a b',exclude:false},{term:'-x',exclude:true},{term:'tag:"c d"',exclude:false}]),'"a b" -"-x" tag:"c d"');
+  h.state.searchMode='keyword';h.state.search.mode='keyword';h.context.syncSearchMode();
+  assert.equal(h.state.tagTermsBox,null);
 });

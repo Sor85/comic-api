@@ -11,6 +11,31 @@ function comicLabels(values){
   }
   return result;
 }
+// Mirrors the server parser: whitespace or commas separate tags, quotes keep spaces, a leading "-" excludes.
+function tagQueryList(text){
+  const list=[];
+  for(const [,sign,raw] of String(text||'').matchAll(/([+-]?)((?:[a-z]+:)?"[^"]*"|[^\s,，、"]+)/g)){
+    const term=/^[a-z]+:"/.test(raw)?raw:raw.replace(/^"+|"+$/g,'').trim(),exclude=sign==='-';
+    if(term.replace(/[+-]/g,'')&&!list.some(item=>item.term===term&&item.exclude===exclude))list.push({term,exclude});
+  }
+  return list;
+}
+function tagQueryTerms(text){
+  const list=tagQueryList(text);
+  return {include:list.filter(item=>!item.exclude).map(item=>item.term),exclude:list.filter(item=>item.exclude).map(item=>item.term)};
+}
+// Inverse of tagQueryList; tags with separators, quotes or a leading sign are quoted.
+function tagQueryText(list){
+  const quote=term=>/^[a-z]+:"/.test(term)||!/[\s,，、"]|^[+-]/.test(term)?term:`"${term.replace(/"/g,'')}"`;
+  return list.map(item=>(item.exclude?'-':'')+quote(item.term)).join(' ');
+}
+function searchCapability(search){
+  if(search.mode==='tag'&&!search.tag_value){
+    const terms=tagQueryTerms(search.keyword);
+    if(terms.include.length>1||terms.exclude.length)return 'multi_tag_search';
+  }
+  return {tag:'tag_search',author:'author_search'}[search.mode]||'search';
+}
 function searchKey(search){return JSON.stringify([search.keyword,search.mode||'keyword',search.page||1,search.deduplicate===true]);}
 function searchParams(search){
   const params=new URLSearchParams({keyword:search.keyword,page:search.page||1});

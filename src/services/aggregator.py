@@ -1,6 +1,7 @@
 """Source dispatch, search aggregation and ranking. Image proxy and PDF building
 live in src/services/image_proxy.py and src/services/pdf.py."""
 import asyncio
+import re
 import unicodedata
 from difflib import SequenceMatcher
 from typing import List, Dict, Any
@@ -11,6 +12,31 @@ from src.services.pdf import build_chapter_pdf
 from src.services.search_dedup import search_result_payload
 from src.sources import load_sources
 from src.storage import Store
+
+# Tags are separated by whitespace or commas; quotes keep spaces inside one tag, a leading "-" excludes it.
+TAG_TERM = re.compile(r'([+-]?)((?:[a-z]+:)?"[^"]*"|[^\s,，、"]+)')
+
+
+def parse_tag_query(text):
+    include, exclude = [], []
+    for sign, term in TAG_TERM.findall(str(text or "")):
+        # nhentai typed values such as tag:"big breasts" stay intact for the plugin to validate.
+        if not re.match(r'[a-z]+:"', term):
+            term = term.strip('"').strip()
+        target = exclude if sign == "-" else include
+        if term.strip("+-") and term not in target:
+            target.append(term)
+    return include, exclude
+
+
+def _label_keys(item):
+    keys = set()
+    for field in ("tags", "categories"):
+        for entry in item.get(field) or []:
+            for value in (entry.get("label"), entry.get("value")) if isinstance(entry, dict) else (entry,):
+                if isinstance(value, str) and value.strip():
+                    keys.add(unicodedata.normalize("NFKC", value.strip()).casefold())
+    return keys
 
 
 class AggregatorService:
@@ -86,11 +112,30 @@ class AggregatorService:
         # Stable ties preserve upstream order; identical titles across sources stay selectable.
         return sorted(items, key=score, reverse=True)
 
+    def tag_terms(self, mode, keyword, tag_value=""):
+        """Return (include, exclude) for multi-tag queries, or None for a plain single-tag search."""
+        if mode != "tag" or tag_value:
+            return None
+        include, exclude = parse_tag_query(keyword)
+        if len(include) <= 1 and not exclude:
+            return None
+        if not include:
+            raise ComicApiError("排除标签需搭配至少一个包含的标签", 422, "invalid_request")
+        return include, exclude
+
+    @staticmethod
+    def search_capability(mode, terms=None):
+        if terms:
+            return "multi_tag_search"
+        return {"tag": "tag_search", "author": "author_search"}.get(mode, "search")
+
     async def search_source(self, source, keyword, page=1, sort="", mode="keyword", tag_value="", category=""):
+        """Return (items, upstream_count); local tag filtering may drop items from a full upstream page."""
         plugin = self.source(source)
-        capability = {"tag": "tag_search", "author": "author_search"}.get(mode, "search")
-        if capability not in plugin.capabilities:
-            raise ComicApiError("图源不支持此搜索方式", 422, "unsupported", source)
+        terms = self.tag_terms(mode, keyword, tag_value)
+        if self.search_capability(mode, terms) not in plugin.capabilities:
+            message = "图源不支持多标签或排除标签搜索" if terms else "图源不支持此搜索方式"
+            raise ComicApiError(message, 422, "unsupported", source)
         sorts = plugin.tag_sorts if mode == "tag" else plugin.search_sorts
         if sort and sort not in [item["value"] for item in sorts]:
             raise ComicApiError("图源不支持此搜索排序", 422, "invalid_request", source)
@@ -100,18 +145,28 @@ class AggregatorService:
         kwargs = {key: value for key, value in {"sort": sort, "category": category}.items() if value}
         if mode == "tag" and tag_value:
             kwargs["tag_value"] = tag_value
+        local_filter = bool(terms) and plugin.local_tag_filter
+        if terms and not local_filter:
+            kwargs["tags"], kwargs["exclude_tags"] = terms
+        query = terms[0][0] if local_filter else keyword
         method = {"tag": "search_tag", "author": "search_author"}.get(mode, "search")
-        result = await self.call(source, method, keyword, page, **kwargs)
+        result = await self.call(source, method, query, page, **kwargs)
         items = [dict(item, source=source) for item in result]
-        return self.rank_results(keyword, items) if mode == "keyword" else items
+        upstream_count = len(items)
+        if local_filter:
+            # The upstream query already applied the first tag; list items carry tags for the rest.
+            include, exclude = ({unicodedata.normalize("NFKC", term).casefold() for term in group} for group in terms)
+            items = [item for item in items
+                     if include <= (keys := _label_keys(item)) and not exclude & keys]
+        return (self.rank_results(keyword, items) if mode == "keyword" else items), upstream_count
 
     async def aggregate_search(self, keyword: str, page: int = 1, mode: str = "keyword",
                                deduplicate: bool = False) -> Dict[str, Any]:
         """Search registered sources independently and retain partial failures."""
-        capability = {"tag": "tag_search", "author": "author_search"}.get(mode, "search")
+        capability = self.search_capability(mode, self.tag_terms(mode, keyword))
         keys = [key for key, plugin in self.sources.items() if self.is_enabled(key) and capability in plugin.capabilities]
         results = await asyncio.gather(*(self.search_source(key, keyword, page, mode=mode) for key in keys), return_exceptions=True)
-        all_results, errors, candidates = {}, {}, []
+        all_results, errors, candidates, upstream_count = {}, {}, [], 0
         for key, result in zip(keys, results):
             if not self.is_enabled(key):
                 continue
@@ -119,11 +174,13 @@ class AggregatorService:
                 errors[key] = result.payload() if isinstance(result, ComicApiError) else {"message": "图源异常"}
                 all_results[key] = []
             else:
-                all_results[key] = [dict(item, source=key) for item in result]
+                all_results[key] = [dict(item, source=key) for item in result[0]]
                 candidates.extend(all_results[key])
+                upstream_count += result[1]
         if mode == "keyword":
             candidates = self.rank_results(keyword, candidates)
-        result = search_result_payload(candidates, all_results, errors, deduplicate=deduplicate)
+        result = search_result_payload(candidates, all_results, errors, deduplicate=deduplicate,
+                                       upstream_count=upstream_count)
         return dict(result, keyword=keyword, best_match=result['items'][0] if result['items'] else None)
 
     async def get_comic_detail(self, source: str, comic_id: str) -> Dict[str, Any]:

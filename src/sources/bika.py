@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class BikaPlugin(SourcePlugin):
     id = "bika"
     name = "哔咔漫画"
-    capabilities = ["search", "tag_search", "author_search", "search_categories", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
+    capabilities = ["search", "tag_search", "multi_tag_search", "author_search", "search_categories", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": name, "label": name} for name in
@@ -15,6 +15,8 @@ class BikaPlugin(SourcePlugin):
     search_sorts = sorts
     tag_sorts = sorts
     latest_sorts = sorts
+    # Upstream tag search takes one tag; list items include tags for filtering the rest.
+    local_tag_filter = True
     leaderboard_modes = [{"value": v, "label": n} for v, n in [("day", "日榜"), ("week", "周榜"), ("month", "月榜")]]
 
     def __init__(self, store):

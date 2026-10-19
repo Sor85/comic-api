@@ -5,7 +5,7 @@ from src.sources import SourcePlugin
 class JmPlugin(SourcePlugin):
     id = "jm"
     name = "禁漫天堂"
-    capabilities = ["search", "tag_search", "author_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
+    capabilities = ["search", "tag_search", "multi_tag_search", "author_search", "detail", "pages", "latest", "category", "leaderboard", "random", "login", "favorites", "add_favorite", "remove_favorite"]
     login_fields = [{"name": "account", "label": "账号", "type": "text"},
                     {"name": "password", "label": "密码", "type": "password"}]
     categories = [{"value": v, "label": n} for v, n in
@@ -33,7 +33,10 @@ class JmPlugin(SourcePlugin):
             self.store.save_account(self.id, {})
             self.client._account = self.client._password = ""
 
-    def search_tag(self, keyword, page=1, tag_value=""):
+    def search_tag(self, keyword, page=1, tag_value="", tags=(), exclude_tags=()):
+        if tags:
+            # JM's search syntax: "+tag" must match and "-tag" excludes; bare words are not required.
+            return self.client.search_tag(" ".join([f"+{tag}" for tag in tags] + [f"-{tag}" for tag in exclude_tags]), page)
         return self.client.search_tag(tag_value or keyword, page)
 
     def favorites(self, page=1, folder_id="0", order="mr"):

@@ -148,6 +148,14 @@ def test_tag_search_accepts_typed_values_and_plain_names(plugin):
     assert queries == ['tag:"big breasts"', 'tag:"plain name"', 'artist:"some artist"', 'tag:"weird OR name"']
 
 
+def test_multi_tag_search_builds_native_include_and_exclude_query(plugin):
+    plugin.search_tag("ignored", page=2, sort="popular", tags=["巨乳", 'artist:"some artist"', 'plain "name'],
+                      exclude_tags=["中文", 'language:"chinese"', '""'])
+    searches = [call[2] for call in plugin.calls if call[1].endswith("/search")]
+    assert searches == [{"query": 'tag:"big breasts" artist:"some artist" tag:"plain name" '
+                                  '-tag:"中文" -language:"chinese"', "sort": "popular", "page": 2}]
+
+
 @pytest.mark.parametrize("keyword,query", list(JM_TAG_QUERIES.items()))
 def test_tag_search_maps_verified_jm_aliases_without_extra_requests(plugin, keyword, query):
     plugin.search_tag(f" {keyword} ", page=3, sort="popular")
