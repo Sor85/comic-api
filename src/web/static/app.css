@@ -690,13 +690,12 @@ body.site-settings-open{overflow:hidden}
 /* favorites pages (JM & Bika) */
 .fav-view{font-size:15px;line-height:1.6}
 .bika-favorites-view{font-size:15px;line-height:1.6}
-.page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .page-title{display:flex;align-items:center;gap:12px;min-width:0}
 .page-title h1{margin:0;font-size:30px;letter-spacing:-.6px}
 .page-actions{display:flex;align-items:center;gap:8px}
 .page-actions button{border-radius:999px}
 .page-actions .icon-btn{border-radius:50%}
-.page-lead{max-width:760px;margin:0 0 22px;font-size:13.5px;line-height:1.7;color:var(--muted)}
 /* 收藏本地同步（JM / 哔咔共用）：页头触发按钮 + 模态窗口（标题与定时状态 / 当前配置 / 最近任务 / 历史记录 / 底部主操作） */
 .sync-trigger{--sync-tone:var(--accent);position:relative;padding-left:12px}
 .sync-trigger svg{color:var(--sync-tone)}
