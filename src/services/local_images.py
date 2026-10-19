@@ -24,6 +24,13 @@ FORMATS = {"original": "保留图片格式", "jpeg": "JPEG", "png": "PNG", "webp
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
 # Common Linux filesystems (ext4, ZFS, btrfs) cap a single name at 255 bytes.
 MAX_NAME_BYTES = 255
+MOUNTINFO = Path("/proc/self/mountinfo")
+CONTAINER_MARKERS = (Path("/.dockerenv"), Path("/run/.containerenv"))
+# Kernel and runtime filesystems never hold user-mapped storage.
+VIRTUAL_FILESYSTEMS = {"proc", "sysfs", "tmpfs", "devtmpfs", "devpts", "mqueue", "cgroup", "cgroup2", "overlay",
+                       "securityfs", "pstore", "debugfs", "tracefs", "bpf", "hugetlbfs", "fusectl", "configfs",
+                       "binfmt_misc", "autofs", "nsfs", "ramfs"}
+SYSTEM_PREFIXES = (Path("/proc"), Path("/sys"), Path("/dev"), Path("/run"), Path("/etc"), Path("/usr"), Path("/tmp"))
 
 
 def safe_name(value, fallback="未命名", max_bytes=100):
@@ -45,15 +52,48 @@ def plain_chapter_name(chapter, index):
     return safe_name(f"第{index}話 {title}", max_bytes=MAX_NAME_BYTES)
 
 
+def mapped_directories(data_dir):
+    """Directories mapped into this container (Docker/Podman volumes), excluding the data directory.
+
+    Outside a container nothing is returned, so a plain host never exposes its own mounts.
+    """
+    if not any(marker.exists() for marker in CONTAINER_MARKERS):
+        return []
+    try:
+        lines = MOUNTINFO.read_text(encoding="utf-8", errors="surrogateescape").splitlines()
+    except OSError:
+        return []
+    data_dir = Path(data_dir).resolve()
+    result = []
+    for line in lines:
+        fields = line.split(" ")
+        try:
+            fstype = fields[fields.index("-") + 1]
+        except (ValueError, IndexError):
+            continue
+        # mountinfo escapes space, tab, newline and backslash as octal.
+        path = Path(re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), fields[4]))
+        if (fstype in VIRTUAL_FILESYSTEMS or path == Path("/") or any(path.is_relative_to(prefix) for prefix in SYSTEM_PREFIXES)
+                or path.is_relative_to(data_dir) or data_dir.is_relative_to(path) or not path.is_dir() or path.is_symlink()):
+            continue
+        if path not in result:
+            result.append(path)
+    return result
+
+
 class DownloadPaths:
-    """Download roots come from an administrator-controlled environment variable."""
+    """Download roots come from an administrator-controlled environment variable.
+
+    Without it, directories mapped into the container come first (the first is the default save location),
+    followed by ``default`` under the data directory.
+    """
 
     def __init__(self, store, env, default, comic_id=str, chapter_id=str):
         self.env, self.comic_id, self.chapter_id = env, comic_id, chapter_id
         configured = os.environ.get(env, "")
         self.roots = [Path(p.strip()).expanduser().resolve() for p in configured.split(os.pathsep) if p.strip()]
         if not self.roots:
-            self.roots = [(store.root / default).resolve()]
+            self.roots = [*mapped_directories(store.root), (store.root / default).resolve()]
 
     def resolve(self, value):
         value = str(value).replace("\\", "/")

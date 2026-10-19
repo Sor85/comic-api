@@ -389,6 +389,38 @@ def test_directory_bounds_normalization_and_symlinks(tmp_path, monkeypatch):
     assert "/" not in safe_name("../../name:bad")
 
 
+def test_container_mapped_directories_become_roots_before_data_directory(tmp_path, monkeypatch):
+    data = tmp_path / "app" / "data"
+    comics = tmp_path / "mnt" / "hdd" / "漫画 库"
+    nested = data / "cache"
+    for path in (data, comics, nested):
+        path.mkdir(parents=True)
+    (tmp_path / "hosts").write_text("")
+    escaped = str(comics).replace(" ", "\\040")
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text("\n".join([
+        "1 0 0:1 / / rw - overlay overlay rw",
+        f"2 1 0:2 / {data} rw - ext4 /dev/sda1 rw",
+        f"3 1 0:3 /comics {escaped} rw shared:1 - fuse.shfs shfs rw",
+        f"4 1 0:4 / {nested} rw - ext4 /dev/sda1 rw",
+        "5 1 0:5 / /proc rw - proc proc rw",
+        f"6 1 0:6 / {tmp_path / 'hosts'} rw - ext4 /dev/sda1 rw",
+        "7 1 0:7 / /etc/hostname rw - ext4 /dev/sda1 rw",
+    ]), encoding="utf-8")
+    marker = tmp_path / ".dockerenv"
+    monkeypatch.setattr("src.services.local_images.MOUNTINFO", mountinfo)
+    monkeypatch.setattr("src.services.local_images.CONTAINER_MARKERS", (marker,))
+    store = Store(data)
+    # Outside a container the host's own mounts are never offered.
+    assert DownloadPaths(store, "LIBRARY_DOWNLOAD_ROOTS", "library").roots == [(data / "library").resolve()]
+    marker.write_text("")
+    paths = DownloadPaths(store, "LIBRARY_DOWNLOAD_ROOTS", "library")
+    assert paths.roots == [comics, (data / "library").resolve()]
+    assert paths.resolve(comics / "jm") == comics.resolve() / "jm"
+    monkeypatch.setenv("LIBRARY_DOWNLOAD_ROOTS", str(tmp_path / "only"))
+    assert DownloadPaths(store, "LIBRARY_DOWNLOAD_ROOTS", "library").roots == [(tmp_path / "only").resolve()]
+
+
 @pytest.mark.parametrize("rule", ["id", "title", "author"])
 def test_directory_rules_are_contained_and_id_stable(tmp_path, rule):
     library, plugin = make_sync(tmp_path)
