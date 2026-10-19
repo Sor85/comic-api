@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 from src.errors import ComicApiError
 from src.services.aggregator import AggregatorService
 from src.services.downloads import DownloadManager
-from src.services.jm_sync import JmSync, SyncSettings
 from src.sources.copy import CopyPlugin
 from src.storage import Store
 from tests.fakes import DemoPlugin
@@ -217,50 +216,6 @@ def test_disable_during_queued_business_call_marks_download_cancelled(setup):
         await manager.queue.join()
         assert store.task(task["id"])["status"] == "cancelled"
         await manager.stop()
-    asyncio.run(scenario())
-
-
-def test_jm_schedule_pauses_without_erasing_settings_and_resumes(setup, monkeypatch):
-    async def scenario():
-        store, plugins = setup
-        jm = plugins["demo"]
-        jm.id = "jm"
-        jm.capabilities = [*jm.capabilities, "favorites"]
-        jm.login({"account": "jm-demo", "password": "test"})
-        service = AggregatorService(store, {"jm": jm})
-        sync = JmSync(store, service)
-        sync.save_settings(SyncSettings(enabled=True))
-        service.set_enabled("jm", False)
-        calls = []
-        monkeypatch.setattr(sync, "launch", lambda **kwargs: calls.append(kwargs))
-        await sync.start()
-        try:
-            await asyncio.sleep(.03)
-            assert calls == [] and sync.status()["paused"] is True
-            assert sync.status()["next_run_at"] is None and sync.settings()["enabled"] is True
-            service.set_enabled("jm", True)
-            sync.source_changed()
-            await asyncio.sleep(.03)
-            assert calls == [{"automatic": True}] and sync.status()["paused"] is False
-        finally:
-            await sync.stop()
-    asyncio.run(scenario())
-
-
-def test_jm_disabling_stops_active_task_and_blocks_manual_launch(setup):
-    async def scenario():
-        store, plugins = setup
-        service = AggregatorService(store, {"jm": plugins["demo"]})
-        sync = JmSync(store, service)
-        sync.task = asyncio.create_task(asyncio.sleep(.02))
-        sync.current = sync._new_state(False)
-        service.set_enabled("jm", False)
-        sync.source_changed()
-        assert sync.signal.is_set() and sync.current["status"] == "cancelling"
-        await sync.task
-        with pytest.raises(ComicApiError) as error:
-            sync.launch()
-        assert error.value.code == "source_disabled"
     asyncio.run(scenario())
 
 

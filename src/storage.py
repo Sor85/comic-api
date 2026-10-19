@@ -64,6 +64,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS app_settings (
                     name TEXT PRIMARY KEY, settings TEXT NOT NULL
                 );
+                -- jm_/bika_ sync and local status tables belong to the removed favorites sync; only the
+                -- temporary legacy migration reads them. Drop them together with that migration.
                 CREATE TABLE IF NOT EXISTS jm_sync_runs (
                     id TEXT PRIMARY KEY, state TEXT NOT NULL
                 );
@@ -208,7 +210,7 @@ class Store:
             db.execute("DELETE FROM app_settings WHERE name=?", (name,))
 
     def ensure_sync_tables(self, prefix):
-        """Checkpoint tables for one library image-sync source, mirroring the JM/Bika favorites tables."""
+        """Checkpoint tables for one library image-sync source."""
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,80}", prefix):
             raise ValueError(f"Invalid sync table prefix: {prefix}")
         with self.connect() as db:
@@ -288,17 +290,17 @@ class Store:
                     ON CONFLICT(owner) DO UPDATE SET updated_at=CURRENT_TIMESTAMP,
                     sort=CASE WHEN excluded.sort<>'' THEN excluded.sort ELSE sort END""", (owner, sort or ""))
 
-    def favorite_catalog(self, source, owner, root):
-        """Favorited rows for one account joined with their local state under ``root``.
+    def favorite_catalog(self, source, owner, root, status_table):
+        """Favorited rows for one account joined with the library local state in ``status_table`` under ``root``.
 
         Rows favorited after the last ordered snapshot have no position and come first, newest first.
         """
-        if source not in ("jm", "bika"):
+        if source not in ("jm", "bika") or not re.fullmatch(r"library_[a-z0-9_]+_local_status", status_table):
             raise ValueError("Unsupported favorites source")
         with self.connect() as db:
             meta = db.execute(f"SELECT updated_at, sort FROM {source}_favorite_catalog WHERE owner=?", (owner,)).fetchone()
             rows = db.execute(f"""SELECT f.comic_id, f.item, f.position, s.status, s.title, s.path, s.images, s.message, s.checked_at
-                FROM {source}_favorites f LEFT JOIN {source}_local_status s ON s.root=? AND s.album_id=f.comic_id
+                FROM {source}_favorites f LEFT JOIN {status_table} s ON s.root=? AND s.album_id=f.comic_id
                 WHERE f.owner=? AND f.favorited=1
                 ORDER BY f.position IS NOT NULL, f.position, f.updated_at DESC, f.comic_id""", (root, owner)).fetchall()
         return {"complete": meta is not None, "updated_at": meta["updated_at"] if meta else None,

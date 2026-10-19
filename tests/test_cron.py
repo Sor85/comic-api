@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from src.services import cron
-from src.services.jm_sync import SyncSettings
+from src.services.image_sync import ImageSyncSettings
 
 
 def test_next_runs_follow_fields_and_vixie_day_rule():
@@ -45,9 +45,9 @@ def test_settings_normalize_cron_and_preview_api(tmp_path):
     from src.storage import Store
     from tests.fakes import DemoPlugin
 
-    assert SyncSettings(cron="  30   3 * * *").cron == "30 3 * * *"
+    assert ImageSyncSettings(cron="  30   3 * * *").cron == "30 3 * * *"
     with pytest.raises(ValueError):
-        SyncSettings(cron="* * * * *")
+        ImageSyncSettings(cron="* * * * *")
     store = Store(str(tmp_path))
     with TestClient(create_app(store, {"demo": DemoPlugin(store)})) as client:
         data = client.get("/api/cron/preview", params={"expression": "0 3 * * *"}).json()

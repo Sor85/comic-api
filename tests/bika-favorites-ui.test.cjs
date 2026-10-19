@@ -5,7 +5,7 @@ const {test} = require('node:test');
 const vm = require('node:vm');
 const app = readFileSync(join(__dirname, '../src/web/static/app.js'), 'utf8');
 const listing = readFileSync(join(__dirname, '../src/web/static/bika-favorites.js'), 'utf8');
-const favoriteSync = readFileSync(join(__dirname, '../src/web/static/favorite-sync.js'), 'utf8');
+const librarySync = readFileSync(join(__dirname, '../src/web/static/library-sync.js'), 'utf8');
 
 class Element {
   constructor(tag) {
@@ -52,9 +52,9 @@ function harness(){
   vm.runInContext(app.slice(app.indexOf('function emptyState('),app.indexOf('function timeAgo(')),context);
   vm.runInContext(app.slice(app.indexOf('function cloudFavoriteButton('),app.indexOf('function syncDetailHead(')),context);
   vm.runInContext(app.slice(app.indexOf('function coverKey('),app.indexOf('// Reconcile a card list')),context);
-  vm.runInContext(favoriteSync.slice(favoriteSync.indexOf('const FAV_SYNC'),favoriteSync.indexOf('const syncField')),context);
-  vm.runInContext(favoriteSync.slice(favoriteSync.indexOf('function syncableCard('),favoriteSync.indexOf('async function startFavSync(')),context);
-  context.startFavSync=(source,ids)=>{calls.push({sync:source,ids});};
+  vm.runInContext(librarySync.slice(librarySync.indexOf('const FAV_VIEWS'),librarySync.indexOf('const syncField')),context);
+  vm.runInContext(librarySync.slice(librarySync.indexOf('function syncableCard('),librarySync.indexOf('async function startLibrarySync(')),context);
+  context.startLibrarySync=items=>{calls.push({sync:items});};
   vm.runInContext(listing,context);
   return {context,state,roots,calls,toasts,bindings,tabs,view:vm.runInContext('bikaFavorites',context)};
 }
@@ -132,18 +132,18 @@ test('选择下载状态后按本地记录的全部收藏筛选，并可更新�
   const items=[{...detail,id:'b',title:'乙'},{...detail,id:'c',title:'丙'}];
   h.context.api=async(path,options)=>{
     h.calls.push({path,options});
-    if(path.startsWith('/api/bika/sync/catalog/refresh')){refresh={...refresh,active:true,pages:1,total_pages:3};return refresh;}
-    if(path.startsWith('/api/bika/sync/catalog'))return {complete:false,updated_at:null,sort:'',counts:{all:3,downloaded:1,missing:2},total:2,page:1,page_size:20,has_next:false,items,local:{b:{status:'error',message:'坏图'}},refresh};
+    if(path.startsWith('/api/bika/favorites-catalog/refresh')){refresh={...refresh,active:true,pages:1,total_pages:3};return refresh;}
+    if(path.startsWith('/api/bika/favorites-catalog'))return {complete:false,updated_at:null,sort:'',counts:{all:3,downloaded:1,missing:2},total:2,page:1,page_size:20,has_next:false,items,local:{b:{status:'error',message:'坏图'}},refresh};
     return page([{...detail,id:'a',title:'甲'}]);
   };
   const shown=()=>h.roots['bika-favorites-books'].children.map(el=>el.item.id),notice=()=>h.roots['bika-favorites-catalog'];
   await h.context.loadBikaFavorites();assert.deepEqual(shown(),['a']);
   h.roots['bika-favorites-local'].value='missing';h.roots['bika-favorites-local'].onchange();await flush();
-  assert.match(h.calls.at(-1).path,/^\/api\/bika\/sync\/catalog\?local=missing&page=1$/);
+  assert.match(h.calls.at(-1).path,/^\/api\/bika\/favorites-catalog\?local=missing&page=1$/);
   assert.deepEqual(shown(),['b','c']);assert.equal(h.roots['bika-favorites-count'].textContent,'2 本');
   assert.match(notice().textContent,/本地尚未记录完整收藏列表，当前按已记录的 3 本筛选/);
   await notice().querySelector('button').onclick();await flush();
-  assert.equal(h.calls.find(call=>call.path.includes('/refresh')).path,'/api/bika/sync/catalog/refresh?sort=dd');
+  assert.equal(h.calls.find(call=>call.path.includes('/refresh')).path,'/api/bika/favorites-catalog/refresh?sort=dd');
   assert.match(notice().textContent,/正在更新收藏列表.*第 1 \/ 3 页/);
   h.roots['bika-favorites-local'].value='';h.roots['bika-favorites-local'].onchange();await flush();
   assert.deepEqual(shown(),['a']);assert.equal(notice().children.length,0);
@@ -199,19 +199,19 @@ test('收藏卡片可选择并批量或单本同步到本地，换页清空选�
   h.roots['bika-select-page'].onclick();assert.equal(h.view.selected.size,0);
   assert.equal(h.roots['bika-select-page']['aria-label'],'选择本页');assert.equal(h.roots['bika-select-page']['aria-pressed'],'false');
   h.roots['bika-select-page'].onclick();assert.equal(h.view.selected.size,2);await h.roots['bika-sync-selected'].onclick();
-  assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:'bika',ids:items.map(item=>item.id)}));
+  assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:items.map(item=>({source:'bika',id:item.id}))}));
   await first.querySelectorAll('.card-sync')[0].onclick();
-  assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:'bika',ids:[detail.id]}));
+  assert.equal(JSON.stringify(h.calls.at(-1)),JSON.stringify({sync:[{source:'bika',id:detail.id}]}));
   h.roots['bika-favorites-next'].onclick();await flush();assert.equal(h.view.selected.size,0);
 });
 
-test('哔咔收藏页头提供本地同步入口，与 JM 共用同步窗口',()=>{
+test('收藏页不再有独立的本地同步入口，同步统一由书库窗口管理',()=>{
   const html=readFileSync(join(__dirname,'../src/web/templates/index.html'),'utf8');
-  assert.match(html,/id="bika-sync-open"[^>]*aria-controls="fav-sync-dialog"/);
-  assert.match(html,/id="jm-sync-open"[^>]*aria-controls="fav-sync-dialog"/);
-  assert.ok(html.indexOf('/static/favorite-sync.js')<html.indexOf('/static/jm-sync.js'));
-  assert.ok(html.indexOf('/static/favorite-sync.js')<html.indexOf('/static/bika-favorites.js'));
-  assert.match(favoriteSync,/\/api\/\$\{source\}\/sync\/run/);
+  assert.doesNotMatch(html,/id="(bika|jm)-sync-open"/);
+  assert.match(html,/id="library-sync-open"[^>]*aria-controls="fav-sync-dialog"/);
+  assert.ok(html.indexOf('/static/library-sync.js')<html.indexOf('/static/jm-sync.js'));
+  assert.ok(html.indexOf('/static/library-sync.js')<html.indexOf('/static/bika-favorites.js'));
+  assert.match(librarySync,/\$\{SYNC_PATH\}\/run/);
 });
 
 test('收藏卡片在作者行末尾附加本地状态提示（不画在封面上），未下载不显示',async()=>{
@@ -219,10 +219,10 @@ test('收藏卡片在作者行末尾附加本地状态提示（不画在封面�
   const items=ids.map((id,index)=>({...detail,id,title:`漫画 ${index}`}));
   const local={[ids[0]]:{status:'downloaded',images:12,path:'/data/a',message:''},[ids[1]]:{status:'error',images:0,path:'/data/b',message:'章节图片数量不符'},[ids[2]]:{status:'missing',images:0,path:'',message:''}};
   h.context.card=item=>{const el=new Element('article'),cover=new Element('div'),authors=new Element('span');cover.className='cover';authors.className='comic-authors';el.append(cover,authors);el.item=item;return el;};
-  h.context.api=async path=>{h.calls.push({path});return path.includes('/sync/local-status')?{root:'/data',counts:{},items:local}:page(items);};
+  h.context.api=async path=>{h.calls.push({path});return path.includes('/library/sync/local-status')?{root:'/data',counts:{},items:local}:page(items);};
   await h.context.loadBikaFavorites();await flush();await flush();
-  const query=h.calls.find(call=>call.path.includes('/sync/local-status')).path;
-  assert.match(query,/^\/api\/bika\/sync\/local-status\?ids=/);assert.equal(decodeURIComponent(query.split('ids=')[1]),ids.join(','));
+  const query=h.calls.find(call=>call.path.includes('/library/sync/local-status')).path;
+  assert.match(query,/^\/api\/library\/sync\/local-status\?source=bika&ids=/);assert.equal(decodeURIComponent(query.split('ids=')[1]),ids.join(','));
   const cards=h.roots['bika-favorites-books'].children;
   assert.ok(cards.every(card=>!card.querySelectorAll('.cover')[0].querySelectorAll('.card-local').length));
   const badges=cards.map(card=>card.querySelectorAll('.comic-authors')[0].querySelectorAll('.card-local')[0]);

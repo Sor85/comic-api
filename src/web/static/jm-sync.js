@@ -2,7 +2,7 @@
 const jm = {page:1, folder:'0', order:'mr', items:[], folders:[], selected:new Set(), request:0};
 async function loadJmFavoritesView(){
   if(sourcePlugin('jm')?.enabled===false){await loadJmFavorites();return;}
-  await Promise.all([loadSyncSettings('jm'),loadSyncStatus('jm'),loadJmFavorites()]);
+  await Promise.all([loadSyncStatus().catch(()=>{}),loadJmFavorites()]);
 }
 function jmCanRead(){const p=sourcePlugin('jm');return p?.enabled!==false&&p?.capabilities.includes('favorites')&&(p.account?.authenticated||p.account?.configured);}
 // Reloading the page already shown (tab re-entry, refresh) keeps its cards and only patches what changed remotely.
@@ -66,8 +66,7 @@ function renderJmBooks(){
   syncJmSelection();
 }
 function syncJmSelection(){syncSelectionBar('jm',jm);}
-FAV_SYNC.jm.onStatus=syncJmSelection;
-FAV_SYNC.jm.onLocalChange=async()=>{if(favCatalogMode('jm',jm)){run(loadJmFavorites);return;}if(jm.items.length&&await loadLocalStatus('jm',jm.items.map(item=>String(item.id))))renderJmBooks();};
+libSync.onLocalChange.jm=async()=>{if(favCatalogMode('jm',jm)){run(loadJmFavorites);return;}if(jm.items.length&&await loadLocalStatus('jm',jm.items.map(item=>String(item.id))))renderJmBooks();};
 $('jm-favorites-refresh').onclick=()=>run(loadJmFavoritesView,$('jm-favorites-refresh'));
 $('jm-favorites-filter').onsubmit=event=>{event.preventDefault();renderJmBooks();};
 if(typeof dropdown!=='undefined')dropdown.filterMenu($('jm-favorites-filter-open'),[{select:$('jm-favorites-sort')},{select:$('jm-favorites-local')}]);
@@ -78,4 +77,4 @@ $('jm-favorites-sort').onchange=()=>{jm.order=$('jm-favorites-sort').value;jm.pa
 $('jm-favorites-prev').onclick=()=>{if(jm.page>1){jm.page--;run(loadJmFavorites);}};
 $('jm-favorites-next').onclick=()=>{if(jm.hasNext){jm.page++;run(loadJmFavorites);}};
 $('jm-select-page').onclick=()=>toggleSyncPage(jm,filteredJmBooks().map(item=>String(item.id)),renderJmBooks);
-$('jm-sync-selected').onclick=()=>run(()=>startFavSync('jm',[...jm.selected]),$('jm-sync-selected'));
+$('jm-sync-selected').onclick=()=>run(()=>startLibrarySync([...jm.selected].map(id=>({source:'jm',id}))),$('jm-sync-selected'));
