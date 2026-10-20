@@ -74,6 +74,24 @@ test('自定义模板示例按变量渲染并补零，未知变量原样保留',
   assert.equal(rulePathExample('title_plain', '{id}/{index}'), '漫画标题/第1話 章节标题');
 });
 
+test('迁移源目录示例与目标示例复用同一种说明块和路径字体', () => {
+  const html = readFileSync(join(__dirname, '../src/web/templates/index.html'), 'utf8');
+  const samples = html.match(/<ul class="([^"]*\bmigration-samples\b[^"]*)"[^>]*>([\s\S]*?)<\/ul>/);
+  assert.ok(samples);
+  assert.ok(samples[1].split(/\s+/).includes('migration-example'));
+  assert.ok(samples[1].split(/\s+/).includes('jm-path'));
+  assert.match(html, /id="library-migration-example" class="migration-example jm-path"/);
+  assert.deepEqual([...samples[2].matchAll(/<li>(.*?)<\/li>/g)].map(match => match[1]), [
+    '123456/', '标题 [123456]/', '标题/第1話 章节/', '作者/标题 [123456]/', '【作者】原标题/', '标题/00001.jpg（单章）',
+  ]);
+});
+
+test('迁移源目录示例纵向排列，不再为每条目录绘制独立标签背景', () => {
+  const css = readFileSync(join(__dirname, '../src/web/static/app.css'), 'utf8');
+  assert.match(css.match(/\.migration-samples\s*\{([^}]*)\}/)[1], /flex-direction\s*:\s*column/);
+  assert.doesNotMatch(css, /\.migration-samples\s+li\s*\{[^}]*(?:background|border-radius)\s*:/);
+});
+
 function migrationHarness(api = async () => {}) {
   const elements = {}, libSync = {active: false, migrationSource: ''};
   const $ = id => elements[id] ||= new Element('div');

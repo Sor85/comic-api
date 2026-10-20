@@ -919,8 +919,7 @@ button.danger-soft:hover{border-color:var(--danger)}
 .migration-step-icon svg{width:19px;height:19px}
 .migration-link{display:flex;align-items:center;flex:0 0 auto;color:var(--muted)}
 .migration-arrow{width:16px;height:16px}
-.migration-samples{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 0;padding:0;list-style:none}
-.migration-samples li{padding:1px 7px;border-radius:6px;font:11.5px/1.6 ui-monospace,Consolas,monospace;color:var(--text);background:var(--group)}
+.migration-samples{display:flex;flex-direction:column;gap:2px;margin:2px 0 0;list-style:none}
 .migration-example{margin-top:2px!important;padding:6px 8px;border-radius:8px;font-size:11.5px;color:var(--text);background:var(--group)}
 .migration-example:empty{display:none}
 .migration-safety{display:flex;align-items:flex-start;gap:8px;margin:12px 0 0;font-size:13px;line-height:1.6;color:var(--muted)}
