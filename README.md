@@ -8,12 +8,10 @@ Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画、
 
 ## 界面预览
 
-以下截图选用 JM 与哔咔中标注「全年龄／非H／无H内容」的 24 本演示条目，封面经过逐张检查。书库分类、阅读进度、云收藏和本地下载状态均为隔离环境中的演示数据，不关联真实账号，不改动真实书库或云端收藏。阅读器仅载入选取的全年龄漫画样张。漫画封面及阅读样张版权归相应权利人所有。
-
 <table>
   <tr>
-    <th width="50%">首页 · JM 与哔咔双源书架</th>
-    <th width="50%">书库 · 24 本双源漫画</th>
+    <th width="50%">首页</th>
+    <th width="50%">书库</th>
   </tr>
   <tr>
     <td><img src="docs/images/home.webp" alt="首页：继续阅读、JM 与哔咔漫画书架"></td>
@@ -21,7 +19,7 @@ Python / FastAPI 多图源漫画 WebUI。内置禁漫、哔咔、拷贝漫画、
   </tr>
   <tr>
     <th>漫画详情</th>
-    <th>阅读页 · 全年龄漫画样张</th>
+    <th>阅读页</th>
   </tr>
   <tr>
     <td><img src="docs/images/info.webp" alt="漫画详情：封面、作者、标签、简介与章节列表"></td>
