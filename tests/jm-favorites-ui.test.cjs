@@ -31,7 +31,7 @@ function harness() {
     toast:(message,options)=>toasts.push({message,options}),loadJmFavorites:async()=>{refreshes++;},
     bindButton:id=>{const button=new Element('button');button.textContent='绑定 JM 账号';button.onclick=()=>bindings.push(id);return button;},
     inLibrary:()=>false,readLocal:()=>null,readingLast:()=>null,renderComicLabels:()=>new Element('div'),
-    syncChapterSort(){},syncChapterPreviews(){},drawChapters(){},requestAnimationFrame(){},
+    syncChapterSort(){},drawChapters(){},requestAnimationFrame(){},
     detailHero:()=>{const hero=new Element('div'),text=new Element('div');hero.append(text);return {hero,text};},
   });
   vm.runInContext(readFileSync(join(__dirname, '../src/web/static/comic-authors.js'), 'utf8'),context);

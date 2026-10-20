@@ -527,12 +527,6 @@ button.source-toggle svg{width:44px;height:28px;stroke:none}
 .chapters-tools{display:flex;flex-wrap:nowrap;gap:8px;margin-left:auto;align-items:center;justify-content:flex-end;min-width:0}
 .chapters-tools .small{border-radius:999px;padding:6px 14px;background:var(--group);border-color:transparent;color:var(--muted)}
 .chapters-tools .small:hover{color:var(--text)}
-.chapter-previews-toggle{font-size:13px;line-height:1.4}
-.chapter-previews-toggle[aria-checked="true"]{color:var(--accent)!important;background:color-mix(in srgb,var(--accent) 12%,transparent)!important}
-.chapters-tools .chapter-previews-toggle svg{width:24px;height:16px;stroke:none}
-.chapter-previews-toggle .switch-track{fill:color-mix(in srgb,currentColor 35%,transparent)}
-.chapter-previews-toggle[aria-checked="true"] .switch-track{fill:var(--accent)}
-.chapter-previews-toggle .switch-knob{fill:#fff}
 .chapter-search{flex:0 1 200px;min-width:120px;max-width:200px}
 .chapter-search svg{left:11px;width:14px;height:14px}
 #chapter-filter{width:100%;padding:6px 12px 6px 32px;font-size:13px;border-radius:999px;background:var(--group);border-color:transparent}
@@ -542,11 +536,6 @@ button.source-toggle svg{width:44px;height:28px;stroke:none}
 .chapter:hover{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent),0 4px 12px -6px #0000002e}
 .chapter.current{background:color-mix(in srgb,var(--accent) 10%,var(--surface));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent)}
 .chapter.read .chapter-name span{color:var(--muted)}
-.chapter-preview{position:relative;flex:0 0 48px;width:48px;height:64px;margin-left:-6px;display:grid;place-items:center;overflow:hidden;border-radius:8px;background:var(--group);color:var(--muted);font-size:12px;line-height:1.4}
-.chapter-preview>svg{position:absolute;width:20px;height:20px}
-.chapter-preview img{position:relative;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s}
-.chapter-preview img.ready{opacity:1}
-.chapter-preview.has-image>svg{visibility:hidden}
 .chapter-name{flex:1;min-width:0;display:flex;flex-direction:column}
 .chapter-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .chapter-name small{font-size:11px;color:var(--accent)}

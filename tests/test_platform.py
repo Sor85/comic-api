@@ -328,16 +328,20 @@ def test_index_asset_url_tracks_bundle_contents(client, tmp_path, monkeypatch):
     assert f"?v={app_module.bundled_asset_version()}" in second
 
 
-def test_chapter_previews_script_is_versioned_and_loaded_before_app(client):
+def test_comic_tags_script_is_versioned_and_loaded_before_app(client):
     import main as app_module
     version = app_module.bundled_asset_version()
     html = client.get("/").text
-    for asset, marker in [('chapter-previews.js', 'class ChapterPreviews'), ('comic-tags.js', 'function comicLabels')]:
-        path = f'/static/{asset}?v={version}'
-        assert html.index(path) < html.index(f'/static/app.js?v={version}')
-        response = client.get(path)
-        assert response.status_code == 200 and marker in response.text
-        assert "immutable" in response.headers["cache-control"]
+    path = f'/static/comic-tags.js?v={version}'
+    assert html.index(path) < html.index(f'/static/app.js?v={version}')
+    response = client.get(path)
+    assert response.status_code == 200 and 'function comicLabels' in response.text
+    assert "immutable" in response.headers["cache-control"]
+
+
+def test_chapter_previews_script_is_removed(client):
+    assert "chapter-previews" not in client.get("/").text
+    assert client.get("/static/chapter-previews.js").status_code == 404
 
 
 def test_static_assets_cache_by_version(client):

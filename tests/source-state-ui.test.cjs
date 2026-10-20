@@ -29,7 +29,7 @@ function harness(){
     needsLogin:()=>false,renderSourceSettings(){},initBrowse(){},showTab:tab=>{state.tab=tab;},renderQuick(){},renderContinue(){},filterBooks(){},syncSearchMode(){},renderFilters(){},
     loadShelves:async()=>loads.push(context.activeSources().map(p=>p.id)),loadSearch:async()=>loads.push('search'),loadDiscover:async()=>loads.push('discover'),
     loadJmFavoritesView:async()=>loads.push('jm'),loadBikaFavoritesView:async()=>loads.push('bika'),syncJmSelection(){},
-    jm:{request:0,items:[],selected:new Set()},bikaFavorites:{request:0,items:[]},chapterPreviews:{stop:()=>loads.push('previews-stop')},closeReader:()=>{root('reader-dialog').close();loads.push('reader-close');},
+    jm:{request:0,items:[],selected:new Set()},bikaFavorites:{request:0,items:[]},closeReader:()=>{root('reader-dialog').close();loads.push('reader-close');},
     pick:(values,value)=>values.some(v=>v.value===value)?value:values[0]?.value||'',BROWSE_ORDER:['latest'],CAP_LABELS:{search:'搜索',favorites:'收藏夹'},
   });
   vm.runInContext(app.slice(app.indexOf('function node('),app.indexOf('// The toast')),context);
@@ -74,13 +74,13 @@ test('重新启用发送布尔值并恢复导航，不依赖浏览器本地存�
   assert.ok(h.tabs.filter(tab=>tab.dataset.tab==='bika-favorites').every(tab=>!tab.hidden));
 });
 
-test('关闭正在显示的收藏和漫画时清理迟到请求、预览及阅读器',async()=>{
+test('关闭正在显示的收藏和漫画时清理迟到请求及阅读器',async()=>{
   const h=harness();h.state.tab='bika-favorites';h.state.detailItem={source:'bika'};h.state.detail={source:'bika'};
   h.root('detail-dialog').open=h.root('reader-dialog').open=true;
   await h.context.setSourceEnabled('bika',false);
   assert.equal(h.state.tab,'browse');assert.equal(h.state.detail,null);assert.equal(h.root('detail-dialog').open,false);assert.equal(h.root('reader-dialog').open,false);
   assert.equal(h.state.detailRequest,1);assert.ok(h.context.bikaFavorites.request>0);assert.ok(h.context.jm.request>0);
-  assert.ok(h.loads.includes('previews-stop')&&h.loads.includes('reader-close'));
+  assert.ok(h.loads.includes('reader-close'));
 });
 
 test('关闭的单源搜索清除专属筛选并回到聚合搜索',()=>{

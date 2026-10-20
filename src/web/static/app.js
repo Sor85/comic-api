@@ -5,7 +5,7 @@ const state = {
   sources: [], tab: 'browse', books: [], categories: [], detail: null, detailItem: null, reader: null,
   discover: {source: '', action: 'latest', page: 1, name: '', sort: '', mode: 'day'}, search: null, searchCounts: null, view: 'home',
   health: {}, healthDots: {}, chapterDesc: readLocal('comic:chapter-desc') === true,
-  chapterPreviews: readLocal('comic:chapter-previews') === true, recentPage: readLocal('comic:recent-page') !== false,
+  recentPage: readLocal('comic:recent-page') !== false,
   searchMode: 'keyword', searchCategories: {}, searchCategoryRequests: {},
   browseRequest: 0, shelfRequest: 0, detailRequest: 0, readerRequest: 0, resultItems: [], resultShown: 0, activeTasks: 0,
   reading: [], readingIndex: new Map(), readingLoaded: false, favoriteIds: {},
@@ -34,7 +34,6 @@ const icons = {
   copy:'<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   play:'<polygon points="6 3 20 12 6 21 6 3"/>',
   check:'<polyline points="20 6 9 17 4 12"/>',
-  image:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
   'toggle-left':'<rect class="switch-track" x="1" y="5" width="22" height="14" rx="7"/><circle class="switch-knob" cx="8" cy="12" r="5"/>',
   'toggle-right':'<rect class="switch-track" x="1" y="5" width="22" height="14" rx="7"/><circle class="switch-knob" cx="16" cy="12" r="5"/>',
   folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
@@ -189,7 +188,7 @@ function refreshSourceViews(){
   for(const p of state.sources)if(p.enabled===false){state.healthChecks?.[p.id]?.abort();if(state.healthChecks)delete state.healthChecks[p.id];delete state.health[p.id];}
   const detailSource=state.detailItem?.source||state.detail?.source;
   if(detailSource&&sourcePlugin(detailSource)?.enabled===false){
-    ++state.detailRequest;chapterPreviews.stop();if($('reader-dialog').open)closeReader(true);
+    ++state.detailRequest;if($('reader-dialog').open)closeReader(true);
     if($('detail-dialog').open)$('detail-dialog').close();state.detail=state.detailItem=null;
   }
   ++jm.request;jm.items=[];jm.hasNext=false;jm.loadedKey='';jm.selected.clear();syncJmSelection();
@@ -845,7 +844,6 @@ function detailHero(item,loading){
 }
 async function openComic(item) {
   if(sourcePlugin(item.source)?.enabled===false){toast('图源已关闭，重新启用入口位于「设置 → 图源管理」');return;}
-  chapterPreviews.stop();
   const request=++state.detailRequest,dlg=$('detail-dialog');state.detail=null;state.detailItem=item;
   $('detail-title').textContent=item.title||'漫画详情';
   $('detail-body').replaceChildren(detailHero(item,true).hero);
@@ -869,51 +867,9 @@ function errorPanel(title,e,item,compact){
   box.append(icon,text,actions);return box;
 }
 const CHAPTER_PAGE=60;
-const chapterPreviews=new ChapterPreviews({
-  load:async(detail,chapter)=>{
-    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
-    try{const data=await api(`/api/chapter/${enc(detail.source)}/${enc(detail.id)}/${enc(chapter.id)}`,{signal:controller.signal});return data.images?.[0]||null;}
-    finally{clearTimeout(timer);}
-  },
-  render:renderChapterPreview,
-});
-function chapterPreviewVisible(box){return state.chapterPreviews&&box.isConnected&&$('detail-dialog').open&&!$('reader-dialog').open;}
-function renderChapterPreview(box,url,detail,chapter){
-  if(!chapterPreviewVisible(box))return;
-  const fallback=detail.cover?coverFor(detail):'';
-  const show=(src,isFallback)=>{
-    box.querySelector('img')?.remove();box.classList.remove('has-image');
-    if(!src||!safeImage(src)){box.title='章节首图不可用';return;}
-    box.title=isFallback?'章节首图不可用，显示漫画封面':'章节首图';
-    const img=image(src,'');
-    img.onload=()=>{if(chapterPreviewVisible(box)){img.classList.add('ready');box.classList.add('has-image');}};
-    img.onerror=()=>{
-      img.removeAttribute('src');
-      if(!chapterPreviewVisible(box))return;
-      if(!isFallback){chapterPreviews.failed(detail,chapter);show(fallback,true);}
-      else{img.remove();box.title='章节首图不可用';}
-    };
-    box.append(img);
-  };
-  show(url||fallback,!url);
-}
-function syncChapterPreviews(){
-  const control=$('chapter-previews-toggle');if(!control)return;
-  control.setAttribute('aria-checked',String(state.chapterPreviews));
-  control.innerHTML=svgIcon(state.chapterPreviews?'toggle-right':'toggle-left');
-  control.append(node('span','章节封面'));
-}
-function toggleChapterPreviews(){
-  state.chapterPreviews=!state.chapterPreviews;saveLocal('comic:chapter-previews',state.chapterPreviews);
-  syncChapterPreviews();drawChapters(true,true);
-}
 function chapterRow(detail,chapter,lastId){
   const id=String(chapter.id),progress=chapterProgress(detail,id);
   const row=node('div',undefined,'chapter'+(id===lastId?' current':progress?' read':''));row.tabIndex=0;row.setAttribute('role','button');
-  if(state.chapterPreviews){
-    const preview=node('span',undefined,'chapter-preview');preview.setAttribute('aria-hidden','true');preview.title='章节首图按需加载';preview.innerHTML=svgIcon('image');
-    row.append(preview);chapterPreviews.watch(preview,detail,chapter);
-  }
   const label=node('div',undefined,'chapter-name');label.append(node('span',chapter.name||`第 ${chapter.order||''} 话`));
   if(id===lastId)label.append(node('small',`上次读到第 ${(progress?.index??0)+1} 页`));
   else if(progress)label.append(node('small',`读到第 ${progress.index+1} 页`));
@@ -923,12 +879,10 @@ function chapterRow(detail,chapter,lastId){
   return row;
 }
 // Chapters render in chunks so books with hundreds of episodes stay responsive.
-function drawChapters(reset,keepShown=false){
+function drawChapters(reset){
   const detail=state.detail,list=$('chapter-list');if(!detail||!list)return;
   if(reset){
-    if(state.chapterPreviews&&$('detail-dialog').open&&!$('reader-dialog').open)chapterPreviews.start($('detail-dialog'));
-    else chapterPreviews.stop();
-    state.chapterView={shown:keepShown?state.chapterView?.shown||CHAPTER_PAGE:CHAPTER_PAGE,needle:($('chapter-filter')?.value||'').trim().toLowerCase()};list.replaceChildren();
+    state.chapterView={shown:CHAPTER_PAGE,needle:($('chapter-filter')?.value||'').trim().toLowerCase()};list.replaceChildren();
   }
   const view=state.chapterView,lastId=readingLast(detail)?.chapterId;
   const matched=(detail.chapters||[]).filter(c=>!view.needle||(c.name||'').toLowerCase().includes(view.needle));
@@ -963,11 +917,10 @@ function renderDetail() {
   text.append(controls);
   const section=node('section',undefined,'chapters'),head=node('div',undefined,'chapters-head'),tools=node('div',undefined,'chapters-tools');
   head.append(node('h3','章节'),node('span',String(detail.chapters.length),'count'),tools);
-  if(detail.chapters.length){const preview=button('',toggleChapterPreviews,'small chapter-previews-toggle');preview.id='chapter-previews-toggle';preview.setAttribute('role','switch');preview.setAttribute('aria-label','章节封面');preview.title='使用章节首图，按可见范围加载；设置仅保存在当前浏览器。';tools.append(preview);}
   if(detail.chapters.length>15){const box=node('div',undefined,'input-icon chapter-search'),filter=node('input');box.innerHTML=svgIcon('search');filter.id='chapter-filter';filter.type='search';filter.placeholder='筛选章节';filter.maxLength=50;filter.setAttribute('aria-label','筛选章节');filter.oninput=()=>drawChapters(true);box.append(filter);tools.append(box);}
   if(detail.chapters.length>1){const sort=node('button',undefined,'small chapter-sort');sort.id='chapter-sort';sort.type='button';sort.onclick=()=>{state.chapterDesc=!state.chapterDesc;saveLocal('comic:chapter-desc',state.chapterDesc);syncChapterSort();drawChapters(true);};tools.append(sort);}
   const list=node('div',undefined,'chapter-list');list.id='chapter-list';section.append(head,list);
-  body.append(hero,section);syncChapterSort();syncChapterPreviews();drawChapters(true);
+  body.append(hero,section);syncChapterSort();drawChapters(true);
   // Long synopses collapse to a few lines with an explicit toggle.
   requestAnimationFrame(()=>{if(desc.scrollHeight>desc.clientHeight+2){const more=node('button','展开简介','link-btn');more.type='button';more.onclick=()=>{const open=desc.classList.toggle('open');more.textContent=open?'收起简介':'展开简介';};desc.after(more);}});
 }
@@ -1233,7 +1186,7 @@ function showReaderDialog(){const dlg=$('reader-dialog');if(dlg.open)return;stat
 // Continue reading straight into the reader: load the comic behind the scenes without opening its detail page.
 async function resumeComic(item){
   if(sourcePlugin(item.source)?.enabled===false){toast('图源已关闭，重新启用入口位于「设置 → 图源管理」');return;}
-  saveProgress();++state.detailRequest;chapterPreviews.stop();
+  saveProgress();++state.detailRequest;
   const request=++state.readerRequest;state.readerAbort?.abort();state.readerAbort=new AbortController();state.reader=null;
   state.observer?.disconnect();state.mounter?.disconnect();
   $('reader-comic').textContent=item.title||'';$('reader-title').textContent='';$('reader-chapter').hidden=true;$('page-status').textContent='';
@@ -1259,7 +1212,6 @@ async function resumeComic(item){
 }
 async function openReader(chapterId,startAt){
   saveProgress();const book=state.detail;if(!book)return;book.chapters=book.chapters||[];const chapter=book.chapters.find(c=>String(c.id)===chapterId);if(!chapter)return;
-  chapterPreviews.stop();
   const request=++state.readerRequest;state.readerAbort?.abort();state.readerAbort=new AbortController();state.reader=null;
   state.observer?.disconnect();state.mounter?.disconnect();
   $('reader-comic').textContent=book.title;$('reader-title').textContent=chapter.name;fillChapterSelect(book,chapterId);
@@ -1375,8 +1327,7 @@ document.querySelectorAll('[data-tab]').forEach(n=>n.onclick=()=>showTab(n.datas
 document.querySelectorAll('[data-close]').forEach(n=>n.onclick=()=>{if(n.dataset.close==='detail-dialog')++state.detailRequest;$(n.dataset.close).close();});
 // Click on the dialog backdrop (outside its content) closes it, same as the close button.
 document.querySelectorAll('dialog:not(#reader-dialog)').forEach(dlg=>dlg.addEventListener('click',event=>{if(event.target!==dlg)return;const r=dlg.getBoundingClientRect();if(event.clientX>=r.left&&event.clientX<=r.right&&event.clientY>=r.top&&event.clientY<=r.bottom)return;if(dlg.id==='detail-dialog')++state.detailRequest;dlg.close();}));
-$('detail-dialog').addEventListener('close',()=>{if(!$('detail-dialog').open){++state.detailRequest;chapterPreviews.stop();}});
-$('detail-dialog').addEventListener('cancel',()=>chapterPreviews.stop());
+$('detail-dialog').addEventListener('close',()=>{if(!$('detail-dialog').open)++state.detailRequest;});
 $('detail-scroll').addEventListener('scroll',syncDetailHead,{passive:true});
 $('browse-form').onsubmit=browse;
 function syncClear(){$('keyword-clear').hidden=!$('keyword').value;renderTagTerms();}
