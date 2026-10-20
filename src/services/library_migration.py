@@ -17,7 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from src.errors import ComicApiError
+from src.errors import ComicApiError, DownloadCancelled
 from src.services.image_sync import DEFAULT_ROOT, ROOTS_ENV
 from src.services.local_check import LocalLibrary, name_keys
 from src.services.local_images import DIRECTORY_RULES, DownloadPaths, id_free, parse_template
@@ -41,7 +41,7 @@ def original_name(title):
 class SourceTree(LocalLibrary):
     """Read-only matching over a migration source, which may use any directory rule."""
 
-    def __init__(self, store, paths, root, books, owner, template=""):
+    def __init__(self, store, paths, root, books, owner, template="", signal=None):
         # The saved custom template is recognized even after switching back to a built-in rule.
         try:
             parse_template(template)
@@ -49,7 +49,7 @@ class SourceTree(LocalLibrary):
         except ValueError:
             rule = ""
         super().__init__(store, paths, {"download_dir": str(root), "directory_rule": rule, "directory_template": template},
-                         books, threading.Event(), owner)
+                         books, signal or threading.Event(), owner)
 
     def album(self, book):
         found = super().album(book)
@@ -85,6 +85,9 @@ class LibraryMigration:
     def __init__(self, store, service, library):
         self.store, self.service, self.library = store, service, library
         self.task = None
+        self.signal = threading.Event()
+        self.preview_gate = asyncio.Event()
+        self.preview_gate.set()
         self.paths = DownloadPaths(store, ROOTS_ENV, DEFAULT_ROOT)
         for env, default in LEGACY_ROOTS:
             configured = [Path(part.strip()).expanduser().resolve() for part in os.environ.get(env, "").split(os.pathsep) if part.strip()]
@@ -94,7 +97,7 @@ class LibraryMigration:
         # Album moves of the latest preview, keyed by (source, comic ID); kept in memory only.
         self.plan = {}
         self.state = store.settings(STATE_KEY) or {"status": "idle"}
-        if self.state.get("status") in ("previewing", "running"):
+        if self.state.get("status") in ("previewing", "pausing", "paused", "running"):
             self.state.update(status="interrupted", error="服务重启中断；已迁移的漫画保留，需重新预览")
             self._persist()
 
@@ -128,12 +131,47 @@ class LibraryMigration:
         if not source.is_dir():
             raise ComicApiError("迁移源目录不存在或不是目录", 422, "directory_unavailable", "library")
         self.plan = {}
+        self.signal = threading.Event()
+        self.preview_gate = asyncio.Event()
+        self.preview_gate.set()
         self.state = {"status": "previewing", "source_dir": str(source), "scope": self._scope(source),
                       "started_at": time.time(), "finished_at": None, "albums_total": 0, "albums_done": 0,
                       "albums": [], "leftovers": [], "error": ""}
         self._persist()
         self.task = asyncio.create_task(self._preview(source))
         return self.status()
+
+    def pause(self):
+        if not self.active or self.state.get("status") != "previewing":
+            raise ComicApiError("没有正在生成的迁移预览", 409, "invalid_state", "library")
+        self.preview_gate.clear()
+        self.state["status"] = "pausing"
+        self._persist()
+        return self.status()
+
+    def resume(self):
+        if not self.active or self.state.get("status") != "paused":
+            raise ComicApiError("没有已暂停的迁移预览", 409, "invalid_state", "library")
+        self.state["status"] = "previewing"
+        self.preview_gate.set()
+        self._persist()
+        return self.status()
+
+    async def _checkpoint(self):
+        if self.signal.is_set():
+            raise DownloadCancelled()
+        while not self.preview_gate.is_set():
+            self.state["status"] = "paused"
+            self._persist()
+            await self.preview_gate.wait()
+        if self.signal.is_set():
+            raise DownloadCancelled()
+
+    async def stop(self):
+        self.signal.set()
+        self.preview_gate.set()
+        if self.task:
+            await self.task
 
     def run(self):
         self._guard()
@@ -161,18 +199,27 @@ class LibraryMigration:
         state = self.state
         known = set()
         try:
+            await self._checkpoint()
             bases = await asyncio.to_thread(self._bases, source)
+            await self._checkpoint()
             books = defaultdict(list)
-            for book in await asyncio.to_thread(self.store.books):
+            all_books = await asyncio.to_thread(self.store.books)
+            await self._checkpoint()
+            for book in all_books:
                 books[book["source"]].append(book)
             state["albums_total"] = sum(len(books[worker.source]) for worker, _ in bases)
             template = self.library.settings()["directory_template"]
             for worker, base in bases:
-                tree = await asyncio.to_thread(SourceTree, self.store, self.paths, base, books[worker.source], worker, template)
+                tree = await asyncio.to_thread(SourceTree, self.store, self.paths, base, books[worker.source], worker, template, self.signal)
                 for meta in books[worker.source]:
+                    await self._checkpoint()
                     await self._preview_album(worker, tree, meta, known)
+                    await self._checkpoint()
                     state["albums_done"] += 1
+            await self._checkpoint()
             state["status"] = "ready" if self.plan else "completed"
+        except DownloadCancelled:
+            state.update(status="interrupted", error="服务停止中断；已迁移的漫画保留，需重新预览")
         except Exception as exc:
             state.update(status="failed", error=str(exc) if isinstance(exc, ComicApiError) else "迁移预览失败")
             log.warning("Library migration preview failed", exc_info=not isinstance(exc, ComicApiError))
@@ -185,7 +232,9 @@ class LibraryMigration:
         try:
             album_id = worker.normalize_id(str(meta["id"]))
             recorded = (await asyncio.to_thread(worker.local_status, [album_id]))["items"].get(album_id, {})
+            await self._checkpoint()
             directory = await asyncio.to_thread(tree.album, meta) or await asyncio.to_thread(self._recorded_directory, tree, recorded)
+            await self._checkpoint()
         except ComicApiError as exc:
             if exc.code != "local_ambiguous":
                 return
@@ -212,6 +261,8 @@ class LibraryMigration:
                 entry.update(title=plan["book"]["title"], to=plan["album"], images=len(plan["moves"]), status="ready",
                              message=plan["note"])
                 self.plan[(worker.source, album_id)] = plan
+        except DownloadCancelled:
+            raise
         except Exception as exc:
             entry["message"] = str(exc) if isinstance(exc, ComicApiError) else "预览失败"
             if not isinstance(exc, ComicApiError):
@@ -227,25 +278,31 @@ class LibraryMigration:
     async def _plan(self, worker, tree, album_id, directory):
         source = worker.source
         book = await self.service.get_comic_detail(source, album_id)
+        await self._checkpoint()
         chapters = book.get("chapters", [])
         if not chapters:
             raise ComicApiError("漫画暂无有效章节", 502, "invalid_response", source)
         config = worker.settings()
         moves, missing_chapters, missing_pages, broken = [], 0, 0, 0
         for index, chapter in enumerate(chapters, 1):
+            await self._checkpoint()
             chapter_id = worker.chapter_id(chapter["id"])
             found = await asyncio.to_thread(tree.find_chapter, directory, chapter, index)
             if not found and len(chapters) == 1 and await asyncio.to_thread(tree.image_files, directory):
                 found = directory
+            await self._checkpoint()
             if not found:
                 missing_chapters += 1
                 continue
             urls = await self.service.get_chapter_images(source, album_id, chapter_id)
+            await self._checkpoint()
             if not urls:
                 raise ComicApiError("章节未返回图片", 502, "invalid_response", source)
             pages = await asyncio.to_thread(tree.pages, found, urls)
+            await self._checkpoint()
             target_dir = worker.paths.chapter(config, book, chapter, index)
             for page, url in enumerate(urls, 1):
+                await self._checkpoint()
                 path = pages.get(page)
                 if path is None:
                     missing_pages += 1
@@ -255,6 +312,8 @@ class LibraryMigration:
                 except ComicApiError:
                     broken += 1
                     continue
+                finally:
+                    await self._checkpoint()
                 target = worker.paths.resolve(target_dir / f"{page:05d}{path.suffix.lower()}")
                 if target.exists() and not os.path.samefile(target, path):
                     raise ComicApiError(f"目标位置已有其他文件：{target}", 409, "file_conflict", source)

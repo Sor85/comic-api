@@ -386,6 +386,8 @@ async function loadMigration(){
 function migrationLead(data){
   const albums=data.albums||[],count=status=>albums.filter(a=>a.status===status).length;
   if(data.status==='previewing')return `正在扫描源目录：${data.albums_done||0} / ${data.albums_total||0} 本书库漫画`;
+  if(data.status==='pausing')return `正在暂停预览：${data.albums_done||0} / ${data.albums_total||0} 本书库漫画，当前请求或单页校验完成后暂停。`;
+  if(data.status==='paused')return `预览已暂停：${data.albums_done||0} / ${data.albums_total||0} 本书库漫画，扫描进度已保留；服务重启后需重新预览。`;
   if(data.status==='running')return `正在迁移：${data.albums_done||0} / ${count('ready')+count('migrated')} 本`;
   if(data.status==='ready')return `预览完成：${count('ready')} 本待迁移，执行前不改动任何文件。`;
   if(data.status==='completed'&&count('migrated'))return `迁移完成：${count('migrated')} 本已迁入书库目录。`;
@@ -414,6 +416,9 @@ function renderMigration(data){
   $('library-migration-leftover-list').replaceChildren(...leftovers.map(item=>node('p',`${item.root}：${item.entries.join('、')}${item.more?` 等另 ${item.more} 项`:''}`,'jm-path')));
   $('library-migration-browse').disabled=busy;
   $('library-migration-preview').disabled=busy||libSync.active||!source;
+  $('library-migration-pause').hidden=!busy||!['previewing','pausing'].includes(data.status);
+  $('library-migration-pause').disabled=data.status!=='previewing';
+  $('library-migration-resume').hidden=!busy||data.status!=='paused';
   // A new source directory needs its own preview before anything moves.
   const fresh=data.status==='ready'&&source===data.source_dir;
   $('library-migration-run').disabled=busy||libSync.active||!fresh;
@@ -427,6 +432,9 @@ async function openMigration(){
 async function previewMigration(){
   const source_dir=libSync.migrationSource||libSync.migration?.source_dir;
   renderMigration(libSync.migration=await api('/api/library/migration/preview',write('POST',{source_dir})));
+}
+async function controlMigrationPreview(action){
+  renderMigration(libSync.migration=await api(`/api/library/migration/${action}`,{method:'POST'}));
 }
 async function runMigration(){
   const data=libSync.migration,count=(data?.albums||[]).filter(a=>a.status==='ready').length;
@@ -442,8 +450,9 @@ $('fav-sync-cancel').onclick=()=>run(async()=>{await api(`${SYNC_PATH}/cancel`,{
 $('fav-sync-settings-open').onclick=()=>run(openSyncSettings,$('fav-sync-settings-open'));
 $('library-migration-open').onclick=()=>run(openMigration,$('library-migration-open'));
 $('library-migration-browse').onclick=()=>run(()=>openDirectoryPicker('migration',libSync.migration?.roots,libSync.migrationSource||libSync.migration?.source_dir||''),$('library-migration-browse'));
-$('library-migration-preview').onclick=()=>run(previewMigration,$('library-migration-preview'));
-$('library-migration-run').onclick=()=>run(runMigration,$('library-migration-run'));
+$('library-migration-preview').onclick=()=>run(previewMigration,$('library-migration-preview')).finally(()=>renderMigration(libSync.migration));
+for(const action of ['pause','resume'])$('library-migration-'+action).onclick=()=>run(()=>controlMigrationPreview(action),$('library-migration-'+action)).finally(()=>renderMigration(libSync.migration));
+$('library-migration-run').onclick=()=>run(runMigration,$('library-migration-run')).finally(()=>renderMigration(libSync.migration));
 $('fav-sync-form').onsubmit=event=>{
   event.preventDefault();
   const values={};

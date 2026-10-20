@@ -1,5 +1,7 @@
 import asyncio
+import copy
 import shutil
+import threading
 import time
 
 import pytest
@@ -7,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from main import create_app
 from src.errors import ComicApiError
-from src.services.library_migration import LibraryMigration, original_name
+from src.services.library_migration import LibraryMigration, SourceTree, original_name
 from tests.test_jm_sync import FavoritePlugin, isolated_environment, jm_root, make_sync, save  # noqa: F401
 
 
@@ -217,6 +219,139 @@ def test_run_requires_fresh_preview_and_blocks_library_sync(tmp_path):
     asyncio.run(scenario())
 
 
+async def wait_preview_status(migration, status):
+    for _ in range(300):
+        if migration.state["status"] == status:
+            return
+        await asyncio.sleep(.01)
+    raise AssertionError(f"migration did not become {status}: {migration.state}")
+
+
+def test_preview_pause_keeps_progress_and_resumes_within_album(tmp_path, monkeypatch):
+    async def scenario():
+        library, plugin = make_sync(tmp_path)
+        source = library.store.root / "jm-favorites"
+        for album_id in ("101", "102"):
+            write_album(plugin, source / f"漫画 {album_id}", album_id)
+        migration = LibraryMigration(library.store, library.service, library)
+        entered, release = threading.Event(), threading.Event()
+        inspected, inspect = [], SourceTree.inspect
+
+        def slow_inspect(tree, path):
+            inspected.append(path)
+            if len(inspected) == 5:  # One complete album, then the first page of the next album.
+                entered.set()
+                assert release.wait(5)
+            return inspect(tree, path)
+
+        monkeypatch.setattr(SourceTree, "inspect", slow_inspect)
+        migration.preview(str(source))
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            assert migration.state["albums_done"] == 1 and len(migration.plan) == 1
+            assert migration.pause()["status"] == "pausing"
+            for control in (migration.pause, migration.resume):
+                with pytest.raises(ComicApiError) as error:
+                    control()
+                assert error.value.code == "invalid_state"
+            release.set()
+            await wait_preview_status(migration, "paused")
+            assert migration.active and migration.state["finished_at"] is None
+            assert library.store.settings("library_migration")["status"] == "paused"
+            snapshot = copy.deepcopy((migration.state, migration.plan))
+            await asyncio.sleep(.03)
+            assert (migration.state, migration.plan) == snapshot and len(inspected) == 5
+            for control in (migration.run, lambda: migration.preview(str(source))):
+                with pytest.raises(ComicApiError) as error:
+                    control()
+                assert error.value.code == "migration_active"
+            task = migration.task
+            assert migration.resume()["status"] == "previewing"
+            await migration.task
+            assert migration.task is task
+            assert migration.state["status"] == "ready" and migration.state["albums_done"] == 2
+            assert len(migration.plan) == len(migration.state["albums"]) == 2
+            assert len(inspected) == len(set(inspected)) == 8
+            assert len(list(source.rglob("*.png"))) == 8 and not any(jm_root(library).rglob("*.png"))
+        finally:
+            release.set()
+            await migration.stop()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("operation", ["get_comic_detail", "get_chapter_images"])
+def test_preview_pauses_after_in_flight_request(tmp_path, monkeypatch, operation):
+    async def scenario():
+        library, plugin = make_sync(tmp_path, books=("101",))
+        source = library.store.root / "jm-favorites"
+        write_album(plugin, source / "漫画 101")
+        migration = LibraryMigration(library.store, library.service, library)
+        entered, release = asyncio.Event(), asyncio.Event()
+        original, calls = getattr(library.service, operation), []
+
+        async def delayed(*args):
+            calls.append(args)
+            result = await original(*args)
+            entered.set()
+            await release.wait()
+            return result
+
+        monkeypatch.setattr(library.service, operation, delayed)
+        migration.preview(str(source))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            migration.pause()
+            release.set()
+            await wait_preview_status(migration, "paused")
+            assert not migration.plan and not migration.state["albums_done"] and len(calls) == 1
+            migration.resume()
+            await migration.task
+            assert migration.state["status"] == "ready" and entry(migration.state)["images"] == 4
+            assert len(calls) == (1 if operation == "get_comic_detail" else 2)
+        finally:
+            release.set()
+            await migration.stop()
+    asyncio.run(scenario())
+
+
+def test_preview_can_pause_immediately_and_pause_again_before_resume_runs(tmp_path):
+    async def scenario():
+        library, plugin = make_sync(tmp_path)
+        source = library.store.root / "jm-favorites"
+        write_album(plugin, source / "漫画 101")
+        migration = LibraryMigration(library.store, library.service, library)
+        migration.preview(str(source))
+        migration.pause()
+        try:
+            await wait_preview_status(migration, "paused")
+            assert migration.state["albums_total"] == 0
+            migration.resume()
+            migration.pause()
+            await wait_preview_status(migration, "paused")
+            assert migration.state["albums_total"] == 0
+            await asyncio.wait_for(migration.stop(), 5)
+            assert not migration.active and migration.state["status"] == "interrupted"
+            assert migration.state["finished_at"] and not migration.plan
+            await preview(migration, source)
+            assert migration.state["status"] == "ready"
+        finally:
+            await migration.stop()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", ["previewing", "pausing", "paused", "running"])
+def test_unfinished_migration_is_interrupted_after_restart(tmp_path, status):
+    library, _ = make_sync(tmp_path)
+    library.store.save_settings("library_migration", {"status": status})
+    migration = LibraryMigration(library.store, library.service, library)
+    assert migration.state["status"] == "interrupted" and not migration.active and not migration.plan
+    assert "重新预览" in migration.state["error"]
+    for control in (migration.pause, migration.resume):
+        with pytest.raises(ComicApiError) as error:
+            control()
+        assert error.value.code == "invalid_state"
+
+
 def wait_idle(client):
     for _ in range(300):
         data = client.get("/api/library/migration").json()
@@ -244,6 +379,59 @@ def test_migration_api(tmp_path):
         assert data["status"] == "completed" and data["albums"][0]["status"] == "migrated"
         html = client.get("/").text
         assert 'id="library-migration-dialog"' in html and 'id="library-migration-open"' in html
+
+
+@pytest.mark.parametrize("resume", [True, False])
+def test_migration_pause_resume_api_and_paused_shutdown(tmp_path, monkeypatch, resume):
+    library, plugin = make_sync(tmp_path, books=("101",))
+    source = library.store.root / "jm-favorites"
+    write_album(plugin, source / "漫画 101")
+    entered, release = threading.Event(), threading.Event()
+    inspect = SourceTree.inspect
+
+    def slow_inspect(tree, path):
+        entered.set()
+        assert release.wait(5)
+        return inspect(tree, path)
+
+    monkeypatch.setattr(SourceTree, "inspect", slow_inspect)
+    app = create_app(library.store, {"jm": plugin})
+    with TestClient(app) as client:
+        try:
+            for action in ("pause", "resume"):
+                assert client.post(f"/api/library/migration/{action}").status_code == 409
+            assert client.post("/api/library/migration/preview", json={"source_dir": str(source)}).status_code == 202
+            assert entered.wait(5)
+            response = client.post("/api/library/migration/pause")
+            assert response.status_code == 202 and response.json()["status"] == "pausing"
+            assert client.post("/api/library/migration/resume").status_code == 409
+            release.set()
+            for _ in range(300):
+                response = client.get("/api/library/migration")
+                if response.json()["status"] == "paused":
+                    break
+                time.sleep(.01)
+            else:
+                raise AssertionError("migration did not pause")
+            assert response.headers["cache-control"] == "no-store" and response.json()["active"]
+            assert client.post("/api/library/migration/preview", json={"source_dir": str(source)}).status_code == 409
+            assert client.post("/api/library/migration/run").status_code == 409
+            if resume:
+                response = client.post("/api/library/migration/resume")
+                assert response.status_code == 202 and response.json()["status"] == "previewing"
+                assert wait_idle(client)["status"] == "ready"
+                for action in ("pause", "resume"):
+                    assert client.post(f"/api/library/migration/{action}").status_code == 409
+                assert client.post("/api/library/migration/run").status_code == 202
+                assert wait_idle(client)["status"] == "completed"
+            html = client.get("/").text
+            assert 'id="library-migration-pause"' in html and 'id="library-migration-resume"' in html
+        finally:
+            release.set()
+    assert not app.state.migration.active
+    if not resume:
+        assert app.state.migration.state["status"] == "interrupted"
+        assert len(list(source.rglob("*.png"))) == 4
 
 
 def test_single_chapter_pages_directly_in_comic_directory(tmp_path, monkeypatch):

@@ -17,6 +17,7 @@ class Element {
   get textContent() { return this.value + this.children.map(child => typeof child === 'string' ? child : child.textContent).join(''); }
   set innerHTML(value) { this.html = value; }
   append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = children; this.value = ''; }
   setAttribute(name, value) { this.attributes[name] = value; }
 }
 
@@ -71,6 +72,82 @@ test('自定义模板示例按变量渲染并补零，未知变量原样保留',
   assert.equal(rulePathExample('custom', ' {category}\\{title} [{id}]/{index:03} - {chapter} [{chapter_id}]/ '), '分类/漫画标题 [123456]/001 - 章节标题 [123457]');
   assert.equal(rulePathExample('custom', '{source}-{author}/{nope}'), 'jm-作者/{nope}');
   assert.equal(rulePathExample('title_plain', '{id}/{index}'), '漫画标题/第1話 章节标题');
+});
+
+function migrationHarness(api = async () => {}) {
+  const elements = {}, libSync = {active: false, migrationSource: ''};
+  const $ = id => elements[id] ||= new Element('div');
+  $('library-migration-dialog').open = true;
+  const context = {document: {createElement: tag => new Element(tag)}, $, libSync, api,
+    FAV_VIEWS: {jm: {label: 'JM'}}, rulePathExample: () => '123456/123457', toast: message => assert.fail(message)};
+  vm.createContext(context);
+  vm.runInContext(
+    app.slice(app.indexOf('function node('), app.indexOf('function button(')) +
+    app.slice(app.indexOf('async function run('), app.indexOf('// The toast')) +
+    sync.slice(sync.indexOf('const MIGRATION_STATUS'), sync.indexOf('async function openMigration(')) +
+    sync.slice(sync.indexOf('async function controlMigrationPreview('), sync.indexOf('async function runMigration(')) +
+    sync.slice(sync.indexOf("$('library-migration-preview').onclick="), sync.indexOf("$('fav-sync-form').onsubmit=")),
+    context,
+  );
+  return {...context, elements};
+}
+
+function migrationState(status, overrides = {}) {
+  return {status, active: ['previewing', 'pausing', 'paused', 'running'].includes(status), source_dir: '/imports',
+    albums_done: 1, albums_total: 2, albums: [{source: 'jm', id: '101', title: '漫画 101', status: 'ready',
+      from: '/imports/101', to: '/library/jm/101', images: 4}], target: {download_dir: '/library', directory_rule: 'id', label: '漫画 ID'},
+    ...overrides};
+}
+
+for (const [status, pauseVisible, pauseDisabled, resumeVisible] of [
+  ['idle', false, true, false], ['previewing', true, false, false], ['pausing', true, true, false],
+  ['paused', false, true, true], ['ready', false, true, false], ['running', false, true, false],
+  ['completed', false, true, false], ['failed', false, true, false], ['interrupted', false, true, false],
+]) test(`迁移 ${status} 状态只显示可用的暂停或继续操作`, () => {
+  const {renderMigration, elements} = migrationHarness();
+  const data = migrationState(status);
+  renderMigration(data);
+  assert.equal(elements['library-migration-pause'].hidden, !pauseVisible);
+  assert.equal(elements['library-migration-pause'].disabled, pauseDisabled);
+  assert.equal(elements['library-migration-resume'].hidden, !resumeVisible);
+  assert.equal(elements['library-migration-browse'].disabled, data.active);
+  assert.equal(elements['library-migration-preview'].disabled, data.active);
+  assert.equal(elements['library-migration-run'].hidden, !['ready', 'running'].includes(status));
+  assert.equal(elements['library-migration-run'].disabled, status !== 'ready');
+  if (status === 'pausing') assert.match(elements['library-migration-state'].textContent, /正在暂停预览：1 \/ 2.*当前请求或单页校验完成后暂停/);
+  if (status === 'paused') assert.match(elements['library-migration-state'].textContent, /预览已暂停：1 \/ 2.*扫描进度已保留.*重启后需重新预览/);
+});
+
+test('暂停和继续调用对应 API，并在按钮忙碌包装结束后恢复正确状态', async () => {
+  const requests = [];
+  const harness = migrationHarness(async (path, options) => {
+    requests.push([path, options.method]);
+    return migrationState(path.endsWith('/pause') ? 'pausing' : 'previewing');
+  });
+  const {elements, libSync, renderMigration} = harness;
+  renderMigration(libSync.migration = migrationState('previewing'));
+  await elements['library-migration-pause'].onclick();
+  assert.equal(libSync.migration.status, 'pausing');
+  assert.equal(elements['library-migration-pause'].disabled, true);
+  assert.equal(elements['library-migration-preview'].disabled, true);
+  renderMigration(libSync.migration = migrationState('paused'));
+  await elements['library-migration-resume'].onclick();
+  assert.deepEqual(requests, [['/api/library/migration/pause', 'POST'], ['/api/library/migration/resume', 'POST']]);
+  assert.equal(libSync.migration.status, 'previewing');
+  assert.equal(elements['library-migration-resume'].hidden, true);
+  assert.equal(elements['library-migration-pause'].disabled, false);
+  assert.equal(elements['library-migration-preview'].disabled, true);
+});
+
+test('重新打开迁移窗口仍展示保留的暂停进度', () => {
+  const {renderMigration, elements} = migrationHarness();
+  elements['library-migration-dialog'].open = false;
+  renderMigration(migrationState('paused'));
+  elements['library-migration-dialog'].open = true;
+  renderMigration(migrationState('paused'));
+  assert.match(elements['library-migration-state'].textContent, /预览已暂停：1 \/ 2/);
+  assert.equal(elements['library-migration-list'].children.length, 1);
+  assert.equal(elements['library-migration-resume'].hidden, false);
 });
 
 test('清空自定义模板时路径预览不回填默认模板', () => {

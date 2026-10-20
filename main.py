@@ -144,6 +144,7 @@ def create_app(store=None, sources=None):
         try:
             yield
         finally:
+            await migration.stop()
             await library_images.stop()
             await library_sync.stop()
             for favorite in favorites.values():
@@ -406,6 +407,14 @@ def create_app(store=None, sources=None):
     @app.post("/api/library/migration/preview", status_code=202)
     async def preview_library_migration(values: MigrationInput):
         return migration.preview(values.source_dir)
+
+    @app.post("/api/library/migration/pause", status_code=202)
+    async def pause_library_migration():
+        return migration.pause()
+
+    @app.post("/api/library/migration/resume", status_code=202)
+    async def resume_library_migration():
+        return migration.resume()
 
     @app.post("/api/library/migration/run", status_code=202)
     async def run_library_migration():
