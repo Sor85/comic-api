@@ -151,7 +151,7 @@ def create_app(store=None, sources=None):
                 await favorite.stop()
             await downloads.stop()
 
-    app = FastAPI(title="Comic · 图源与书库", version="2.0.1", lifespan=lifespan)
+    app = FastAPI(title="Comic · 图源与书库", version="2.0.2", lifespan=lifespan)
     app.add_middleware(BasicAuthMiddleware, auth=auth)
     app.state.auth = auth
     app.state.store, app.state.service, app.state.downloads = store, service, downloads
