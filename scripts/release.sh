@@ -45,7 +45,7 @@ echo "==> 推送 main 与 $tag"
 git push -q --atomic origin main "$tag"
 
 # 两次推送各对应一个工作流运行：headBranch 分别为 main 与标签名。
-echo "==> 等待 GitHub Actions 构建（$sha）"
+echo "==> 等待 GitHub Actions 构建（${sha}）"
 runs=""
 for _ in $(seq 1 60); do
   runs=$(gh run list --workflow "$WORKFLOW" --commit "$sha" --json databaseId,headBranch \
@@ -70,7 +70,7 @@ for ref in main "$version"; do
   digest=$(jq -r '[.manifests[]|select(.platform.os=="linux")][0].digest' <<<"$index")
   config=$(registry "manifests/$digest" | jq -r .config.digest)
   revision=$(registry "blobs/$config" | jq -r '.config.Labels["org.opencontainers.image.revision"]')
-  [ "$revision" = "$sha" ] || die "$ref 对应提交为 $revision，不是 $sha"
+  [ "$revision" = "$sha" ] || die "$ref 对应提交为 ${revision}，不是 ${sha}"
   echo "    ghcr.io/$IMAGE:$ref  提交 ${sha:0:7}  架构 $archs"
 done
-echo "==> 发布完成：ghcr.io/$IMAGE:$version（同时更新 main、${version%.*}、sha-${sha:0:7}）"
+echo "==> 发布完成：ghcr.io/$IMAGE:${version}（同时更新 main、${version%.*}、sha-${sha:0:7}）"
