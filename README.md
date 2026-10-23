@@ -255,6 +255,15 @@ python -m pytest tests -q
 node --test tests/*-ui.test.cjs
 ```
 
+## 发布
+
+```bash
+scripts/release.sh          # 版本号递增 patch，如 2.0.1 → 2.0.2
+scripts/release.sh 2.1.0    # 指定版本号
+```
+
+脚本在 `main` 分支上运行测试，更新 `main.py` 中的版本号并提交，打 `vX.Y.Z` 标签后推送，等待 GitHub Actions 构建完成，再核对 GHCR 上 `main` 与 `X.Y.Z` 镜像的架构和对应提交。依赖 `gh`（已登录）、`jq`、`curl`、`node` 与 pytest。
+
 ## License
 
 MIT。
