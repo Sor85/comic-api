@@ -335,9 +335,16 @@ async function loadReading(){
   setReading([...local.values(),...(data.items||[]).filter(h=>!local.has(readingKey(h)))]);
   renderContinue();filterBooks();refreshCardStates();
 }
-async function fetchComicReading(item){
+// Server rows with this page's still-unsent writes laid on top, so a refresh never rolls back local progress.
+async function pullComicReading(item){
   await flushReading();
-  try{return await api(`/api/reading/${enc(item.source)}/${enc(item.id)}`);}
+  const data=await api(`/api/reading/${enc(item.source)}/${enc(item.id)}`),key=readingKey(item);
+  const reading={comic:data.comic||null,chapters:{...data.chapters}};
+  for(const job of readingQueue.pending.values())if(job.comic===key){reading.comic=job.entry;reading.chapters[job.entry.chapter_id]={page:job.entry.page,updated_at:job.entry.updated_at};}
+  return reading;
+}
+async function fetchComicReading(item){
+  try{return await pullComicReading(item);}
   catch{return {comic:state.readingIndex?.get(readingKey(item))||null,chapters:{}};}
 }
 // Writes are coalesced per chapter and sent in order, so a slow request never overwrites a newer position.
@@ -350,7 +357,7 @@ function recordReading(r){
   b.reading=b.reading||{comic:null,chapters:{}};b.reading.comic=entry;b.reading.chapters={...b.reading.chapters,[r.chapterId]:{page:r.index,updated_at:now}};
   upsertReading(entry);
   const key=`${readingKey(b)}:${r.chapterId}`;readingQueue.pending.delete(key);
-  readingQueue.pending.set(key,{path:`/api/reading/${enc(b.source)}/${enc(b.id)}`,body:JSON.stringify(body),entry});
+  readingQueue.pending.set(key,{comic:readingKey(b),path:`/api/reading/${enc(b.source)}/${enc(b.id)}`,body:JSON.stringify(body),entry});
   clearTimeout(readingQueue.timer);readingQueue.timer=setTimeout(flushReading,800);
 }
 function flushReading(keepalive=false){
@@ -1219,7 +1226,9 @@ async function openReader(chapterId,startAt){
   const index=book.chapters.indexOf(chapter);$('chapter-prev').disabled=index<=0;$('chapter-next').disabled=index>=book.chapters.length-1;
   $('reader-dialog').classList.add('ui-open','ui-pinned');
   showReaderDialog();
-  try{const data=await api(`/api/chapter/${enc(book.source)}/${enc(book.id)}/${enc(chapterId)}`,{signal:state.readerAbort.signal});if(request!==state.readerRequest)return;
+  // Other devices may have moved on since the detail page loaded, so resume from the server's latest page.
+  try{const [data,reading]=await Promise.all([api(`/api/chapter/${enc(book.source)}/${enc(book.id)}/${enc(chapterId)}`,{signal:state.readerAbort.signal}),pullComicReading(book).catch(()=>null)]);if(request!==state.readerRequest)return;
+    if(reading)book.reading=reading;
     const saved=chapterProgress(book,chapterId);const resume=Math.max(0,Math.min(Number(saved?.index)||0,data.images.length-1));
     state.reader={book,chapterId,chapterName:chapter.name,images:data.images,index:typeof startAt==='number'?(startAt<0?Math.max(0,data.images.length-1):0):resume};renderReader();
   }catch(e){
@@ -1319,7 +1328,24 @@ function closeReader(silent){
   saveProgress();state.readerAbort?.abort();++state.readerRequest;state.observer?.disconnect();state.mounter?.disconnect();state.reader=null;
   if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
   $('reader-dialog').close();$('reader-pages').replaceChildren();flushReading();renderContinue();refreshCardStates();
-  if(!silent&&state.detail&&$('detail-dialog').open){const scroller=$('detail-scroll'),top=scroller.scrollTop;renderDetail();scroller.scrollTop=top;}
+  if(!silent&&state.detail&&$('detail-dialog').open)redrawDetail();
+}
+// Re-render the open detail page in place, keeping its scroll position, chapter filter and expanded chapter count.
+function redrawDetail(){
+  const scroller=$('detail-scroll'),top=scroller.scrollTop,needle=$('chapter-filter')?.value||'',shown=state.chapterView?.shown||0;
+  renderDetail();
+  const filter=$('chapter-filter');if(filter&&needle){filter.value=needle;drawChapters(true);}
+  if(shown>CHAPTER_PAGE){state.chapterView.shown=shown;drawChapters();}
+  scroller.scrollTop=top;
+}
+// Coming back to the page pulls progress other devices saved meanwhile into the lists and the open detail page.
+function refreshReading(){
+  if(!state.readingLoaded||refreshReading.busy)return;refreshReading.busy=true;
+  const detail=state.detail,idle=()=>state.detail===detail&&$('detail-dialog').open&&!$('reader-dialog').open;
+  Promise.all([loadReading(),detail&&idle()&&pullComicReading(detail).then(reading=>{
+    if(!idle()||JSON.stringify(reading)===JSON.stringify(detail.reading))return;
+    detail.reading=reading;redrawDetail();
+  })]).catch(()=>{}).finally(()=>{refreshReading.busy=false;});
 }
 
 /* ---------- wiring ---------- */
@@ -1396,7 +1422,8 @@ window.addEventListener('keydown',event=>{
 });
 window.addEventListener('pagehide',()=>{saveProgress();flushReading(true);});
 // Mobile browsers may never fire pagehide; flush on hide and pick up other devices' progress on return.
-document.addEventListener('visibilitychange',()=>{if(document.hidden){saveProgress();flushReading(true);}else if(state.readingLoaded)loadReading().catch(()=>{});});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){saveProgress();flushReading(true);}else refreshReading();});
+window.addEventListener('focus',refreshReading);
 // Page-level scrollbar + floating back-to-top button.
 window.addEventListener('scroll',()=>{
   const h=document.documentElement,p=h.scrollTop/(h.scrollHeight-h.clientHeight||1);
